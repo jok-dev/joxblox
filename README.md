@@ -7,7 +7,9 @@ Simple cross-platform Go GUI app that:
 - Opens the image in a separate window
 - Shows asset ID, dimensions, and image size in MB
 - Includes a Folder Scan mode for finding Roblox asset IDs in text files and browsing results in a sortable table
+- Includes an RBXL Scan mode for extracting asset IDs directly from `.rbxl` place files
 - Supports optional `.ROBLOSECURITY` authentication for gated AssetDelivery requests
+- Can securely remember `.ROBLOSECURITY` using the OS keychain/credential store
 
 ## Requirements
 

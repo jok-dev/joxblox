@@ -1,0 +1,61 @@
+[22:44:30] Loaded auth cookie from keychain
+[22:44:30] Application started
+[22:44:36] Single asset load started for asset 431164471
+[22:44:37] Rust extractor processing in-memory payload (30560 bytes)
+[22:44:37] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-3349138777.bin (limit=5000)
+[22:44:37] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:37] Rust extractor returned JSON bytes=36 and parsed IDs=2
+[22:44:37] Referenced asset extraction Rust path returned 2 IDs
+[22:44:37] Rust extractor processing in-memory payload (592105 bytes)
+[22:44:37] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-3287152263.bin (limit=5000)
+[22:44:37] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:37] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:37] Referenced asset extraction Rust path returned 0 IDs
+[22:44:37] Rust extractor processing in-memory payload (883133 bytes)
+[22:44:37] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-3248771943.bin (limit=5000)
+[22:44:37] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:37] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:37] Referenced asset extraction Rust path returned 0 IDs
+[22:44:38] Single asset load complete for 431164471 (fallback thumbnail, state=Completed)
+[22:44:49] Scan started for source: /Users/jok/Documents/DE-Water-Update.rbxl (limit=100)
+[22:44:49] RBXL scan started: /Users/jok/Documents/DE-Water-Update.rbxl (limit=100)
+[22:44:49] Rust extractor requested for file: /Users/jok/Documents/DE-Water-Update.rbxl (limit=100)
+[22:44:49] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:49] Rust extractor returned JSON bytes=100 and parsed IDs=7
+[22:44:49] RBXL scan completed with 7 unique asset IDs
+[22:44:49] Rust extractor processing in-memory payload (165138 bytes)
+[22:44:49] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-1200255139.bin (limit=5000)
+[22:44:49] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:49] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:49] Referenced asset extraction Rust path returned 0 IDs
+[22:44:50] Rust extractor processing in-memory payload (1054 bytes)
+[22:44:50] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-2045051543.bin (limit=5000)
+[22:44:50] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:50] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:50] Referenced asset extraction Rust path returned 0 IDs
+[22:44:50] Rust extractor processing in-memory payload (29201 bytes)
+[22:44:50] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-4102967918.bin (limit=5000)
+[22:44:50] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:50] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:50] Referenced asset extraction Rust path returned 0 IDs
+[22:44:50] Rust extractor processing in-memory payload (10641 bytes)
+[22:44:50] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-3161090669.bin (limit=5000)
+[22:44:50] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:50] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:50] Referenced asset extraction Rust path returned 0 IDs
+[22:44:50] Rust extractor processing in-memory payload (3940 bytes)
+[22:44:50] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-1605012198.bin (limit=5000)
+[22:44:50] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:50] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:50] Referenced asset extraction Rust path returned 0 IDs
+[22:44:51] Rust extractor processing in-memory payload (2501 bytes)
+[22:44:51] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-2254596280.bin (limit=5000)
+[22:44:51] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:51] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:51] Referenced asset extraction Rust path returned 0 IDs
+[22:44:51] Rust extractor processing in-memory payload (32414 bytes)
+[22:44:51] Rust extractor requested for file: /var/folders/k5/5zfl1rbj0cgd5hj2qy01q9p00000gn/T/rbxl-id-extractor-4205126435.bin (limit=5000)
+[22:44:51] Using Rust extractor binary: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor
+[22:44:51] Rust extractor returned JSON bytes=17 and parsed IDs=0
+[22:44:51] Referenced asset extraction Rust path returned 0 IDs
+[22:44:51] Scan complete: 7 assets shown

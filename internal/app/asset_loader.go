@@ -12,18 +12,32 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
 )
 
 const (
-	requestTimeout       = 15 * time.Second
-	thumbnailURLTemplate = "https://thumbnails.roblox.com/v1/assets?assetIds=%d&size=768x432&format=Png&isCircular=false"
-	assetDeliveryURLBase = "https://assetdelivery.roblox.com/v1/assetId/%d"
+	requestTimeout        = 15 * time.Second
+	thumbnailURLTemplate  = "https://thumbnails.roblox.com/v1/assets?assetIds=%d&size=768x432&format=Png&isCircular=false"
+	assetDeliveryURLBase  = "https://assetdelivery.roblox.com/v1/assetId/%d"
+	economyDetailsURLBase = "https://economy.roblox.com/v2/assets/%d/details"
 )
 
 var assetIDPattern = regexp.MustCompile(`\d+`)
+
+type assetSelfInfo struct {
+	BytesSize   int
+	AssetTypeID int
+}
+
+var assetSizeCache = struct {
+	mutex         sync.RWMutex
+	infoByAssetID map[int64]assetSelfInfo
+}{
+	infoByAssetID: map[int64]assetSelfInfo{},
+}
 
 type thumbnailsResponse struct {
 	Data []thumbnailsData `json:"data"`
@@ -44,6 +58,30 @@ type imageInfo struct {
 	ContentType string
 }
 
+type childAssetInfo struct {
+	AssetID     int64
+	BytesSize   int
+	AssetTypeID int
+	Resolved    bool
+}
+
+type assetPreviewResult struct {
+	Image              *imageInfo
+	Stats              *imageInfo
+	ReferencedAssetIDs []int64
+	ChildAssets        []childAssetInfo
+	TotalBytesSize     int
+	Source             string
+	State              string
+	WarningMessage     string
+	AssetDeliveryJSON  string
+	ThumbnailJSON      string
+	EconomyJSON        string
+	RustExtractorJSON  string
+	AssetTypeID        int
+	AssetTypeName      string
+}
+
 type thumbnailInfo struct {
 	ImageURL string
 	State    string
@@ -51,13 +89,37 @@ type thumbnailInfo struct {
 }
 
 type assetDeliveryResponse struct {
-	Location string                    `json:"location"`
-	Errors   []assetDeliveryErrorEntry `json:"errors"`
+	Location    string                    `json:"location"`
+	AssetTypeID int                       `json:"assetTypeId"`
+	Errors      []assetDeliveryErrorEntry `json:"errors"`
 }
 
 type assetDeliveryErrorEntry struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type assetDeliveryInfo struct {
+	Location      string
+	RawJSON       string
+	AssetTypeID   int
+	AssetTypeName string
+}
+
+type economyAssetDetailsResponse struct {
+	AssetTypeID int `json:"AssetTypeId"`
+}
+
+type economyAssetDetailsInfo struct {
+	AssetTypeID int
+	RawJSON     string
+}
+
+type assetFileInfo struct {
+	Info               *imageInfo
+	IsImage            bool
+	ReferencedAssetIDs []int64
+	RustExtractorJSON  string
 }
 
 func parseAssetID(rawInput string) (int64, error) {
@@ -79,31 +141,102 @@ func parseAssetID(rawInput string) (int64, error) {
 	return assetID, nil
 }
 
-func loadBestImageInfo(assetID int64) (*imageInfo, string, string, string, string, string, error) {
-	assetDeliveryLocation, assetDeliveryRawJSON, assetDeliveryErr := fetchAssetDeliveryLocation(assetID)
-	if assetDeliveryErr == nil {
-		deliveryImageInfo, deliveryImageErr := fetchImageInfo(assetDeliveryLocation, assetID)
-		if deliveryImageErr == nil {
-			return deliveryImageInfo, "AssetDelivery (In-Game)", "Completed", "", assetDeliveryRawJSON, "", nil
+func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
+	deliveryInfo, assetDeliveryErr := fetchAssetDeliveryInfo(assetID)
+	assetDeliveryRawJSON := ""
+	assetTypeID := 0
+	assetTypeName := "Unknown"
+	if deliveryInfo != nil {
+		assetDeliveryRawJSON = deliveryInfo.RawJSON
+		assetTypeID = deliveryInfo.AssetTypeID
+		assetTypeName = deliveryInfo.AssetTypeName
+	}
+
+	economyRawJSON := ""
+	if assetTypeID <= 0 {
+		economyInfo, economyErr := fetchAssetDetailsFromEconomy(assetID)
+		if economyErr == nil && economyInfo != nil {
+			economyRawJSON = economyInfo.RawJSON
+			if economyInfo.AssetTypeID > 0 {
+				assetTypeID = economyInfo.AssetTypeID
+				assetTypeName = getAssetTypeName(economyInfo.AssetTypeID)
+			}
 		}
-		assetDeliveryErr = deliveryImageErr
+	}
+
+	var statsInfo *imageInfo
+	referencedAssetIDs := []int64{}
+	rustExtractorRawJSON := ""
+	if assetDeliveryErr == nil && deliveryInfo != nil {
+		deliveryFileInfo, deliveryFileErr := fetchAssetFileInfo(deliveryInfo.Location, assetID)
+		if deliveryFileErr != nil {
+			assetDeliveryErr = deliveryFileErr
+		} else if deliveryFileInfo != nil {
+			statsInfo = deliveryFileInfo.Info
+			referencedAssetIDs = deliveryFileInfo.ReferencedAssetIDs
+			rustExtractorRawJSON = deliveryFileInfo.RustExtractorJSON
+			if deliveryFileInfo.IsImage {
+				totalBytesSize, childAssets := computeChildAssetsAndTotal(deliveryFileInfo.Info.BytesSize, referencedAssetIDs)
+				return &assetPreviewResult{
+					Image:              deliveryFileInfo.Info,
+					Stats:              deliveryFileInfo.Info,
+					ReferencedAssetIDs: referencedAssetIDs,
+					ChildAssets:        childAssets,
+					TotalBytesSize:     totalBytesSize,
+					Source:             sourceAssetDeliveryInGame,
+					State:              stateCompleted,
+					WarningMessage:     "",
+					AssetDeliveryJSON:  assetDeliveryRawJSON,
+					ThumbnailJSON:      "",
+					EconomyJSON:        economyRawJSON,
+					RustExtractorJSON:  deliveryFileInfo.RustExtractorJSON,
+					AssetTypeID:        assetTypeID,
+					AssetTypeName:      assetTypeName,
+				}, nil
+			}
+			if assetTypeID > 0 && assetTypeID != 1 {
+				assetDeliveryErr = fmt.Errorf("asset type %s (%d) is not directly previewable from AssetDelivery payload", assetTypeName, assetTypeID)
+			} else {
+				assetDeliveryErr = fmt.Errorf("AssetDelivery file is not an image preview")
+			}
+		}
 	}
 
 	thumbnailInfo, thumbnailRawJSON, thumbnailErr := fetchThumbnailInfo(assetID)
+	assetDeliveryErrText := "unknown AssetDelivery error"
+	if assetDeliveryErr != nil {
+		assetDeliveryErrText = assetDeliveryErr.Error()
+	}
 	if thumbnailErr != nil {
-		return nil, "", "", "", assetDeliveryRawJSON, thumbnailRawJSON, fmt.Errorf("AssetDelivery failed (%s) and thumbnail lookup failed (%s)", assetDeliveryErr.Error(), thumbnailErr.Error())
+		return nil, fmt.Errorf("AssetDelivery failed (%s) and thumbnail lookup failed (%s)", assetDeliveryErrText, thumbnailErr.Error())
 	}
 
 	if thumbnailInfo.ImageURL == "" {
-		return nil, "", "", "", assetDeliveryRawJSON, thumbnailRawJSON, fmt.Errorf("No image available. State: %s. AssetDelivery error: %s", thumbnailInfo.State, assetDeliveryErr.Error())
+		return nil, fmt.Errorf("No image available. State: %s. AssetDelivery error: %s", thumbnailInfo.State, assetDeliveryErrText)
 	}
 
 	thumbnailImageInfo, thumbnailImageErr := fetchImageInfo(thumbnailInfo.ImageURL, assetID)
 	if thumbnailImageErr != nil {
-		return nil, "", "", "", assetDeliveryRawJSON, thumbnailRawJSON, fmt.Errorf("Thumbnail download failed (%s). AssetDelivery error: %s", thumbnailImageErr.Error(), assetDeliveryErr.Error())
+		return nil, fmt.Errorf("Thumbnail download failed (%s). AssetDelivery error: %s", thumbnailImageErr.Error(), assetDeliveryErrText)
 	}
 
-	return thumbnailImageInfo, "Thumbnails API (Fallback)", thumbnailInfo.State, assetDeliveryErr.Error(), assetDeliveryRawJSON, thumbnailRawJSON, nil
+	totalBytesSize, childAssets := computeChildAssetsAndTotal(chooseStatsInfo(statsInfo, thumbnailImageInfo).BytesSize, referencedAssetIDs)
+	return &assetPreviewResult{
+		Image:              thumbnailImageInfo,
+		Stats:              chooseStatsInfo(statsInfo, thumbnailImageInfo),
+		ReferencedAssetIDs: referencedAssetIDs,
+		ChildAssets:        childAssets,
+		TotalBytesSize:     totalBytesSize,
+		Source:             sourceThumbnailsFallback,
+		State:              thumbnailInfo.State,
+		WarningMessage:     assetDeliveryErrText,
+		AssetDeliveryJSON:  assetDeliveryRawJSON,
+		ThumbnailJSON:      thumbnailRawJSON,
+		EconomyJSON:        economyRawJSON,
+		RustExtractorJSON:  rustExtractorRawJSON,
+		AssetTypeID:        assetTypeID,
+		AssetTypeName:      assetTypeName,
+	}, nil
 }
 
 func fetchThumbnailInfo(assetID int64) (*thumbnailInfo, string, error) {
@@ -142,42 +275,48 @@ func fetchThumbnailInfo(assetID int64) (*thumbnailInfo, string, error) {
 	}, rawResponse, nil
 }
 
-func fetchAssetDeliveryLocation(assetID int64) (string, string, error) {
+func fetchAssetDeliveryInfo(assetID int64) (*assetDeliveryInfo, error) {
 	urlString := fmt.Sprintf(assetDeliveryURLBase, assetID)
 	response, err := doAuthenticatedGet(urlString)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	defer response.Body.Close()
 
 	responseBytes, err := io.ReadAll(response.Body)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	rawResponse := string(responseBytes)
+	info := &assetDeliveryInfo{
+		RawJSON:       rawResponse,
+		AssetTypeID:   0,
+		AssetTypeName: "Unknown",
+	}
+	var apiResponse assetDeliveryResponse
+	if err := json.Unmarshal(responseBytes, &apiResponse); err == nil {
+		info.Location = apiResponse.Location
+		info.AssetTypeID = apiResponse.AssetTypeID
+		info.AssetTypeName = getAssetTypeName(apiResponse.AssetTypeID)
+	}
 
 	if response.StatusCode != http.StatusOK {
 		reason := extractAssetDeliveryFailureReason(rawResponse)
 		if reason != "" {
-			return "", rawResponse, fmt.Errorf("%s", reason)
+			return info, fmt.Errorf("%s", reason)
 		}
-		return "", rawResponse, fmt.Errorf("AssetDelivery returned HTTP %d", response.StatusCode)
-	}
-
-	var apiResponse assetDeliveryResponse
-	if err := json.Unmarshal(responseBytes, &apiResponse); err != nil {
-		return "", rawResponse, err
+		return info, fmt.Errorf("AssetDelivery returned HTTP %d", response.StatusCode)
 	}
 
 	if apiResponse.Location == "" {
 		reason := extractAssetDeliveryFailureReason(rawResponse)
 		if reason != "" {
-			return "", rawResponse, fmt.Errorf("%s", reason)
+			return info, fmt.Errorf("%s", reason)
 		}
-		return "", rawResponse, fmt.Errorf("AssetDelivery did not return a location")
+		return info, fmt.Errorf("AssetDelivery did not return a location")
 	}
 
-	return apiResponse.Location, rawResponse, nil
+	return info, nil
 }
 
 func extractAssetDeliveryFailureReason(rawResponse string) string {
@@ -233,6 +372,57 @@ func fetchImageInfo(imageURL string, assetID int64) (*imageInfo, error) {
 	}, nil
 }
 
+func fetchAssetFileInfo(fileURL string, assetID int64) (*assetFileInfo, error) {
+	response, err := doAuthenticatedGet(fileURL)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+
+	fileBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	contentType := strings.Split(response.Header.Get("Content-Type"), ";")[0]
+	info := &imageInfo{
+		Resource:    nil,
+		Width:       0,
+		Height:      0,
+		BytesSize:   len(fileBytes),
+		Format:      inferFormatFromContentType(contentType),
+		ContentType: contentType,
+	}
+
+	imageConfig, imageFormat, decodeErr := image.DecodeConfig(bytes.NewReader(fileBytes))
+	if decodeErr != nil {
+		referencedAssetIDs, rustExtractorJSON := extractReferencedAssetIDsFromBytes(fileBytes)
+		return &assetFileInfo{
+			Info:               info,
+			IsImage:            false,
+			ReferencedAssetIDs: referencedAssetIDs,
+			RustExtractorJSON:  rustExtractorJSON,
+		}, nil
+	}
+
+	resourceName := fmt.Sprintf("asset_%d.%s", assetID, imageFormat)
+	info.Resource = fyne.NewStaticResource(resourceName, fileBytes)
+	info.Width = imageConfig.Width
+	info.Height = imageConfig.Height
+	info.Format = strings.ToUpper(imageFormat)
+	referencedAssetIDs, rustExtractorJSON := extractReferencedAssetIDsFromBytes(fileBytes)
+	return &assetFileInfo{
+		Info:               info,
+		IsImage:            true,
+		ReferencedAssetIDs: referencedAssetIDs,
+		RustExtractorJSON:  rustExtractorJSON,
+	}, nil
+}
+
 func doAuthenticatedGet(urlString string) (*http.Response, error) {
 	httpClient := &http.Client{Timeout: requestTimeout}
 	request, err := http.NewRequest(http.MethodGet, urlString, nil)
@@ -257,4 +447,119 @@ func buildFallbackWarningText(warningReason string) string {
 		"failed to get in-game version, showing a thumbnail instead, note that this is not representitive of the actual asset size, dimentions etc. reason: %s",
 		warningReason,
 	)
+}
+
+func fetchAssetDetailsFromEconomy(assetID int64) (*economyAssetDetailsInfo, error) {
+	urlString := fmt.Sprintf(economyDetailsURLBase, assetID)
+	response, err := doAuthenticatedGet(urlString)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", response.StatusCode)
+	}
+
+	responseBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+	var detailsResponse economyAssetDetailsResponse
+	if err := json.Unmarshal(responseBytes, &detailsResponse); err != nil {
+		return nil, err
+	}
+	return &economyAssetDetailsInfo{
+		AssetTypeID: detailsResponse.AssetTypeID,
+		RawJSON:     string(responseBytes),
+	}, nil
+}
+
+func inferFormatFromContentType(contentType string) string {
+	trimmedContentType := strings.TrimSpace(contentType)
+	if trimmedContentType == "" {
+		return "UNKNOWN"
+	}
+
+	contentTypeParts := strings.Split(trimmedContentType, "/")
+	if len(contentTypeParts) < 2 {
+		return strings.ToUpper(trimmedContentType)
+	}
+	return strings.ToUpper(contentTypeParts[1])
+}
+
+func chooseStatsInfo(preferredStats *imageInfo, fallbackStats *imageInfo) *imageInfo {
+	if preferredStats != nil {
+		return preferredStats
+	}
+	return fallbackStats
+}
+
+func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64) (int, []childAssetInfo) {
+	totalBytesSize := selfBytesSize
+	childAssets := make([]childAssetInfo, 0, len(referencedAssetIDs))
+	for _, referencedAssetID := range referencedAssetIDs {
+		referencedAssetInfo, infoErr := getAssetSelfInfo(referencedAssetID)
+		if infoErr != nil || referencedAssetInfo.BytesSize <= 0 {
+			childAssets = append(childAssets, childAssetInfo{
+				AssetID:     referencedAssetID,
+				BytesSize:   0,
+				AssetTypeID: referencedAssetInfo.AssetTypeID,
+				Resolved:    false,
+			})
+			continue
+		}
+		totalBytesSize += referencedAssetInfo.BytesSize
+		childAssets = append(childAssets, childAssetInfo{
+			AssetID:     referencedAssetID,
+			BytesSize:   referencedAssetInfo.BytesSize,
+			AssetTypeID: referencedAssetInfo.AssetTypeID,
+			Resolved:    true,
+		})
+	}
+	return totalBytesSize, childAssets
+}
+
+func getAssetSelfInfo(assetID int64) (assetSelfInfo, error) {
+	assetSizeCache.mutex.RLock()
+	cachedAssetInfo, found := assetSizeCache.infoByAssetID[assetID]
+	assetSizeCache.mutex.RUnlock()
+	if found {
+		return cachedAssetInfo, nil
+	}
+
+	assetDeliveryInfo, deliveryErr := fetchAssetDeliveryInfo(assetID)
+	selfInfo := assetSelfInfo{}
+	if assetDeliveryInfo != nil {
+		selfInfo.AssetTypeID = assetDeliveryInfo.AssetTypeID
+	}
+	if deliveryErr != nil || assetDeliveryInfo == nil || strings.TrimSpace(assetDeliveryInfo.Location) == "" {
+		if deliveryErr != nil {
+			return selfInfo, deliveryErr
+		}
+		return selfInfo, fmt.Errorf("asset delivery location unavailable")
+	}
+
+	fileInfo, fileErr := fetchAssetFileInfo(assetDeliveryInfo.Location, assetID)
+	if fileErr != nil || fileInfo == nil || fileInfo.Info == nil {
+		if fileErr != nil {
+			return selfInfo, fileErr
+		}
+		return selfInfo, fmt.Errorf("asset file info unavailable")
+	}
+	selfInfo.BytesSize = fileInfo.Info.BytesSize
+
+	assetSizeCache.mutex.Lock()
+	assetSizeCache.infoByAssetID[assetID] = selfInfo
+	assetSizeCache.mutex.Unlock()
+	return selfInfo, nil
+}
+
+func extractReferencedAssetIDsFromBytes(fileBytes []byte) ([]int64, string) {
+	rustAssetIDs, rustExtractorJSON, rustErr := extractAssetIDsWithRustFromBytes(fileBytes, rustExtractorDefaultLimit)
+	if rustErr != nil {
+		logDebugf("Referenced asset extraction Rust path errored: %s", rustErr.Error())
+		return []int64{}, rustExtractorJSON
+	}
+	logDebugf("Referenced asset extraction Rust path returned %d IDs", len(rustAssetIDs))
+	return rustAssetIDs, rustExtractorJSON
 }

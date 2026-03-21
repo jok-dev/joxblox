@@ -1,0 +1,55 @@
+name: Build Binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            ext: ""
+          - os: windows-latest
+            goos: windows
+            ext: ".exe"
+          - os: macos-latest
+            goos: darwin
+            ext: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binary
+        id: build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          BINARY_NAME: roblox-asset-explorer
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          GOARCH="$(go env GOARCH)"
+          OUTPUT_PATH="dist/${BINARY_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          go build -v -trimpath -o "$OUTPUT_PATH" ./cmd/roblox-asset-explorer
+          echo "output_path=$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-binary
+          path: ${{ steps.build.outputs.output_path }}
+          if-no-files-found: error
