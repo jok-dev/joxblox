@@ -1,4 +1,4 @@
-name: Build Binaries
+name: Build Joxblox Binaries
 
 on:
   workflow_dispatch:
@@ -38,13 +38,13 @@ jobs:
         shell: bash
         env:
           GOOS: ${{ matrix.goos }}
-          BINARY_NAME: roblox-asset-explorer
+          BINARY_NAME: joxblox
         run: |
           set -euo pipefail
           mkdir -p dist
           GOARCH="$(go env GOARCH)"
           OUTPUT_PATH="dist/${BINARY_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          go build -v -trimpath -o "$OUTPUT_PATH" ./cmd/roblox-asset-explorer
+          go build -v -trimpath -o "$OUTPUT_PATH" ./cmd/joxblox
           echo "output_path=$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Upload binary artifact

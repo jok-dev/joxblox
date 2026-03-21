@@ -29,7 +29,7 @@ func extractAssetIDsWithRustFromFile(filePath string, limit int, stopChannel <-c
 
 	toolDirectoryPath := filepath.Join(repoRootPath, "tools", "rbxl-id-extractor")
 	binaryPath := filepath.Join(toolDirectoryPath, "target", "release", "rbxl-id-extractor")
-	cargoHomePath := filepath.Join(os.TempDir(), "roblox-asset-explorer-cargo-home")
+	cargoHomePath := filepath.Join(os.TempDir(), "joxblox-cargo-home")
 	targetPath := filepath.Join(toolDirectoryPath, "target")
 	cargoManifestPath := filepath.Join(toolDirectoryPath, "Cargo.toml")
 
@@ -71,11 +71,12 @@ func extractAssetIDsWithRustFromFile(filePath string, limit int, stopChannel <-c
 	if runErr != nil {
 		stderrText := strings.TrimSpace(stderrBuffer.String())
 		if stderrText == "" {
-			logDebugf("Rust extractor unavailable for this payload, using fallback: %s", runErr.Error())
+			logDebugf("Rust extractor failed: %s", runErr.Error())
+			return nil, "", fmt.Errorf("Rust extractor failed: %s", runErr.Error())
 		} else {
-			logDebugf("Rust extractor unavailable for this payload, using fallback: %s | stderr: %s", runErr.Error(), stderrText)
+			logDebugf("Rust extractor failed: %s | stderr: %s", runErr.Error(), stderrText)
+			return nil, "", fmt.Errorf("Rust extractor failed: %s", stderrText)
 		}
-		return nil, "", nil
 	}
 
 	commandOutput := stdoutBuffer.Bytes()

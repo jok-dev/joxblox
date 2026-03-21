@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	authKeyringService = "roblox-asset-explorer"
+	authKeyringService = "joxblox"
 	authKeyringUser    = "roblosecurity"
 )
 

@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -17,6 +18,8 @@ import (
 const (
 	defaultAssetScanLimit  = 100
 	scanTableEmojiTextSize = 18
+	failedScanRowState     = "Failed"
+	failedScanRowSource    = "Load Failed"
 )
 
 type assetScanTabOptions struct {
@@ -200,14 +203,20 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) fyne.Canva
 					label.SetText("-")
 				}
 			case 4:
-				if isThumbnailFallback(row.Source) && !isCompletedState(row.State) {
+				if row.State == failedScanRowState {
+					label.SetText(fmt.Sprintf("⚠ %s", row.State))
+					label.Importance = widget.DangerImportance
+				} else if isThumbnailFallback(row.Source) && !isCompletedState(row.State) {
 					label.SetText(fmt.Sprintf("⚠ %s", row.State))
 					label.Importance = widget.DangerImportance
 				} else {
 					label.SetText(row.State)
 				}
 			case 5:
-				if isThumbnailFallback(row.Source) {
+				if row.Source == failedScanRowSource {
+					label.SetText(fmt.Sprintf("⚠ %s", row.Source))
+					label.Importance = widget.DangerImportance
+				} else if isThumbnailFallback(row.Source) {
 					label.SetText(fmt.Sprintf("⚠ %s", row.Source))
 					label.Importance = widget.DangerImportance
 				} else {
@@ -348,6 +357,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) fyne.Canva
 					}
 					logDebugf("Scan failed: %s", scanErr.Error())
 					statusLabel.SetText(fmt.Sprintf("Scan failed: %s", scanErr.Error()))
+					fyneDialog.ShowError(scanErr, window)
 				})
 				return
 			}
@@ -365,6 +375,8 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) fyne.Canva
 				return
 			}
 
+			loadFailureCount := 0
+			var firstLoadErr error
 			for hitIndex, hit := range hits {
 				select {
 				case <-localStopScanChannel:
@@ -382,7 +394,25 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) fyne.Canva
 
 				scanRow, loadErr := loadScanResult(hit)
 				if loadErr != nil {
-					continue
+					loadFailureCount++
+					if firstLoadErr == nil {
+						firstLoadErr = loadErr
+					}
+					logDebugf("Scan result load failed for asset %d: %s", hit.AssetID, loadErr.Error())
+					scanRow = scanResult{
+						AssetID:       hit.AssetID,
+						FilePath:      hit.FilePath,
+						Source:        failedScanRowSource,
+						State:         failedScanRowState,
+						BytesSize:     0,
+						Format:        "-",
+						ContentType:   "-",
+						AssetTypeID:   0,
+						AssetTypeName: "Unknown",
+						Warning:       true,
+						WarningCause:  loadErr.Error(),
+						Resource:      nil,
+					}
 				}
 
 				fyne.Do(func() {
@@ -398,6 +428,33 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) fyne.Canva
 					stopScanChannel = nil
 				}
 				scanButton.Enable()
+				if len(results) == 0 && firstLoadErr != nil {
+					statusLabel.SetText(fmt.Sprintf(
+						"Scan extracted %d IDs but could not load any assets. First error: %s",
+						len(hits),
+						firstLoadErr.Error(),
+					))
+					fyneDialog.ShowError(firstLoadErr, window)
+					logDebugf(
+						"Scan complete with 0 shown assets (extracted=%d, load failures=%d)",
+						len(hits),
+						loadFailureCount,
+					)
+					return
+				}
+				if loadFailureCount > 0 {
+					statusLabel.SetText(fmt.Sprintf(
+						"Scan complete. Showing %d assets (%d failed to load).",
+						len(results),
+						loadFailureCount,
+					))
+					logDebugf(
+						"Scan complete: %d assets shown, %d failed to load",
+						len(results),
+						loadFailureCount,
+					)
+					return
+				}
 				statusLabel.SetText(fmt.Sprintf("Scan complete. Showing %d assets.", len(results)))
 				logDebugf("Scan complete: %d assets shown", len(results))
 			})

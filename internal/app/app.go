@@ -27,11 +27,11 @@ func Run() {
 	guiApp := app.New()
 	appIcon := fyne.NewStaticResource("app_icon.svg", appIconSVG)
 	guiApp.SetIcon(appIcon)
-	window := guiApp.NewWindow("Roblox Asset Explorer")
+	window := guiApp.NewWindow("Joxblox")
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1100, 700))
 
-	singleAssetTab := container.NewTabItem("Single Asset", newSingleAssetTab())
+	singleAssetTab := container.NewTabItem("Single Asset", newSingleAssetTab(window))
 	folderScanTab := container.NewTabItem("Folder Scan", newFolderScanTab(window))
 	rbxlScanTab := container.NewTabItem("RBXL Scan", newRBXLScanTab(window))
 	tabs := container.NewAppTabs(singleAssetTab, folderScanTab, rbxlScanTab)

@@ -10,6 +10,17 @@ use serde::Serialize;
 
 const RAW_ASSET_CONTEXT_WINDOW: usize = 80;
 const PHYSICS_DATA_PROPERTY_TOKEN: &str = "physicsdata";
+const IMAGE_PROPERTY_TOKENS: [&str; 9] = [
+    "texture",
+    "image",
+    "decal",
+    "thumbnail",
+    "shirt",
+    "pants",
+    "face",
+    "icon",
+    "content",
+];
 
 #[derive(Serialize)]
 struct ExtractResult {
@@ -49,7 +60,6 @@ fn run() -> Result<(), String> {
     extract_ids_from_text(
         &String::from_utf8_lossy(&file_bytes),
         &mut extracted_asset_ids,
-        false,
     );
 
     let file = File::open(file_path).map_err(|open_err| format!("open failed: {}", open_err))?;
@@ -60,8 +70,11 @@ fn run() -> Result<(), String> {
                 if normalized_property_name.contains(PHYSICS_DATA_PROPERTY_TOKEN) {
                     continue;
                 }
+                if !is_image_property_name(&normalized_property_name) {
+                    continue;
+                }
                 let rendered_property_value = format!("{:?}", property_value);
-                extract_ids_from_text(&rendered_property_value, &mut extracted_asset_ids, true);
+                extract_ids_from_text(&rendered_property_value, &mut extracted_asset_ids);
             }
         }
     }
@@ -80,22 +93,15 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn extract_ids_from_text(
-    text: &str,
-    extracted_asset_ids: &mut BTreeSet<i64>,
-    allow_loose_number_matches: bool,
-) {
+fn extract_ids_from_text(text: &str, extracted_asset_ids: &mut BTreeSet<i64>) {
     let rbx_asset_regex = get_rbx_asset_regex();
     let asset_url_regex = get_asset_url_regex();
-    let query_id_regex = get_query_id_regex();
     let raw_large_number_regex = get_raw_large_number_regex();
-    let loose_number_regex = get_loose_number_regex();
-    let roblox_context_regex = get_roblox_context_regex();
+    let image_context_regex = get_image_context_regex();
 
     for regex_match in rbx_asset_regex
         .captures_iter(text)
         .chain(asset_url_regex.captures_iter(text))
-        .chain(query_id_regex.captures_iter(text))
     {
         if let Some(asset_id_match) = regex_match.get(1) {
             if let Ok(asset_id) = asset_id_match.as_str().trim().parse::<i64>() {
@@ -111,21 +117,22 @@ fn extract_ids_from_text(
         let context_end = (number_match.end() + RAW_ASSET_CONTEXT_WINDOW).min(text.len());
         let context_bytes = &text.as_bytes()[context_start..context_end];
         let context_text = String::from_utf8_lossy(context_bytes);
-        if !roblox_context_regex.is_match(&context_text) {
+        if !image_context_regex.is_match(&context_text) {
             continue;
         }
         if let Ok(asset_id) = number_match.as_str().trim().parse::<i64>() {
             extracted_asset_ids.insert(asset_id);
         }
     }
+}
 
-    if allow_loose_number_matches {
-        for number_match in loose_number_regex.find_iter(text) {
-            if let Ok(asset_id) = number_match.as_str().trim().parse::<i64>() {
-                extracted_asset_ids.insert(asset_id);
-            }
+fn is_image_property_name(normalized_property_name: &str) -> bool {
+    for image_property_token in IMAGE_PROPERTY_TOKENS {
+        if normalized_property_name.contains(image_property_token) {
+            return true;
         }
     }
+    false
 }
 
 fn normalize_for_match(text: &str) -> String {
@@ -144,27 +151,15 @@ fn get_asset_url_regex() -> &'static Regex {
     })
 }
 
-fn get_query_id_regex() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"(?i)(?:\?|&)id=(\d+)").expect("valid regex"))
-}
-
 fn get_raw_large_number_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r"\b\d{8,}\b").expect("valid regex"))
 }
 
-fn get_loose_number_regex() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"\b\d{6,}\b").expect("valid regex"))
-}
-
-fn get_roblox_context_regex() -> &'static Regex {
+fn get_image_context_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(
-            r"(?i)(rbxassetid|assetid|texture|image|decal|thumbnail|meshid|soundid|mesh|content)",
-        )
-        .expect("valid regex")
+        Regex::new(r"(?i)(texture|image|decal|thumbnail|shirt|pants|face|icon|content)")
+            .expect("valid regex")
     })
 }

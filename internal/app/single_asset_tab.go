@@ -6,10 +6,11 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
-func newSingleAssetTab() fyne.CanvasObject {
+func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	assetInput := widget.NewEntry()
 	assetInput.SetPlaceHolder("Paste Roblox asset ID (e.g. 138155379338302 or rbxassetid://138155379338302)")
 
@@ -98,6 +99,7 @@ func newSingleAssetTab() fyne.CanvasObject {
 				if loadErr != nil {
 					statusLabel.SetText(loadErr.Error())
 					logDebugf("Single asset load failed for %d: %s", selectedAssetID, loadErr.Error())
+					fyneDialog.ShowError(loadErr, window)
 					return
 				}
 

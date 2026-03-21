@@ -1,4 +1,4 @@
-# Roblox Asset Explorer
+# Joxblox
 
 Simple cross-platform Go GUI app that:
 
@@ -19,13 +19,13 @@ Simple cross-platform Go GUI app that:
 
 ```bash
 go mod tidy
-go run ./cmd/roblox-asset-explorer
+go run ./cmd/joxblox
 ```
 
 ## Build
 
 ```bash
-go build ./cmd/roblox-asset-explorer
+go build ./cmd/joxblox
 ```
 
 ## macOS Dock icon
@@ -35,6 +35,6 @@ To get the app icon in Dock/Task Switcher, package as a `.app` bundle:
 
 ```bash
 go install fyne.io/tools/cmd/fyne@latest
-fyne package -os darwin -src ./cmd/roblox-asset-explorer
-open "./cmd/roblox-asset-explorer/Roblox Asset Explorer.app"
+fyne package -os darwin -src ./cmd/joxblox
+open "./cmd/joxblox/Joxblox.app"
 ```

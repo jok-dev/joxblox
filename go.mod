@@ -1,4 +1,4 @@
-module roblox-asset-explorer
+module joxblox
 
 go 1.22
 
