@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -29,6 +30,8 @@ const (
 	scanFilterAllOption    = "All"
 	minScanLoadWorkers     = 4
 	maxScanLoadWorkers     = 16
+	scanLoadUIBatchSize    = 25
+	scanLoadUIFlushDelay   = 150 * time.Millisecond
 )
 
 type assetScanTabOptions struct {
@@ -42,6 +45,8 @@ type assetScanTabOptions struct {
 	ScanningStatusText               string
 	NoResultsStatusText              string
 	MaxResultsDefault                int
+	ScanContextKey                   string
+	RecentFilesPreferenceKey         string
 	SelectSource                     func(window fyne.Window, onSelected func(string), onError func(error))
 	SelectSecondarySource            func(window fyne.Window, onSelected func(string), onError func(error))
 	ExtractHits                      func(sourcePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error)
@@ -67,7 +72,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	showOnlyDuplicates := false
 	searchQuery := ""
 	typeFilterValue := scanFilterAllOption
-	recentLoadedFiles := []string{}
+	recentLoadedFiles := loadRecentFilesFromPreferences(options.RecentFilesPreferenceKey)
 	columnHeaders := []string{"Asset ID", "Use Count", "Type", "Self Size", "Dimensions", "State", "Asset SHA256"}
 	sortField := "Self Size"
 	sortDescending := true
@@ -412,7 +417,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	table.SetColumnWidth(6, 500)
 
 	var scanInProgress bool
-	var stopScanChannel chan struct{}
+	var activeStopSignal *stopSignal
 	scanButton := widget.NewButton("Start Scan", nil)
 	hasSecondarySource := options.SelectSecondarySource != nil
 	combinedSourcePath := func() string {
@@ -498,6 +503,21 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			typeFilterSelect.Enable()
 		}
 	}
+	requestStopScan := func() {
+		if activeStopSignal == nil {
+			return
+		}
+		localStopSignal := activeStopSignal
+		activeStopSignal = nil
+		localStopSignal.Stop()
+	}
+	finishScan := func(localStopSignal *stopSignal) {
+		updateScanControls(false)
+		if activeStopSignal == localStopSignal {
+			activeStopSignal = nil
+		}
+		scanButton.Enable()
+	}
 	showOnlyDuplicatesCheck := widget.NewCheck("Show only duplicates", func(checked bool) {
 		showOnlyDuplicates = checked
 		applySortAndFilters()
@@ -535,28 +555,78 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 		}
 		recentLoadedFiles = nextRecent
+		saveRecentFilesToPreferences(options.RecentFilesPreferenceKey, recentLoadedFiles)
 	}
 
-	importResultsFromPath := func(importPath string) {
-		importBytes, readErr := os.ReadFile(importPath)
-		if readErr != nil {
-			statusLabel.SetText(fmt.Sprintf("Import read failed: %s", readErr.Error()))
-			return
-		}
-		importedResults, parseErr := unmarshalScanTable(importBytes)
-		if parseErr != nil {
-			statusLabel.SetText(fmt.Sprintf("Import parse failed: %s", parseErr.Error()))
-			return
-		}
-
+	applyImportedResults := func(importedResults []scanResult, statusMessage string) {
 		allResults = importedResults
 		selectedAssetID = 0
 		clearPreview()
-		addRecentLoadedFile(importPath)
 		updateFilterOptions()
 		applySortAndFilters()
-		statusLabel.SetText(fmt.Sprintf("Imported %d scan rows.", len(allResults)))
-		logDebugf("Scan table imported: %s (rows=%d)", importPath, len(allResults))
+		if strings.TrimSpace(statusMessage) != "" {
+			statusLabel.SetText(statusMessage)
+		}
+	}
+
+	importResultsFromPath := func(importPath string) {
+		statusLabel.SetText("Importing results...")
+		go func() {
+			importBytes, readErr := os.ReadFile(importPath)
+			if readErr != nil {
+				fyne.Do(func() {
+					statusLabel.SetText(fmt.Sprintf("Import read failed: %s", readErr.Error()))
+					fyneDialog.ShowError(fmt.Errorf("import read failed: %w", readErr), window)
+				})
+				return
+			}
+
+			var importedResults []scanResult
+			importFormat := detectScanImportFormat(importBytes)
+			switch importFormat {
+			case scanImportFormatWorkspace:
+				tablesByContext, parseErr := unmarshalScanWorkspace(importBytes)
+				if parseErr != nil {
+					fyne.Do(func() {
+						statusLabel.SetText(fmt.Sprintf("Import parse failed: %s", parseErr.Error()))
+						fyneDialog.ShowError(fmt.Errorf("import parse failed: %w", parseErr), window)
+					})
+					return
+				}
+				importedResults = tablesByContext[options.ScanContextKey]
+			case scanImportFormatTable:
+				var parseErr error
+				importedResults, parseErr = unmarshalScanTable(importBytes)
+				if parseErr != nil {
+					fyne.Do(func() {
+						statusLabel.SetText(fmt.Sprintf("Import parse failed: %s", parseErr.Error()))
+						fyneDialog.ShowError(fmt.Errorf("import parse failed: %w", parseErr), window)
+					})
+					return
+				}
+			default:
+				fyne.Do(func() {
+					statusLabel.SetText("Import parse failed: unsupported scan JSON format.")
+					fyneDialog.ShowError(fmt.Errorf("import parse failed: unsupported scan JSON format"), window)
+				})
+				return
+			}
+
+			fyne.Do(func() {
+				addRecentLoadedFile(importPath)
+				applyImportedResults(importedResults, fmt.Sprintf("Imported %d results.", len(importedResults)))
+				if importFormat == scanImportFormatWorkspace {
+					logDebugf(
+						"Scan workspace imported into context %s: %s (rows=%d)",
+						options.ScanContextKey,
+						importPath,
+						len(importedResults),
+					)
+					return
+				}
+				logDebugf("Scan table imported: %s (rows=%d)", importPath, len(importedResults))
+			})
+		}()
 	}
 
 	exportMarkdownResults := func() {
@@ -582,17 +652,27 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		if !strings.HasSuffix(strings.ToLower(selectedExportPath), ".md") {
 			selectedExportPath += ".md"
 		}
-		markdownBytes, markdownErr := marshalScanTableMarkdown(allResults)
-		if markdownErr != nil {
-			statusLabel.SetText(fmt.Sprintf("Markdown export failed: %s", markdownErr.Error()))
-			return
-		}
-		if writeErr := os.WriteFile(selectedExportPath, markdownBytes, 0644); writeErr != nil {
-			statusLabel.SetText(fmt.Sprintf("Markdown export write failed: %s", writeErr.Error()))
-			return
-		}
-		statusLabel.SetText(fmt.Sprintf("Exported markdown for %d scan rows.", len(allResults)))
-		logDebugf("Scan table markdown exported: %s (rows=%d)", selectedExportPath, len(allResults))
+		resultsToExport := append([]scanResult(nil), allResults...)
+		statusLabel.SetText("Exporting markdown...")
+		go func() {
+			markdownBytes, markdownErr := marshalScanTableMarkdown(resultsToExport)
+			if markdownErr != nil {
+				fyne.Do(func() {
+					statusLabel.SetText(fmt.Sprintf("Markdown export failed: %s", markdownErr.Error()))
+				})
+				return
+			}
+			if writeErr := os.WriteFile(selectedExportPath, markdownBytes, 0644); writeErr != nil {
+				fyne.Do(func() {
+					statusLabel.SetText(fmt.Sprintf("Markdown export write failed: %s", writeErr.Error()))
+				})
+				return
+			}
+			fyne.Do(func() {
+				statusLabel.SetText(fmt.Sprintf("Exported markdown for %d results.", len(resultsToExport)))
+				logDebugf("Scan table markdown exported: %s (rows=%d)", selectedExportPath, len(resultsToExport))
+			})
+		}()
 	}
 
 	saveResultsToJSON := func() {
@@ -619,19 +699,28 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		if !strings.HasSuffix(strings.ToLower(selectedExportPath), ".json") {
 			selectedExportPath += ".json"
 		}
+		resultsToExport := append([]scanResult(nil), allResults...)
+		statusLabel.SetText("Exporting results...")
+		go func() {
+			exportBytes, marshalErr := marshalScanTable(resultsToExport)
+			if marshalErr != nil {
+				fyne.Do(func() {
+					statusLabel.SetText(fmt.Sprintf("Export failed: %s", marshalErr.Error()))
+				})
+				return
+			}
+			if writeErr := os.WriteFile(selectedExportPath, exportBytes, 0644); writeErr != nil {
+				fyne.Do(func() {
+					statusLabel.SetText(fmt.Sprintf("Export write failed: %s", writeErr.Error()))
+				})
+				return
+			}
 
-		exportBytes, marshalErr := marshalScanTable(allResults)
-		if marshalErr != nil {
-			statusLabel.SetText(fmt.Sprintf("Export failed: %s", marshalErr.Error()))
-			return
-		}
-		if writeErr := os.WriteFile(selectedExportPath, exportBytes, 0644); writeErr != nil {
-			statusLabel.SetText(fmt.Sprintf("Export write failed: %s", writeErr.Error()))
-			return
-		}
-
-		statusLabel.SetText(fmt.Sprintf("Exported %d scan rows.", len(allResults)))
-		logDebugf("Scan table exported: %s (rows=%d)", selectedExportPath, len(allResults))
+			fyne.Do(func() {
+				statusLabel.SetText(fmt.Sprintf("Saved %d results.", len(resultsToExport)))
+				logDebugf("Scan table exported: %s (rows=%d)", selectedExportPath, len(resultsToExport))
+			})
+		}()
 	}
 
 	loadResultsFromPicker := func() {
@@ -654,38 +743,39 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		importResultsFromPath(selectedImportPath)
 	}
 
+	handleDroppedURIs := func(uris []fyne.URI) {
+		if scanInProgress {
+			statusLabel.SetText("Cannot import while scan is running.")
+			return
+		}
+		for _, uri := range uris {
+			if uri == nil {
+				continue
+			}
+			candidatePath := strings.TrimSpace(uri.Path())
+			if candidatePath == "" {
+				continue
+			}
+			if !strings.EqualFold(filepath.Ext(candidatePath), ".json") {
+				continue
+			}
+			importResultsFromPath(candidatePath)
+			return
+		}
+		statusLabel.SetText("Drop a .json results file to import.")
+	}
 	if dropWindow, ok := window.(interface {
 		SetOnDropped(func(position fyne.Position, uris []fyne.URI))
 	}); ok {
 		dropWindow.SetOnDropped(func(_ fyne.Position, uris []fyne.URI) {
-			if scanInProgress {
-				statusLabel.SetText("Cannot import while scan is running.")
-				return
-			}
-			for _, uri := range uris {
-				if uri == nil {
-					continue
-				}
-				candidatePath := strings.TrimSpace(uri.Path())
-				if candidatePath == "" {
-					continue
-				}
-				if !strings.EqualFold(filepath.Ext(candidatePath), ".json") {
-					continue
-				}
-				importResultsFromPath(candidatePath)
-				return
-			}
-			statusLabel.SetText("Drop a .json results file to import.")
+			handleDroppedURIs(uris)
 		})
 	}
 
 	scanButton.OnTapped = func() {
 		if scanInProgress {
 			logDebugf("Scan stop requested")
-			if stopScanChannel != nil {
-				close(stopScanChannel)
-			}
+			requestStopScan()
 			statusLabel.SetText("Stopping scan...")
 			scanButton.Disable()
 			return
@@ -718,22 +808,18 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		clearPreview()
 		logDebugf("Scan started for source: %s (limit=%d)", combinedSourcePath(), limitValue)
 		statusLabel.SetText(options.ScanningStatusText)
-		localStopScanChannel := make(chan struct{})
-		stopScanChannel = localStopScanChannel
+		localStopSignal := newStopSignal()
+		activeStopSignal = localStopSignal
 		updateScanControls(true)
 
 		go func() {
-			hits, scanErr := options.ExtractHits(combinedSourcePath(), limitValue, localStopScanChannel)
+			hits, scanErr := options.ExtractHits(combinedSourcePath(), limitValue, localStopSignal.channel)
 			if scanErr != nil {
 				fyne.Do(func() {
-					updateScanControls(false)
-					if stopScanChannel == localStopScanChannel {
-						stopScanChannel = nil
-					}
-					scanButton.Enable()
+					finishScan(localStopSignal)
 					if errors.Is(scanErr, errScanStopped) {
 						logDebugf("Scan stopped with %d loaded assets", len(allResults))
-						statusLabel.SetText(fmt.Sprintf("Scan stopped. Loaded %d assets.", len(allResults)))
+						statusLabel.SetText(fmt.Sprintf("Stopped. %d results loaded.", len(allResults)))
 						return
 					}
 					logDebugf("Scan failed: %s", scanErr.Error())
@@ -745,11 +831,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 
 			if len(hits) == 0 {
 				fyne.Do(func() {
-					updateScanControls(false)
-					if stopScanChannel == localStopScanChannel {
-						stopScanChannel = nil
-					}
-					scanButton.Enable()
+					finishScan(localStopSignal)
 					statusLabel.SetText(options.NoResultsStatusText)
 					logDebugf("Scan finished: no results")
 				})
@@ -793,7 +875,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				defer close(hitJobs)
 				for _, hit := range hits {
 					select {
-					case <-localStopScanChannel:
+					case <-localStopSignal.channel:
 						return
 					case hitJobs <- hit:
 					}
@@ -804,6 +886,26 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				close(loadOutcomes)
 			}()
 			completedCount := 0
+			pendingRows := make([]scanResult, 0, scanLoadUIBatchSize)
+			lastUIFlushAt := time.Now()
+			flushPendingRows := func(force bool) {
+				if len(pendingRows) == 0 {
+					return
+				}
+				if !force && len(pendingRows) < scanLoadUIBatchSize && time.Since(lastUIFlushAt) < scanLoadUIFlushDelay {
+					return
+				}
+				rowsToPublish := append([]scanResult(nil), pendingRows...)
+				publishedCount := completedCount
+				pendingRows = pendingRows[:0]
+				lastUIFlushAt = time.Now()
+				fyne.Do(func() {
+					allResults = append(allResults, rowsToPublish...)
+					updateFilterOptions()
+					applySortAndFilters()
+					statusLabel.SetText(fmt.Sprintf("Loading results %d/%d...", publishedCount, len(hits)))
+				})
+			}
 			for loadOutcome := range loadOutcomes {
 				completedCount++
 				if loadOutcome.loadErr != nil {
@@ -812,35 +914,22 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 						firstLoadErr = loadOutcome.loadErr
 					}
 				}
-				currentCount := completedCount
-				scanRow := loadOutcome.row
-				fyne.Do(func() {
-					allResults = append(allResults, scanRow)
-					updateFilterOptions()
-					applySortAndFilters()
-					statusLabel.SetText(fmt.Sprintf("Loaded %d/%d assets...", currentCount, len(hits)))
-				})
+				pendingRows = append(pendingRows, loadOutcome.row)
+				flushPendingRows(false)
 			}
+			flushPendingRows(true)
 			select {
-			case <-localStopScanChannel:
+			case <-localStopSignal.channel:
 				fyne.Do(func() {
-					updateScanControls(false)
-					if stopScanChannel == localStopScanChannel {
-						stopScanChannel = nil
-					}
-					scanButton.Enable()
-					statusLabel.SetText(fmt.Sprintf("Scan stopped. Loaded %d assets.", len(allResults)))
+					finishScan(localStopSignal)
+					statusLabel.SetText(fmt.Sprintf("Stopped. %d results loaded.", len(allResults)))
 				})
 				return
 			default:
 			}
 
 			fyne.Do(func() {
-				updateScanControls(false)
-				if stopScanChannel == localStopScanChannel {
-					stopScanChannel = nil
-				}
-				scanButton.Enable()
+				finishScan(localStopSignal)
 				if len(allResults) == 0 && firstLoadErr != nil {
 					statusLabel.SetText(fmt.Sprintf(
 						"Scan extracted %d IDs but could not load any assets. First error: %s",
@@ -868,7 +957,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 					)
 					return
 				}
-				statusLabel.SetText(fmt.Sprintf("Scan complete. Showing %d assets.", len(allResults)))
+				statusLabel.SetText(fmt.Sprintf("Done. %d results loaded.", len(allResults)))
 				logDebugf("Scan complete: %d assets shown", len(allResults))
 			})
 		}()
@@ -947,8 +1036,10 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		container.NewBorder(statusLabel, nil, nil, nil, split),
 	)
 	fileActions := &scanTabFileActions{
+		ContextKey:     options.ScanContextKey,
 		SaveJSON:       saveResultsToJSON,
 		LoadJSON:       loadResultsFromPicker,
+		HandleDrop:     handleDroppedURIs,
 		ExportMarkdown: exportMarkdownResults,
 		RecentFiles: func() []string {
 			paths := make([]string, len(recentLoadedFiles))
@@ -962,6 +1053,17 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 			importResultsFromPath(path)
 		},
+		GetResults: func() []scanResult {
+			rows := make([]scanResult, len(allResults))
+			copy(rows, allResults)
+			return rows
+		},
+		SetResults: func(rows []scanResult) {
+			nextRows := make([]scanResult, len(rows))
+			copy(nextRows, rows)
+			applyImportedResults(nextRows, fmt.Sprintf("Loaded %d results.", len(nextRows)))
+		},
+		AddRecentFile: addRecentLoadedFile,
 	}
 	return content, fileActions
 }

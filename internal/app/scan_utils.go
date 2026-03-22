@@ -3,11 +3,14 @@ package app
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 )
 
 const (
@@ -27,6 +30,26 @@ type scanHit struct {
 	AssetID  int64
 	FilePath string
 	UseCount int
+}
+
+type stopSignal struct {
+	channel chan struct{}
+	once    sync.Once
+}
+
+func newStopSignal() *stopSignal {
+	return &stopSignal{
+		channel: make(chan struct{}),
+	}
+}
+
+func (signal *stopSignal) Stop() {
+	if signal == nil {
+		return
+	}
+	signal.once.Do(func() {
+		close(signal.channel)
+	})
 }
 
 func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
@@ -73,7 +96,7 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 				FilePath: path,
 				UseCount: 1,
 			})
-			if len(results) >= limit {
+			if limit > 0 && len(results) >= limit {
 				return errScanLimitReached
 			}
 		}
@@ -172,4 +195,62 @@ func isProbablyBinaryFile(filePath string) bool {
 	}
 
 	return false
+}
+
+func scanFolderDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
+	sourceParts := strings.SplitN(sourcePath, "\n", 2)
+	if len(sourceParts) != 2 {
+		return nil, fmt.Errorf("invalid folder diff source format")
+	}
+	baselineFolderPath := strings.TrimSpace(sourceParts[0])
+	targetFolderPath := strings.TrimSpace(sourceParts[1])
+	if baselineFolderPath == "" || targetFolderPath == "" {
+		return nil, fmt.Errorf("both baseline and target folders are required")
+	}
+	baselineInfo, baselineErr := os.Stat(baselineFolderPath)
+	if baselineErr != nil {
+		return nil, baselineErr
+	}
+	if !baselineInfo.IsDir() {
+		return nil, fmt.Errorf("baseline path must be a folder")
+	}
+	targetInfo, targetErr := os.Stat(targetFolderPath)
+	if targetErr != nil {
+		return nil, targetErr
+	}
+	if !targetInfo.IsDir() {
+		return nil, fmt.Errorf("target path must be a folder")
+	}
+
+	baselineHits, baselineScanErr := scanFolderForAssetIDs(baselineFolderPath, 0, stopChannel)
+	if errors.Is(baselineScanErr, errScanStopped) {
+		return nil, errScanStopped
+	}
+	if baselineScanErr != nil {
+		return nil, baselineScanErr
+	}
+
+	targetHits, targetScanErr := scanFolderForAssetIDs(targetFolderPath, 0, stopChannel)
+	if errors.Is(targetScanErr, errScanStopped) {
+		return nil, errScanStopped
+	}
+	if targetScanErr != nil {
+		return nil, targetScanErr
+	}
+
+	baselineIDs := map[int64]bool{}
+	for _, hit := range baselineHits {
+		baselineIDs[hit.AssetID] = true
+	}
+	diffHits := make([]scanHit, 0, len(targetHits))
+	for _, hit := range targetHits {
+		if baselineIDs[hit.AssetID] {
+			continue
+		}
+		diffHits = append(diffHits, hit)
+		if limit > 0 && len(diffHits) >= limit {
+			break
+		}
+	}
+	return diffHits, nil
 }

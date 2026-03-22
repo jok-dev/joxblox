@@ -9,56 +9,84 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/widget"
 	nativeDialog "github.com/sqweek/dialog"
 )
 
-func newRBXLScanTab(window fyne.Window) (fyne.CanvasObject, scanTabFileActionsProvider) {
+func newRBXLScanTab(
+	window fyne.Window,
+) (fyne.CanvasObject, scanTabFileActionsProvider, []scanTabFileActionsProvider, func(string)) {
 	singleFileScan, singleFileActions := newAssetScanTab(window, assetScanTabOptions{
-		NoSourceSelectedText:    "No .rbxl file selected.",
-		SelectButtonText:        "Select .rbxl File",
-		ReadyStatusText:         "Ready to scan .rbxl file.",
-		MissingSourceStatusText: "Please select an .rbxl file first.",
-		ScanningStatusText:      "Extracting asset IDs from .rbxl...",
-		NoResultsStatusText:     "No Roblox asset IDs found in this .rbxl file.",
-		MaxResultsDefault:       rustExtractorDefaultLimit,
-		SelectSource:            pickRBXLSource,
-		ExtractHits:             scanRBXLFileForAssetIDs,
+		NoSourceSelectedText:     "No .rbxl file selected.",
+		SelectButtonText:         "Select .rbxl File",
+		ReadyStatusText:          "Ready.",
+		MissingSourceStatusText:  "Select an .rbxl file first.",
+		ScanningStatusText:       "Scanning...",
+		NoResultsStatusText:      "No results found.",
+		MaxResultsDefault:        rustExtractorDefaultLimit,
+		ScanContextKey:           scanContextRBXLSingle,
+		RecentFilesPreferenceKey: "scan.recent.rbxl.single",
+		SelectSource:             pickRBXLSource,
+		ExtractHits:              scanRBXLFileForAssetIDs,
 	})
 	fileDiffScan, fileDiffActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:             "Baseline: no .rbxl file selected.",
 		SelectButtonText:                 "Select Baseline",
 		NoSecondarySourceText:            "Target: no .rbxl file selected.",
 		SelectSecondaryButtonText:        "Select Target",
-		ReadyStatusText:                  "Ready to run one-way file diff (target minus baseline).",
-		MissingSourceStatusText:          "Please select both baseline and target .rbxl files first.",
-		MissingSecondarySourceStatusText: "Please select a target .rbxl file.",
-		ScanningStatusText:               "Diffing RBXL asset IDs (target minus baseline)...",
-		NoResultsStatusText:              "No new Roblox asset IDs found in target file.",
+		ReadyStatusText:                  "Ready.",
+		MissingSourceStatusText:          "Select baseline and target .rbxl files first.",
+		MissingSecondarySourceStatusText: "Select a target .rbxl file.",
+		ScanningStatusText:               "Diffing...",
+		NoResultsStatusText:              "No new results found.",
 		MaxResultsDefault:                rustExtractorDefaultLimit,
+		ScanContextKey:                   scanContextRBXLDiff,
+		RecentFilesPreferenceKey:         "scan.recent.rbxl.diff",
 		SelectSource:                     pickRBXLBaselineSource,
 		SelectSecondarySource:            pickRBXLTargetSource,
 		ExtractHits:                      scanRBXLFileDiffForAssetIDs,
 	})
 
-	modeTabs := container.NewAppTabs(
-		container.NewTabItem("Single File", singleFileScan),
-		container.NewTabItem("File Diff", fileDiffScan),
-	)
-	modeTabs.SetTabLocation(container.TabLocationTop)
+	modeLabel := widget.NewLabel("Mode:")
+	modeSwitch := widget.NewRadioGroup([]string{"Single File", "File Diff"}, nil)
+	modeSwitch.Horizontal = true
+	modeSwitch.SetSelected("Single File")
+	contentStack := container.NewStack(singleFileScan, fileDiffScan)
+	contentStack.Objects[1].Hide()
 	currentActions := singleFileActions
-	modeTabs.OnSelected = func(selectedTab *container.TabItem) {
-		if selectedTab == nil {
-			return
-		}
-		if selectedTab.Text == "File Diff" {
+	singleFileProvider := func() *scanTabFileActions { return singleFileActions }
+	fileDiffProvider := func() *scanTabFileActions { return fileDiffActions }
+	modeSwitch.OnChanged = func(selectedMode string) {
+		if strings.EqualFold(selectedMode, "File Diff") {
+			contentStack.Objects[0].Hide()
+			contentStack.Objects[1].Show()
 			currentActions = fileDiffActions
+			contentStack.Refresh()
 			return
 		}
+		contentStack.Objects[1].Hide()
+		contentStack.Objects[0].Show()
 		currentActions = singleFileActions
+		contentStack.Refresh()
 	}
-	return modeTabs, func() *scanTabFileActions {
+	selectContext := func(contextKey string) {
+		switch strings.TrimSpace(contextKey) {
+		case scanContextRBXLDiff:
+			modeSwitch.SetSelected("File Diff")
+		default:
+			modeSwitch.SetSelected("Single File")
+		}
+	}
+	content := container.NewBorder(
+		container.NewHBox(modeLabel, modeSwitch),
+		nil,
+		nil,
+		nil,
+		contentStack,
+	)
+	return content, func() *scanTabFileActions {
 		return currentActions
-	}
+	}, []scanTabFileActionsProvider{singleFileProvider, fileDiffProvider}, selectContext
 }
 
 func pickRBXLSource(window fyne.Window, onSelected func(string), onError func(error)) {
@@ -134,7 +162,7 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 		return nil, readErr
 	}
 
-	rustAssetIDs, useCountsByAssetID, _, rustScanErr := extractAssetIDsWithRustFromFileWithCounts(filePath, limit, stopChannel)
+	rustAssetIDs, useCountsByAssetID, _, rustScanErr := extractAssetIDsWithRustFromFileWithCounts(filePath, 0, limit, stopChannel)
 	if errors.Is(rustScanErr, errScanStopped) {
 		logDebugf("RBXL scan stopped during Rust extraction")
 		return nil, errScanStopped
@@ -184,7 +212,7 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	)
 
 	baselineAssetIDs := map[int64]bool{}
-	baselineFileAssetIDs, _, _, baselineErr := extractAssetIDsWithRustFromFileWithCounts(baselineFilePath, 0, stopChannel)
+	baselineFileAssetIDs, _, _, baselineErr := extractAssetIDsWithRustFromFileWithCounts(baselineFilePath, 0, 0, stopChannel)
 	if errors.Is(baselineErr, errScanStopped) {
 		return nil, errScanStopped
 	}
@@ -196,7 +224,7 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	}
 
 	results := []scanHit{}
-	targetFileAssetIDs, targetUseCountsByAssetID, _, targetErr := extractAssetIDsWithRustFromFileWithCounts(targetFilePath, 0, stopChannel)
+	targetFileAssetIDs, targetUseCountsByAssetID, _, targetErr := extractAssetIDsWithRustFromFileWithCounts(targetFilePath, 0, 0, stopChannel)
 	if errors.Is(targetErr, errScanStopped) {
 		return results, errScanStopped
 	}

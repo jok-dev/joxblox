@@ -21,16 +21,22 @@ type rustExtractorResult struct {
 	AssetUseCounts map[string]int `json:"asset_use_counts"`
 }
 
-func extractAssetIDsWithRustFromFile(filePath string, limit int, stopChannel <-chan struct{}) ([]int64, string, error) {
-	assetIDs, _, commandOutputText, extractErr := extractAssetIDsWithRustFromFileWithCounts(filePath, limit, stopChannel)
+func extractAssetIDsWithRustFromFile(filePath string, assetTypeID int, limit int, stopChannel <-chan struct{}) ([]int64, string, error) {
+	assetIDs, _, commandOutputText, extractErr := extractAssetIDsWithRustFromFileWithCounts(filePath, assetTypeID, limit, stopChannel)
 	return assetIDs, commandOutputText, extractErr
 }
 
-func extractAssetIDsWithRustFromFileWithCounts(filePath string, limit int, stopChannel <-chan struct{}) ([]int64, map[int64]int, string, error) {
+func extractAssetIDsWithRustFromFileWithCounts(filePath string, assetTypeID int, limit int, stopChannel <-chan struct{}) ([]int64, map[int64]int, string, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return nil, map[int64]int{}, "", nil
 	}
-	logDebugf("Rust extractor requested for file: %s (limit=%d)", filePath, limit)
+	logDebugf(
+		"Rust extractor requested for file: %s (limit=%d, assetType=%s (%d))",
+		filePath,
+		limit,
+		getAssetTypeName(assetTypeID),
+		assetTypeID,
+	)
 	repoRootPath, rootErr := getRepositoryRootPath()
 	if rootErr != nil {
 		logDebugf("Rust extractor skipped (repo root unavailable): %s", rootErr.Error())
@@ -100,7 +106,7 @@ func extractAssetIDsWithRustFromFileWithCounts(filePath string, limit int, stopC
 	return assetIDsFromDOM, useCountsByAssetID, commandOutputText, nil
 }
 
-func extractAssetIDsWithRustFromBytes(fileBytes []byte, limit int) ([]int64, string, error) {
+func extractAssetIDsWithRustFromBytes(fileBytes []byte, assetTypeID int, limit int) ([]int64, string, error) {
 	if len(fileBytes) == 0 {
 		return nil, "", nil
 	}
@@ -125,7 +131,7 @@ func extractAssetIDsWithRustFromBytes(fileBytes []byte, limit int) ([]int64, str
 	}
 
 	logDebugf("Rust extractor processing in-memory payload (%d bytes)", len(fileBytes))
-	return extractAssetIDsWithRustFromFile(tempFilePath, limit, nil)
+	return extractAssetIDsWithRustFromFile(tempFilePath, assetTypeID, limit, nil)
 }
 
 func getRepositoryRootPath() (string, error) {

@@ -99,35 +99,11 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		container.NewCenter(previewImage),
 	)
 
-	assetDeliveryJSONValue := widget.NewMultiLineEntry()
-	assetDeliveryJSONValue.SetText("-")
-	assetDeliveryJSONValue.Disable()
-	assetDeliveryJSONValue.Wrapping = fyne.TextWrapBreak
-	assetDeliveryJSONValue.SetMinRowsVisible(6)
-
-	thumbnailJSONValue := widget.NewMultiLineEntry()
-	thumbnailJSONValue.SetText("-")
-	thumbnailJSONValue.Disable()
-	thumbnailJSONValue.Wrapping = fyne.TextWrapBreak
-	thumbnailJSONValue.SetMinRowsVisible(6)
-
-	economyJSONValue := widget.NewMultiLineEntry()
-	economyJSONValue.SetText("-")
-	economyJSONValue.Disable()
-	economyJSONValue.Wrapping = fyne.TextWrapBreak
-	economyJSONValue.SetMinRowsVisible(6)
-
-	referencedAssetsValue := widget.NewMultiLineEntry()
-	referencedAssetsValue.SetText("-")
-	referencedAssetsValue.Disable()
-	referencedAssetsValue.Wrapping = fyne.TextWrapBreak
-	referencedAssetsValue.SetMinRowsVisible(6)
-
-	rustExtractorJSONValue := widget.NewMultiLineEntry()
-	rustExtractorJSONValue.SetText("-")
-	rustExtractorJSONValue.Disable()
-	rustExtractorJSONValue.Wrapping = fyne.TextWrapBreak
-	rustExtractorJSONValue.SetMinRowsVisible(6)
+	assetDeliveryJSONValue := newReadOnlyMultilineEntry(6)
+	thumbnailJSONValue := newReadOnlyMultilineEntry(6)
+	economyJSONValue := newReadOnlyMultilineEntry(6)
+	referencedAssetsValue := newReadOnlyMultilineEntry(6)
+	rustExtractorJSONValue := newReadOnlyMultilineEntry(6)
 	saveJSONButton := widget.NewButton("Save Full JSON to File", nil)
 
 	jsonAccordion := widget.NewAccordion(
@@ -393,6 +369,27 @@ func (view *assetView) Clear() {
 	view.NoteLabel.SetText("")
 }
 
+func newReadOnlyMultilineEntry(minRowsVisible int) *widget.Entry {
+	entry := widget.NewMultiLineEntry()
+	entry.SetText("-")
+	entry.Disable()
+	entry.Wrapping = fyne.TextWrapBreak
+	entry.SetMinRowsVisible(minRowsVisible)
+	return entry
+}
+
+func setLabelTextOrDash(label *widget.Label, value string) {
+	if label == nil {
+		return
+	}
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		label.SetText("-")
+		return
+	}
+	label.SetText(trimmedValue)
+}
+
 func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string, useCount int, previewImageInfo *imageInfo, statsInfo *imageInfo, totalBytesSize int, sourceDescription string, stateDescription string, warningMessage string, assetDeliveryRawJSON string, thumbnailRawJSON string, economyRawJSON string, rustExtractorRawJSON string, referencedAssetIDs []int64, assetTypeID int, assetTypeName string) {
 	if statsInfo == nil {
 		statsInfo = previewImageInfo
@@ -423,26 +420,14 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 	} else {
 		view.RecompressedJPEGSizeValue.SetText("-")
 	}
-	if strings.TrimSpace(statsInfo.Format) != "" {
-		view.FormatValue.SetText(statsInfo.Format)
-	} else {
-		view.FormatValue.SetText("-")
-	}
-	if strings.TrimSpace(statsInfo.ContentType) != "" {
-		view.ContentTypeValue.SetText(statsInfo.ContentType)
-	} else {
-		view.ContentTypeValue.SetText("-")
-	}
+	setLabelTextOrDash(view.FormatValue, statsInfo.Format)
+	setLabelTextOrDash(view.ContentTypeValue, statsInfo.ContentType)
 	if assetTypeID > 0 {
 		view.AssetTypeValue.SetText(fmt.Sprintf("%s (%d)", assetTypeName, assetTypeID))
 	} else {
 		view.AssetTypeValue.SetText(assetTypeName)
 	}
-	if warningMessage != "" {
-		view.FailureReasonValue.SetText(warningMessage)
-	} else {
-		view.FailureReasonValue.SetText("-")
-	}
+	setLabelTextOrDash(view.FailureReasonValue, warningMessage)
 	view.pendingAssetDeliveryJSON = assetDeliveryRawJSON
 	view.pendingThumbnailJSON = thumbnailRawJSON
 	view.pendingEconomyJSON = economyRawJSON
@@ -459,18 +444,10 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 		view.showLazyJSONPlaceholder()
 	}
 	if view.FileValue != nil {
-		if strings.TrimSpace(filePath) == "" {
-			view.FileValue.SetText("-")
-		} else {
-			view.FileValue.SetText(filePath)
-		}
+		setLabelTextOrDash(view.FileValue, filePath)
 	}
 	if view.FileSHA256Value != nil {
-		if strings.TrimSpace(fileSHA256) == "" {
-			view.FileSHA256Value.SetText("-")
-		} else {
-			view.FileSHA256Value.SetText(fileSHA256)
-		}
+		setLabelTextOrDash(view.FileSHA256Value, fileSHA256)
 	}
 
 	view.StateValue.SetText(stateDescription)

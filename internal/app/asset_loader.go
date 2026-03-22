@@ -170,7 +170,7 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 	referencedAssetIDs := []int64{}
 	rustExtractorRawJSON := ""
 	if assetDeliveryErr == nil && deliveryInfo != nil {
-		deliveryFileInfo, deliveryFileErr := fetchAssetFileInfo(deliveryInfo.Location, assetID, true)
+		deliveryFileInfo, deliveryFileErr := fetchAssetFileInfo(deliveryInfo.Location, assetID, assetTypeID, true)
 		if deliveryFileErr != nil {
 			if isRustExtractorFailure(deliveryFileErr) {
 				return nil, deliveryFileErr
@@ -199,7 +199,7 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 					AssetTypeName:      assetTypeName,
 				}, nil
 			}
-			if assetTypeID > 0 && assetTypeID != 1 {
+			if assetTypeID > 0 && assetTypeID != assetTypeImage {
 				assetDeliveryErr = fmt.Errorf("asset type %s (%d) is not directly previewable from AssetDelivery payload", assetTypeName, assetTypeID)
 			} else {
 				assetDeliveryErr = fmt.Errorf("AssetDelivery file is not an image preview")
@@ -464,7 +464,7 @@ func fetchImageInfo(imageURL string, assetID int64, includeHash bool) (*imageInf
 	}, nil
 }
 
-func fetchAssetFileInfo(fileURL string, assetID int64, includeHash bool) (*assetFileInfo, error) {
+func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeHash bool) (*assetFileInfo, error) {
 	response, err := doRobloxAuthenticatedGet(fileURL, requestTimeout)
 	if err != nil {
 		return nil, err
@@ -499,7 +499,12 @@ func fetchAssetFileInfo(fileURL string, assetID int64, includeHash bool) (*asset
 
 	imageConfig, imageFormat, decodeErr := image.DecodeConfig(bytes.NewReader(fileBytes))
 	if decodeErr != nil {
-		referencedAssetIDs, rustExtractorJSON, extractErr := extractReferencedAssetIDsFromBytes(fileBytes)
+		referencedAssetIDs := []int64{}
+		rustExtractorJSON := ""
+		var extractErr error
+		if !shouldSkipRustExtractionForAssetType(assetTypeID) {
+			referencedAssetIDs, rustExtractorJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
+		}
 		if extractErr != nil {
 			return nil, extractErr
 		}
@@ -521,7 +526,12 @@ func fetchAssetFileInfo(fileURL string, assetID int64, includeHash bool) (*asset
 		info.RecompressedPNGByteSize = recompressedPNGByteSize
 		info.RecompressedJPEGByteSize = recompressedJPEGByteSize
 	}
-	referencedAssetIDs, rustExtractorJSON, extractErr := extractReferencedAssetIDsFromBytes(fileBytes)
+	referencedAssetIDs := []int64{}
+	rustExtractorJSON := ""
+	var extractErr error
+	if !shouldSkipRustExtractionForAssetType(assetTypeID) {
+		referencedAssetIDs, rustExtractorJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
+	}
 	if extractErr != nil {
 		return nil, extractErr
 	}
@@ -662,7 +672,7 @@ func getAssetSelfInfo(assetID int64) (assetSelfInfo, error) {
 		return selfInfo, fmt.Errorf("asset delivery location unavailable")
 	}
 
-	fileInfo, fileErr := fetchAssetFileInfo(assetDeliveryInfo.Location, assetID, false)
+	fileInfo, fileErr := fetchAssetFileInfo(assetDeliveryInfo.Location, assetID, selfInfo.AssetTypeID, false)
 	if fileErr != nil || fileInfo == nil || fileInfo.Info == nil {
 		if fileErr != nil {
 			return selfInfo, fileErr
@@ -677,8 +687,8 @@ func getAssetSelfInfo(assetID int64) (assetSelfInfo, error) {
 	return selfInfo, nil
 }
 
-func extractReferencedAssetIDsFromBytes(fileBytes []byte) ([]int64, string, error) {
-	rustAssetIDs, rustExtractorJSON, rustErr := extractAssetIDsWithRustFromBytes(fileBytes, rustExtractorDefaultLimit)
+func extractReferencedAssetIDsFromBytes(fileBytes []byte, assetTypeID int) ([]int64, string, error) {
+	rustAssetIDs, rustExtractorJSON, rustErr := extractAssetIDsWithRustFromBytes(fileBytes, assetTypeID, rustExtractorDefaultLimit)
 	if rustErr != nil {
 		logDebugf("Referenced asset extraction Rust path errored: %s", rustErr.Error())
 		return []int64{}, rustExtractorJSON, rustErr

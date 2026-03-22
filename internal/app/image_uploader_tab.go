@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -53,7 +54,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 	stopButton.Disable()
 
 	var inProgress bool
-	var stopChannel chan struct{}
+	var activeStopSignal *stopSignal
 	updateButtons := func(running bool) {
 		inProgress = running
 		if running {
@@ -72,6 +73,27 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		patternSelect.Enable()
 		outputFolderEntry.Enable()
 	}
+	requestStopGeneration := func() {
+		if activeStopSignal == nil {
+			return
+		}
+		localStopSignal := activeStopSignal
+		activeStopSignal = nil
+		localStopSignal.Stop()
+	}
+	finishGeneration := func(localStopSignal *stopSignal, statusText string) {
+		updateButtons(false)
+		if activeStopSignal == localStopSignal {
+			activeStopSignal = nil
+		}
+		statusLabel.SetText(statusText)
+	}
+	failGeneration := func(localStopSignal *stopSignal, statusText string, err error) {
+		finishGeneration(localStopSignal, statusText)
+		if err != nil {
+			fyneDialog.ShowError(err, window)
+		}
+	}
 
 	selectFolderButton.OnTapped = func() {
 		selectedPath, pickerErr := nativeDialog.Directory().Title("Select output folder").Browse()
@@ -79,16 +101,14 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 			outputFolderEntry.SetText(selectedPath)
 			return
 		}
-		if strings.Contains(strings.ToLower(pickerErr.Error()), "cancel") {
+		if errors.Is(pickerErr, nativeDialog.Cancelled) {
 			return
 		}
 		statusLabel.SetText(fmt.Sprintf("Folder picker failed: %s", pickerErr.Error()))
 	}
 
 	stopButton.OnTapped = func() {
-		if stopChannel != nil {
-			close(stopChannel)
-		}
+		requestStopGeneration()
 		statusLabel.SetText("Stopping generation...")
 		stopButton.Disable()
 	}
@@ -117,8 +137,8 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		}
 
 		generatedPathsEntry.SetText("")
-		localStopChannel := make(chan struct{})
-		stopChannel = localStopChannel
+		localStopSignal := newStopSignal()
+		activeStopSignal = localStopSignal
 		updateButtons(true)
 		statusLabel.SetText("Preparing generation...")
 
@@ -127,13 +147,12 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 			lastPublishedPathsText := ""
 			for index := 0; index < totalCount; index++ {
 				select {
-				case <-localStopChannel:
+				case <-localStopSignal.channel:
 					fyne.Do(func() {
-						updateButtons(false)
-						if stopChannel == localStopChannel {
-							stopChannel = nil
-						}
-						statusLabel.SetText(fmt.Sprintf("Generation stopped. Created %d/%d images.", len(generatedPaths), totalCount))
+						finishGeneration(
+							localStopSignal,
+							fmt.Sprintf("Generation stopped. Created %d/%d images.", len(generatedPaths), totalCount),
+						)
 					})
 					return
 				default:
@@ -149,12 +168,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 				imageBytes, generateErr := generatePNGBytes(uploadImageWidth, uploadImageHeight, patternMode)
 				if generateErr != nil {
 					fyne.Do(func() {
-						updateButtons(false)
-						if stopChannel == localStopChannel {
-							stopChannel = nil
-						}
-						statusLabel.SetText(fmt.Sprintf("Generation failed: %s", generateErr.Error()))
-						fyneDialog.ShowError(generateErr, window)
+						failGeneration(localStopSignal, fmt.Sprintf("Generation failed: %s", generateErr.Error()), generateErr)
 					})
 					return
 				}
@@ -163,12 +177,11 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 				outputPath := filepath.Join(outputFolder, fileName)
 				if writeErr := os.WriteFile(outputPath, imageBytes, 0644); writeErr != nil {
 					fyne.Do(func() {
-						updateButtons(false)
-						if stopChannel == localStopChannel {
-							stopChannel = nil
-						}
-						statusLabel.SetText(fmt.Sprintf("Write failed on item %d: %s", index+1, writeErr.Error()))
-						fyneDialog.ShowError(writeErr, window)
+						failGeneration(
+							localStopSignal,
+							fmt.Sprintf("Write failed on item %d: %s", index+1, writeErr.Error()),
+							writeErr,
+						)
 					})
 					return
 				}
@@ -184,14 +197,10 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 			}
 
 			fyne.Do(func() {
-				updateButtons(false)
-				if stopChannel == localStopChannel {
-					stopChannel = nil
-				}
+				finishGeneration(localStopSignal, fmt.Sprintf("Generation complete. Created %d images.", len(generatedPaths)))
 				if strings.TrimSpace(lastPublishedPathsText) == "" && len(generatedPaths) > 0 {
 					generatedPathsEntry.SetText(strings.Join(generatedPaths, "\n"))
 				}
-				statusLabel.SetText(fmt.Sprintf("Generation complete. Created %d images.", len(generatedPaths)))
 			})
 		}(countValue, outputFolderPath, selectedPatternMode)
 	}

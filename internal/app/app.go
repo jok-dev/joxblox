@@ -3,6 +3,9 @@ package app
 import (
 	_ "embed"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -32,13 +35,61 @@ func Run() {
 	window.Resize(fyne.NewSize(1100, 700))
 
 	singleAssetTab := container.NewTabItem("Single Asset", newSingleAssetTab(window))
-	folderScanContent, folderScanFileActions := newFolderScanTab(window)
-	folderScanTab := container.NewTabItem("Folder Scan", folderScanContent)
-	rbxlScanContent, rbxlScanFileActions := newRBXLScanTab(window)
-	rbxlScanTab := container.NewTabItem("RBXL Scan", rbxlScanContent)
+	scanContent, scanFileActions, allScanFileActions, selectScanContext := newScanTab(window)
+	scanTab := container.NewTabItem("Scan", scanContent)
 	imageUploaderTab := container.NewTabItem("Image Generator", newImageUploaderTab(window))
-	tabs := container.NewAppTabs(singleAssetTab, folderScanTab, rbxlScanTab, imageUploaderTab)
-	bindMainFileMenu(window, tabs, folderScanFileActions, rbxlScanFileActions)
+	tabs := container.NewAppTabs(singleAssetTab, scanTab, imageUploaderTab)
+	bindMainFileMenu(
+		window,
+		tabs,
+		scanTab,
+		scanFileActions,
+		allScanFileActions,
+		selectScanContext,
+	)
+	if dropWindow, ok := window.(interface {
+		SetOnDropped(func(position fyne.Position, uris []fyne.URI))
+	}); ok {
+		dropWindow.SetOnDropped(func(_ fyne.Position, uris []fyne.URI) {
+			for _, uri := range uris {
+				if uri == nil {
+					continue
+				}
+				candidatePath := strings.TrimSpace(uri.Path())
+				if candidatePath == "" || !strings.EqualFold(filepath.Ext(candidatePath), ".json") {
+					continue
+				}
+				go func(importPath string, droppedURIs []fyne.URI) {
+					importBytes, readErr := os.ReadFile(importPath)
+					if readErr != nil {
+						fyne.Do(func() {
+							dialog.ShowError(fmt.Errorf("drop read failed: %w", readErr), window)
+						})
+						return
+					}
+					importFormat := detectScanImportFormat(importBytes)
+					fyne.Do(func() {
+						tabs.Select(scanTab)
+						if importFormat == scanImportFormatWorkspace {
+							loadAllScanResultsFromPathAsync(window, allScanFileActions, importPath, func(selectedContext string, loaded bool) {
+								if loaded && selectScanContext != nil && selectedContext != "" {
+									selectScanContext(selectedContext)
+								}
+							})
+							return
+						}
+						if scanFileActions == nil {
+							return
+						}
+						if activeActions := scanFileActions(); activeActions != nil && activeActions.HandleDrop != nil {
+							activeActions.HandleDrop(droppedURIs)
+						}
+					})
+				}(candidatePath, uris)
+				return
+			}
+		})
+	}
 	authPanel := newAuthPanel(window)
 	mainContent := container.NewBorder(nil, authPanel, nil, nil, tabs)
 	var setLayoutMode func(showConsole bool)
