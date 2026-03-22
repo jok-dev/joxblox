@@ -3,3 +3,26 @@
 .gobin/
 *.app/
 /roblox-asset-explorer
+
+# Logs/runtime output
+*.log
+latest.log
+
+# Python cache/artifacts
+__pycache__/
+*.pyc
+
+# Go build artifacts
+*.exe
+*.test
+
+# Local generated scratch files
+generated_images/
+generated_images_small/
+generated_images_small_compressed/
+generated_images_compressed/
+large_1024.png
+
+# Rust build outputs
+tools/rbxl-id-extractor/target/
+tools/rbxl-id-extractor/NUL

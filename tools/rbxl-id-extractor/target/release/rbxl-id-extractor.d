@@ -1,1 +1,1 @@
-/Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/rbxl-id-extractor: /Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/src/main.rs
+C:\Users\Jok\work\voldex\joxblox\tools\rbxl-id-extractor\target\release\rbxl-id-extractor.exe: C:\Users\Jok\work\voldex\joxblox\tools\rbxl-id-extractor\src\main.rs

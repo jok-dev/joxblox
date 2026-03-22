@@ -40,14 +40,18 @@ type assetView struct {
 	DimensionsValue            *widget.Label
 	SelfSizeValue              *widget.Label
 	TotalSizeValue             *widget.Label
+	RecompressedPNGSizeValue   *widget.Label
+	RecompressedJPEGSizeValue  *widget.Label
 	FormatValue                *widget.Label
 	ContentTypeValue           *widget.Label
 	AssetTypeValue             *widget.Label
 	ReferencedAssetsCountValue *widget.Label
 	StateValue                 *widget.Label
 	SourceValue                *widget.Label
+	UseCountValue              *widget.Label
 	FailureReasonValue         *widget.Label
 	FileValue                  *widget.Label
+	FileSHA256Value            *widget.Label
 
 	AssetDeliveryJSONValue *widget.Entry
 	ThumbnailJSONValue     *widget.Entry
@@ -159,14 +163,18 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		DimensionsValue:            widget.NewLabel("-"),
 		SelfSizeValue:              widget.NewLabel("-"),
 		TotalSizeValue:             widget.NewLabel("-"),
+		RecompressedPNGSizeValue:   widget.NewLabel("-"),
+		RecompressedJPEGSizeValue:  widget.NewLabel("-"),
 		FormatValue:                widget.NewLabel("-"),
 		ContentTypeValue:           widget.NewLabel("-"),
 		AssetTypeValue:             widget.NewLabel("-"),
 		ReferencedAssetsCountValue: widget.NewLabel("-"),
 		StateValue:                 widget.NewLabel("-"),
 		SourceValue:                widget.NewLabel("-"),
+		UseCountValue:              widget.NewLabel("-"),
 		FailureReasonValue:         widget.NewLabel("-"),
 		FileValue:                  nil,
+		FileSHA256Value:            nil,
 		AssetDeliveryJSONValue:     assetDeliveryJSONValue,
 		ThumbnailJSONValue:         thumbnailJSONValue,
 		EconomyJSONValue:           economyJSONValue,
@@ -304,22 +312,30 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 	)
 
 	formItems := []fyne.CanvasObject{
-		widget.NewLabel("Asset ID:"), view.AssetIDValue,
 		widget.NewLabel("Dimensions:"), view.DimensionsValue,
 		widget.NewLabel("Self Size:"), view.SelfSizeValue,
 		widget.NewLabel("Total Size:"), view.TotalSizeValue,
+		widget.NewLabel("Recompressed PNG Size:"), view.RecompressedPNGSizeValue,
+		widget.NewLabel("Recompressed JPEG Size:"), view.RecompressedJPEGSizeValue,
 		widget.NewLabel("Format:"), view.FormatValue,
 		widget.NewLabel("Content-Type:"), view.ContentTypeValue,
 		widget.NewLabel("Asset Type:"), view.AssetTypeValue,
 		widget.NewLabel("Referenced Assets:"), view.ReferencedAssetsCountValue,
 		widget.NewLabel("State:"), view.StateValue,
-		widget.NewLabel("Source:"), view.SourceValue,
+		widget.NewLabel("Image Source:"), view.SourceValue,
+		widget.NewLabel("Use Count:"), view.UseCountValue,
 		widget.NewLabel("Failure Reason:"), view.FailureReasonValue,
 	}
 	if includeFileRow {
 		view.FileValue = widget.NewLabel("-")
 		view.FileValue.Wrapping = fyne.TextWrapWord
-		formItems = append(formItems, widget.NewLabel("File:"), view.FileValue)
+		view.FileSHA256Value = widget.NewLabel("-")
+		view.FileSHA256Value.Wrapping = fyne.TextWrapWord
+		formItems = append(
+			formItems,
+			widget.NewLabel("File:"), view.FileValue,
+			widget.NewLabel("Downloaded SHA256:"), view.FileSHA256Value,
+		)
 	}
 	view.MetadataForm = container.New(layout.NewFormLayout(), formItems...)
 
@@ -336,12 +352,15 @@ func (view *assetView) Clear() {
 	view.DimensionsValue.SetText("-")
 	view.SelfSizeValue.SetText("-")
 	view.TotalSizeValue.SetText("-")
+	view.RecompressedPNGSizeValue.SetText("-")
+	view.RecompressedJPEGSizeValue.SetText("-")
 	view.FormatValue.SetText("-")
 	view.ContentTypeValue.SetText("-")
 	view.AssetTypeValue.SetText("-")
 	view.ReferencedAssetsCountValue.SetText("-")
 	view.StateValue.SetText("-")
 	view.SourceValue.SetText("-")
+	view.UseCountValue.SetText("-")
 	view.FailureReasonValue.SetText("-")
 	view.AssetDeliveryJSONValue.SetText("-")
 	view.ThumbnailJSONValue.SetText("-")
@@ -362,6 +381,9 @@ func (view *assetView) Clear() {
 	if view.FileValue != nil {
 		view.FileValue.SetText("-")
 	}
+	if view.FileSHA256Value != nil {
+		view.FileSHA256Value.SetText("-")
+	}
 	view.StateValue.Importance = widget.MediumImportance
 	view.SourceValue.Importance = widget.MediumImportance
 	view.StateValue.Refresh()
@@ -371,9 +393,12 @@ func (view *assetView) Clear() {
 	view.NoteLabel.SetText("")
 }
 
-func (view *assetView) SetData(assetID int64, filePath string, previewImageInfo *imageInfo, statsInfo *imageInfo, totalBytesSize int, sourceDescription string, stateDescription string, warningMessage string, assetDeliveryRawJSON string, thumbnailRawJSON string, economyRawJSON string, rustExtractorRawJSON string, referencedAssetIDs []int64, assetTypeID int, assetTypeName string) {
+func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string, useCount int, previewImageInfo *imageInfo, statsInfo *imageInfo, totalBytesSize int, sourceDescription string, stateDescription string, warningMessage string, assetDeliveryRawJSON string, thumbnailRawJSON string, economyRawJSON string, rustExtractorRawJSON string, referencedAssetIDs []int64, assetTypeID int, assetTypeName string) {
 	if statsInfo == nil {
 		statsInfo = previewImageInfo
+	}
+	if statsInfo == nil {
+		statsInfo = &imageInfo{}
 	}
 
 	view.currentAssetID = assetID
@@ -383,11 +408,21 @@ func (view *assetView) SetData(assetID int64, filePath string, previewImageInfo 
 	} else {
 		view.DimensionsValue.SetText("-")
 	}
-	view.SelfSizeValue.SetText(formatBytesSizeMB(statsInfo.BytesSize))
+	view.SelfSizeValue.SetText(formatSizeAuto(statsInfo.BytesSize))
 	if totalBytesSize <= 0 {
 		totalBytesSize = statsInfo.BytesSize
 	}
-	view.TotalSizeValue.SetText(formatBytesSizeMB(totalBytesSize))
+	view.TotalSizeValue.SetText(formatSizeAuto(totalBytesSize))
+	if statsInfo.RecompressedPNGByteSize > 0 {
+		view.RecompressedPNGSizeValue.SetText(formatSizeAuto(statsInfo.RecompressedPNGByteSize))
+	} else {
+		view.RecompressedPNGSizeValue.SetText("-")
+	}
+	if statsInfo.RecompressedJPEGByteSize > 0 {
+		view.RecompressedJPEGSizeValue.SetText(formatSizeAuto(statsInfo.RecompressedJPEGByteSize))
+	} else {
+		view.RecompressedJPEGSizeValue.SetText("-")
+	}
 	if strings.TrimSpace(statsInfo.Format) != "" {
 		view.FormatValue.SetText(statsInfo.Format)
 	} else {
@@ -430,11 +465,23 @@ func (view *assetView) SetData(assetID int64, filePath string, previewImageInfo 
 			view.FileValue.SetText(filePath)
 		}
 	}
+	if view.FileSHA256Value != nil {
+		if strings.TrimSpace(fileSHA256) == "" {
+			view.FileSHA256Value.SetText("-")
+		} else {
+			view.FileSHA256Value.SetText(fileSHA256)
+		}
+	}
 
 	view.StateValue.SetText(stateDescription)
 	view.StateValue.Importance = widget.MediumImportance
 	view.SourceValue.SetText(sourceDescription)
 	view.SourceValue.Importance = widget.MediumImportance
+	if useCount > 0 {
+		view.UseCountValue.SetText(strconv.Itoa(useCount))
+	} else {
+		view.UseCountValue.SetText("-")
+	}
 	view.NoteLabel.Hide()
 	view.NoteLabel.SetText("")
 
@@ -455,14 +502,32 @@ func (view *assetView) SetData(assetID int64, filePath string, previewImageInfo 
 	view.StateValue.Refresh()
 	view.SourceValue.Refresh()
 
-	view.PreviewImage.Resource = previewImageInfo.Resource
+	var previewResource fyne.Resource
+	if previewImageInfo != nil && previewImageInfo.Resource != nil {
+		previewResource = previewImageInfo.Resource
+	}
+	view.PreviewImage.File = ""
+	view.PreviewImage.Image = nil
+	view.PreviewImage.Resource = previewResource
 	view.PreviewImage.Refresh()
-	view.PreviewPlaceholder.Hide()
-	view.expandImageButton.Enable()
+	if previewResource != nil {
+		view.PreviewPlaceholder.Hide()
+		view.expandImageButton.Enable()
+	} else {
+		view.PreviewPlaceholder.SetText("No preview image available")
+		view.PreviewPlaceholder.Show()
+		view.expandImageButton.Disable()
+	}
 }
 
-func formatBytesSizeMB(bytesSize int) string {
-	return fmt.Sprintf("%.2f MB", float64(bytesSize)/megabyte)
+func formatSizeAuto(bytesSize int) string {
+	if bytesSize >= megabyte {
+		return fmt.Sprintf("%.2f MB", float64(bytesSize)/megabyte)
+	}
+	if bytesSize >= 1024 {
+		return fmt.Sprintf("%.2f KB", float64(bytesSize)/1024.0)
+	}
+	return fmt.Sprintf("%d bytes", bytesSize)
 }
 
 func (view *assetView) renderJSONDetails() {
@@ -653,7 +718,7 @@ func (view *assetView) SetHierarchy(rows []assetExplorerRow, selectedAssetID int
 
 		sizeText := "size unavailable"
 		if row.SelfBytesSize > 0 {
-			sizeText = formatBytesSizeMB(row.SelfBytesSize)
+			sizeText = formatSizeAuto(row.SelfBytesSize)
 		}
 		nodeIcon := getAssetTypeEmoji(row.AssetTypeID)
 		view.hierarchyEmojiByID[assetUID] = nodeIcon

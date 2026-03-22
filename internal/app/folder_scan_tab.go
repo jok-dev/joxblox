@@ -8,8 +8,8 @@ import (
 	nativeDialog "github.com/sqweek/dialog"
 )
 
-func newFolderScanTab(window fyne.Window) fyne.CanvasObject {
-	return newAssetScanTab(window, assetScanTabOptions{
+func newFolderScanTab(window fyne.Window) (fyne.CanvasObject, scanTabFileActionsProvider) {
+	content, fileActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:    "No folder selected.",
 		SelectButtonText:        "Select Folder",
 		ReadyStatusText:         "Ready to scan folder.",
@@ -20,6 +20,9 @@ func newFolderScanTab(window fyne.Window) fyne.CanvasObject {
 		SelectSource:            pickFolderSource,
 		ExtractHits:             scanFolderForAssetIDs,
 	})
+	return content, func() *scanTabFileActions {
+		return fileActions
+	}
 }
 
 func pickFolderSource(window fyne.Window, onSelected func(string), onError func(error)) {

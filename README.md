@@ -28,6 +28,19 @@ go run ./cmd/joxblox
 go build ./cmd/joxblox
 ```
 
+Build both projects from the repository root:
+
+```bash
+./build.sh
+```
+
+Build one target at a time:
+
+```bash
+./build.sh go
+./build.sh rust
+```
+
 ## macOS Dock icon
 
 When running via `go run .`, macOS may still show a generic runtime icon.

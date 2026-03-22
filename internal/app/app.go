@@ -32,9 +32,13 @@ func Run() {
 	window.Resize(fyne.NewSize(1100, 700))
 
 	singleAssetTab := container.NewTabItem("Single Asset", newSingleAssetTab(window))
-	folderScanTab := container.NewTabItem("Folder Scan", newFolderScanTab(window))
-	rbxlScanTab := container.NewTabItem("RBXL Scan", newRBXLScanTab(window))
-	tabs := container.NewAppTabs(singleAssetTab, folderScanTab, rbxlScanTab)
+	folderScanContent, folderScanFileActions := newFolderScanTab(window)
+	folderScanTab := container.NewTabItem("Folder Scan", folderScanContent)
+	rbxlScanContent, rbxlScanFileActions := newRBXLScanTab(window)
+	rbxlScanTab := container.NewTabItem("RBXL Scan", rbxlScanContent)
+	imageUploaderTab := container.NewTabItem("Image Generator", newImageUploaderTab(window))
+	tabs := container.NewAppTabs(singleAssetTab, folderScanTab, rbxlScanTab, imageUploaderTab)
+	bindMainFileMenu(window, tabs, folderScanFileActions, rbxlScanFileActions)
 	authPanel := newAuthPanel(window)
 	mainContent := container.NewBorder(nil, authPanel, nil, nil, tabs)
 	var setLayoutMode func(showConsole bool)
@@ -64,7 +68,7 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 	statusDotWrapper := container.NewCenter(container.NewGridWrap(fyne.NewSize(10, 10), statusDot))
 	cookieEntry := widget.NewPasswordEntry()
 	cookieEntry.SetPlaceHolder("Optional .ROBLOSECURITY cookie value")
-	rememberAuthCheck := widget.NewCheck("Remember Auth (secure OS keychain)", nil)
+	rememberAuthCheck := widget.NewCheck("Save to keychain", nil)
 	isAuthSaved := false
 	authValidationFailed := false
 	updateAuthIndicator := func() {
@@ -163,13 +167,19 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 		rememberAuthCheck.SetChecked(false)
 	})
 
-	labeledEntry := container.NewBorder(nil, nil, widget.NewLabel("Auth Cookie:"), nil, cookieEntry)
+	labeledEntry := container.NewBorder(
+		nil,
+		nil,
+		widget.NewLabel("Auth Cookie:"),
+		container.NewHBox(rememberAuthCheck),
+		cookieEntry,
+	)
 	leftControls := container.NewBorder(
 		nil,
 		nil,
 		nil,
 		container.NewHBox(helpButton, applyButton, clearButton),
-		container.NewVBox(labeledEntry, rememberAuthCheck),
+		labeledEntry,
 	)
 	rightStatus := container.NewHBox(statusDotWrapper, statusLabel)
 	footerRow := container.NewBorder(nil, nil, nil, rightStatus, leftControls)

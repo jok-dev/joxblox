@@ -2,11 +2,13 @@ package app
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
-	_ "image/jpeg"
-	_ "image/png"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"regexp"
@@ -19,10 +21,7 @@ import (
 )
 
 const (
-	requestTimeout        = 15 * time.Second
-	thumbnailURLTemplate  = "https://thumbnails.roblox.com/v1/assets?assetIds=%d&size=768x432&format=Png&isCircular=false"
-	assetDeliveryURLBase  = "https://assetdelivery.roblox.com/v1/assetId/%d"
-	economyDetailsURLBase = "https://economy.roblox.com/v2/assets/%d/details"
+	requestTimeout = 15 * time.Second
 )
 
 var assetIDPattern = regexp.MustCompile(`\d+`)
@@ -50,12 +49,15 @@ type thumbnailsData struct {
 }
 
 type imageInfo struct {
-	Resource    *fyne.StaticResource
-	Width       int
-	Height      int
-	BytesSize   int
-	Format      string
-	ContentType string
+	Resource                 *fyne.StaticResource
+	Width                    int
+	Height                   int
+	BytesSize                int
+	RecompressedPNGByteSize  int
+	RecompressedJPEGByteSize int
+	Format                   string
+	ContentType              string
+	SHA256                   string
 }
 
 type childAssetInfo struct {
@@ -168,7 +170,7 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 	referencedAssetIDs := []int64{}
 	rustExtractorRawJSON := ""
 	if assetDeliveryErr == nil && deliveryInfo != nil {
-		deliveryFileInfo, deliveryFileErr := fetchAssetFileInfo(deliveryInfo.Location, assetID)
+		deliveryFileInfo, deliveryFileErr := fetchAssetFileInfo(deliveryInfo.Location, assetID, true)
 		if deliveryFileErr != nil {
 			if isRustExtractorFailure(deliveryFileErr) {
 				return nil, deliveryFileErr
@@ -211,15 +213,54 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 		assetDeliveryErrText = assetDeliveryErr.Error()
 	}
 	if thumbnailErr != nil {
+		if statsInfo != nil {
+			return buildNoThumbnailPreviewResult(
+				statsInfo,
+				referencedAssetIDs,
+				assetDeliveryRawJSON,
+				thumbnailRawJSON,
+				economyRawJSON,
+				rustExtractorRawJSON,
+				assetTypeID,
+				assetTypeName,
+				fmt.Sprintf("Thumbnail lookup failed (%s). AssetDelivery details are shown without a preview image.", thumbnailErr.Error()),
+			), nil
+		}
 		return nil, fmt.Errorf("AssetDelivery failed (%s) and thumbnail lookup failed (%s)", assetDeliveryErrText, thumbnailErr.Error())
 	}
 
 	if thumbnailInfo.ImageURL == "" {
+		if statsInfo != nil {
+			return buildNoThumbnailPreviewResult(
+				statsInfo,
+				referencedAssetIDs,
+				assetDeliveryRawJSON,
+				thumbnailRawJSON,
+				economyRawJSON,
+				rustExtractorRawJSON,
+				assetTypeID,
+				assetTypeName,
+				fmt.Sprintf("Thumbnail image URL is empty (state=%s). AssetDelivery details are shown without a preview image.", thumbnailInfo.State),
+			), nil
+		}
 		return nil, fmt.Errorf("No image available. State: %s. AssetDelivery error: %s", thumbnailInfo.State, assetDeliveryErrText)
 	}
 
-	thumbnailImageInfo, thumbnailImageErr := fetchImageInfo(thumbnailInfo.ImageURL, assetID)
+	thumbnailImageInfo, thumbnailImageErr := fetchImageInfo(thumbnailInfo.ImageURL, assetID, true)
 	if thumbnailImageErr != nil {
+		if statsInfo != nil {
+			return buildNoThumbnailPreviewResult(
+				statsInfo,
+				referencedAssetIDs,
+				assetDeliveryRawJSON,
+				thumbnailRawJSON,
+				economyRawJSON,
+				rustExtractorRawJSON,
+				assetTypeID,
+				assetTypeName,
+				fmt.Sprintf("Thumbnail download failed (%s). AssetDelivery details are shown without a preview image.", thumbnailImageErr.Error()),
+			), nil
+		}
 		return nil, fmt.Errorf("Thumbnail download failed (%s). AssetDelivery error: %s", thumbnailImageErr.Error(), assetDeliveryErrText)
 	}
 
@@ -249,24 +290,54 @@ func isRustExtractorFailure(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "rust extractor failed")
 }
 
-func fetchThumbnailInfo(assetID int64) (*thumbnailInfo, string, error) {
-	urlString := fmt.Sprintf(thumbnailURLTemplate, assetID)
+func buildNoThumbnailPreviewResult(
+	statsInfo *imageInfo,
+	referencedAssetIDs []int64,
+	assetDeliveryRawJSON string,
+	thumbnailRawJSON string,
+	economyRawJSON string,
+	rustExtractorRawJSON string,
+	assetTypeID int,
+	assetTypeName string,
+	warningMessage string,
+) *assetPreviewResult {
+	safeStatsInfo := ensureImageInfo(statsInfo)
+	totalBytesSize, childAssets := computeChildAssetsAndTotal(safeStatsInfo.BytesSize, referencedAssetIDs)
+	return &assetPreviewResult{
+		Image:              &imageInfo{},
+		Stats:              safeStatsInfo,
+		ReferencedAssetIDs: referencedAssetIDs,
+		ChildAssets:        childAssets,
+		TotalBytesSize:     totalBytesSize,
+		Source:             sourceNoThumbnail,
+		State:              stateUnavailable,
+		WarningMessage:     warningMessage,
+		AssetDeliveryJSON:  assetDeliveryRawJSON,
+		ThumbnailJSON:      thumbnailRawJSON,
+		EconomyJSON:        economyRawJSON,
+		RustExtractorJSON:  rustExtractorRawJSON,
+		AssetTypeID:        assetTypeID,
+		AssetTypeName:      assetTypeName,
+	}
+}
 
-	response, err := doAuthenticatedGet(urlString)
+func fetchThumbnailInfo(assetID int64) (*thumbnailInfo, string, error) {
+	response, err := doRobloxThumbnailGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, "", err
 	}
 	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("HTTP %d", response.StatusCode)
-	}
-
 	responseBytes, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, "", err
 	}
 	rawResponse := string(responseBytes)
+	if response.StatusCode != http.StatusOK {
+		if response.StatusCode == http.StatusTooManyRequests {
+			return nil, rawResponse, fmt.Errorf("HTTP 429 (too many requests for thumbnails)")
+		}
+		return nil, rawResponse, fmt.Errorf("HTTP %d", response.StatusCode)
+	}
 
 	var apiResponse thumbnailsResponse
 	if err := json.Unmarshal(responseBytes, &apiResponse); err != nil {
@@ -286,8 +357,7 @@ func fetchThumbnailInfo(assetID int64) (*thumbnailInfo, string, error) {
 }
 
 func fetchAssetDeliveryInfo(assetID int64) (*assetDeliveryInfo, error) {
-	urlString := fmt.Sprintf(assetDeliveryURLBase, assetID)
-	response, err := doAuthenticatedGet(urlString)
+	response, err := doRobloxAssetDeliveryGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -349,8 +419,8 @@ func extractAssetDeliveryFailureReason(rawResponse string) string {
 	return ""
 }
 
-func fetchImageInfo(imageURL string, assetID int64) (*imageInfo, error) {
-	response, err := doAuthenticatedGet(imageURL)
+func fetchImageInfo(imageURL string, assetID int64, includeHash bool) (*imageInfo, error) {
+	response, err := doRobloxAuthenticatedGet(imageURL, requestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -372,18 +442,30 @@ func fetchImageInfo(imageURL string, assetID int64) (*imageInfo, error) {
 	contentType := strings.Split(response.Header.Get("Content-Type"), ";")[0]
 	resourceName := fmt.Sprintf("asset_%d.%s", assetID, imageFormat)
 
+	sha256Value := ""
+	if includeHash {
+		sha256Value = computeSHA256Hex(imageBytes)
+	}
+	recompressedPNGByteSize, recompressedJPEGByteSize, recompressErr := computeBestCompressedImageSizes(imageBytes)
+	if recompressErr != nil {
+		recompressedPNGByteSize = 0
+		recompressedJPEGByteSize = 0
+	}
 	return &imageInfo{
-		Resource:    fyne.NewStaticResource(resourceName, imageBytes),
-		Width:       imageConfig.Width,
-		Height:      imageConfig.Height,
-		BytesSize:   len(imageBytes),
-		Format:      strings.ToUpper(imageFormat),
-		ContentType: contentType,
+		Resource:                 fyne.NewStaticResource(resourceName, imageBytes),
+		Width:                    imageConfig.Width,
+		Height:                   imageConfig.Height,
+		BytesSize:                len(imageBytes),
+		RecompressedPNGByteSize:  recompressedPNGByteSize,
+		RecompressedJPEGByteSize: recompressedJPEGByteSize,
+		Format:                   strings.ToUpper(imageFormat),
+		ContentType:              contentType,
+		SHA256:                   sha256Value,
 	}, nil
 }
 
-func fetchAssetFileInfo(fileURL string, assetID int64) (*assetFileInfo, error) {
-	response, err := doAuthenticatedGet(fileURL)
+func fetchAssetFileInfo(fileURL string, assetID int64, includeHash bool) (*assetFileInfo, error) {
+	response, err := doRobloxAuthenticatedGet(fileURL, requestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -399,13 +481,20 @@ func fetchAssetFileInfo(fileURL string, assetID int64) (*assetFileInfo, error) {
 	}
 
 	contentType := strings.Split(response.Header.Get("Content-Type"), ";")[0]
+	sha256Value := ""
+	if includeHash {
+		sha256Value = computeSHA256Hex(fileBytes)
+	}
 	info := &imageInfo{
-		Resource:    nil,
-		Width:       0,
-		Height:      0,
-		BytesSize:   len(fileBytes),
-		Format:      inferFormatFromContentType(contentType),
-		ContentType: contentType,
+		Resource:                 nil,
+		Width:                    0,
+		Height:                   0,
+		BytesSize:                len(fileBytes),
+		RecompressedPNGByteSize:  0,
+		RecompressedJPEGByteSize: 0,
+		Format:                   inferFormatFromContentType(contentType),
+		ContentType:              contentType,
+		SHA256:                   sha256Value,
 	}
 
 	imageConfig, imageFormat, decodeErr := image.DecodeConfig(bytes.NewReader(fileBytes))
@@ -427,6 +516,11 @@ func fetchAssetFileInfo(fileURL string, assetID int64) (*assetFileInfo, error) {
 	info.Width = imageConfig.Width
 	info.Height = imageConfig.Height
 	info.Format = strings.ToUpper(imageFormat)
+	recompressedPNGByteSize, recompressedJPEGByteSize, recompressErr := computeBestCompressedImageSizes(fileBytes)
+	if recompressErr == nil {
+		info.RecompressedPNGByteSize = recompressedPNGByteSize
+		info.RecompressedJPEGByteSize = recompressedJPEGByteSize
+	}
 	referencedAssetIDs, rustExtractorJSON, extractErr := extractReferencedAssetIDsFromBytes(fileBytes)
 	if extractErr != nil {
 		return nil, extractErr
@@ -437,21 +531,6 @@ func fetchAssetFileInfo(fileURL string, assetID int64) (*assetFileInfo, error) {
 		ReferencedAssetIDs: referencedAssetIDs,
 		RustExtractorJSON:  rustExtractorJSON,
 	}, nil
-}
-
-func doAuthenticatedGet(urlString string) (*http.Response, error) {
-	httpClient := &http.Client{Timeout: requestTimeout}
-	request, err := http.NewRequest(http.MethodGet, urlString, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	cookieHeader := GetRoblosecurityCookieHeader()
-	if cookieHeader != "" {
-		request.Header.Set("Cookie", cookieHeader)
-	}
-
-	return httpClient.Do(request)
 }
 
 func buildFallbackWarningText(warningReason string) string {
@@ -466,8 +545,7 @@ func buildFallbackWarningText(warningReason string) string {
 }
 
 func fetchAssetDetailsFromEconomy(assetID int64) (*economyAssetDetailsInfo, error) {
-	urlString := fmt.Sprintf(economyDetailsURLBase, assetID)
-	response, err := doAuthenticatedGet(urlString)
+	response, err := doRobloxEconomyDetailsGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -508,6 +586,35 @@ func chooseStatsInfo(preferredStats *imageInfo, fallbackStats *imageInfo) *image
 		return preferredStats
 	}
 	return fallbackStats
+}
+
+func ensureImageInfo(info *imageInfo) *imageInfo {
+	if info != nil {
+		return info
+	}
+	return &imageInfo{}
+}
+
+func computeSHA256Hex(payload []byte) string {
+	hashBytes := sha256.Sum256(payload)
+	return hex.EncodeToString(hashBytes[:])
+}
+
+func computeBestCompressedImageSizes(imageBytes []byte) (int, int, error) {
+	decodedImage, _, decodeErr := image.Decode(bytes.NewReader(imageBytes))
+	if decodeErr != nil {
+		return 0, 0, decodeErr
+	}
+	var recompressedBuffer bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.BestCompression}
+	if encodeErr := encoder.Encode(&recompressedBuffer, decodedImage); encodeErr != nil {
+		return 0, 0, encodeErr
+	}
+	var recompressedJPEGBuffer bytes.Buffer
+	if encodeErr := jpeg.Encode(&recompressedJPEGBuffer, decodedImage, &jpeg.Options{Quality: 1}); encodeErr != nil {
+		return 0, 0, encodeErr
+	}
+	return recompressedBuffer.Len(), recompressedJPEGBuffer.Len(), nil
 }
 
 func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64) (int, []childAssetInfo) {
@@ -555,7 +662,7 @@ func getAssetSelfInfo(assetID int64) (assetSelfInfo, error) {
 		return selfInfo, fmt.Errorf("asset delivery location unavailable")
 	}
 
-	fileInfo, fileErr := fetchAssetFileInfo(assetDeliveryInfo.Location, assetID)
+	fileInfo, fileErr := fetchAssetFileInfo(assetDeliveryInfo.Location, assetID, false)
 	if fileErr != nil || fileInfo == nil || fileInfo.Info == nil {
 		if fileErr != nil {
 			return selfInfo, fileErr

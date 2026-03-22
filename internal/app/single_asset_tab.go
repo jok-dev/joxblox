@@ -26,9 +26,17 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	var explorerState *assetExplorerState
 	var renderPreview func(selectedAssetID int64, previewResult *assetPreviewResult)
 	renderPreview = func(selectedAssetID int64, previewResult *assetPreviewResult) {
+		downloadedSHA256 := ""
+		if previewResult.Stats != nil && strings.TrimSpace(previewResult.Stats.SHA256) != "" {
+			downloadedSHA256 = previewResult.Stats.SHA256
+		} else if previewResult.Image != nil {
+			downloadedSHA256 = previewResult.Image.SHA256
+		}
 		assetDetailsView.SetData(
 			selectedAssetID,
 			"",
+			downloadedSHA256,
+			0,
 			previewResult.Image,
 			previewResult.Stats,
 			previewResult.TotalBytesSize,

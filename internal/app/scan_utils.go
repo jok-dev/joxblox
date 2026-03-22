@@ -26,6 +26,7 @@ var (
 type scanHit struct {
 	AssetID  int64
 	FilePath string
+	UseCount int
 }
 
 func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
@@ -70,6 +71,7 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 			results = append(results, scanHit{
 				AssetID:  assetID,
 				FilePath: path,
+				UseCount: 1,
 			})
 			if len(results) >= limit {
 				return errScanLimitReached

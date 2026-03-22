@@ -7,27 +7,31 @@ import (
 )
 
 type scanResult struct {
-	AssetID            int64
-	FilePath           string
-	Source             string
-	State              string
-	Width              int
-	Height             int
-	BytesSize          int
-	Format             string
-	ContentType        string
-	AssetTypeID        int
-	AssetTypeName      string
-	Warning            bool
-	WarningCause       string
-	AssetDeliveryJSON  string
-	ThumbnailJSON      string
-	EconomyJSON        string
-	RustExtractorJSON  string
-	ReferencedAssetIDs []int64
-	ChildAssets        []childAssetInfo
-	TotalBytesSize     int
-	Resource           *fyne.StaticResource
+	AssetID              int64
+	UseCount             int
+	FilePath             string
+	FileSHA256           string
+	Source               string
+	State                string
+	Width                int
+	Height               int
+	BytesSize            int
+	RecompressedPNGSize  int
+	RecompressedJPEGSize int
+	Format               string
+	ContentType          string
+	AssetTypeID          int
+	AssetTypeName        string
+	Warning              bool
+	WarningCause         string
+	AssetDeliveryJSON    string
+	ThumbnailJSON        string
+	EconomyJSON          string
+	RustExtractorJSON    string
+	ReferencedAssetIDs   []int64
+	ChildAssets          []childAssetInfo
+	TotalBytesSize       int
+	Resource             *fyne.StaticResource
 }
 
 func loadAssetPreview(assetID int64) (*assetPreviewResult, error) {
@@ -43,30 +47,41 @@ func loadScanResult(hit scanHit) (scanResult, error) {
 	if statsInfo == nil {
 		statsInfo = previewResult.Image
 	}
+	if statsInfo == nil {
+		statsInfo = &imageInfo{}
+	}
+	resource := (*fyne.StaticResource)(nil)
+	if previewResult.Image != nil {
+		resource = previewResult.Image.Resource
+	}
 
 	warning := isThumbnailFallback(previewResult.Source) && !isCompletedState(previewResult.State)
 	return scanResult{
-		AssetID:            hit.AssetID,
-		FilePath:           hit.FilePath,
-		Source:             previewResult.Source,
-		State:              previewResult.State,
-		Width:              statsInfo.Width,
-		Height:             statsInfo.Height,
-		BytesSize:          statsInfo.BytesSize,
-		Format:             statsInfo.Format,
-		ContentType:        statsInfo.ContentType,
-		AssetTypeID:        previewResult.AssetTypeID,
-		AssetTypeName:      previewResult.AssetTypeName,
-		Warning:            warning,
-		WarningCause:       previewResult.WarningMessage,
-		AssetDeliveryJSON:  previewResult.AssetDeliveryJSON,
-		ThumbnailJSON:      previewResult.ThumbnailJSON,
-		EconomyJSON:        previewResult.EconomyJSON,
-		RustExtractorJSON:  previewResult.RustExtractorJSON,
-		ReferencedAssetIDs: previewResult.ReferencedAssetIDs,
-		ChildAssets:        previewResult.ChildAssets,
-		TotalBytesSize:     previewResult.TotalBytesSize,
-		Resource:           previewResult.Image.Resource,
+		AssetID:              hit.AssetID,
+		UseCount:             hit.UseCount,
+		FilePath:             hit.FilePath,
+		FileSHA256:           statsInfo.SHA256,
+		Source:               previewResult.Source,
+		State:                previewResult.State,
+		Width:                statsInfo.Width,
+		Height:               statsInfo.Height,
+		BytesSize:            statsInfo.BytesSize,
+		RecompressedPNGSize:  statsInfo.RecompressedPNGByteSize,
+		RecompressedJPEGSize: statsInfo.RecompressedJPEGByteSize,
+		Format:               statsInfo.Format,
+		ContentType:          statsInfo.ContentType,
+		AssetTypeID:          previewResult.AssetTypeID,
+		AssetTypeName:        previewResult.AssetTypeName,
+		Warning:              warning,
+		WarningCause:         previewResult.WarningMessage,
+		AssetDeliveryJSON:    previewResult.AssetDeliveryJSON,
+		ThumbnailJSON:        previewResult.ThumbnailJSON,
+		EconomyJSON:          previewResult.EconomyJSON,
+		RustExtractorJSON:    previewResult.RustExtractorJSON,
+		ReferencedAssetIDs:   previewResult.ReferencedAssetIDs,
+		ChildAssets:          previewResult.ChildAssets,
+		TotalBytesSize:       previewResult.TotalBytesSize,
+		Resource:             resource,
 	}, nil
 }
 
@@ -74,6 +89,8 @@ func compareScanResults(leftResult scanResult, rightResult scanResult, sortField
 	switch sortField {
 	case "Asset ID":
 		return compareInt64(leftResult.AssetID, rightResult.AssetID)
+	case "Use Count":
+		return compareInt(leftResult.UseCount, rightResult.UseCount)
 	case "Width":
 		return compareInt(leftResult.Width, rightResult.Width)
 	case "Height":
@@ -92,6 +109,8 @@ func compareScanResults(leftResult scanResult, rightResult scanResult, sortField
 		return strings.Compare(leftResult.State, rightResult.State)
 	case "Source":
 		return strings.Compare(leftResult.Source, rightResult.Source)
+	case "Asset SHA256":
+		return strings.Compare(leftResult.FileSHA256, rightResult.FileSHA256)
 	default:
 		return compareInt(leftResult.BytesSize, rightResult.BytesSize)
 	}

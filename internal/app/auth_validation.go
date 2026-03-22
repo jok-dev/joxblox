@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	robloxAuthenticatedUserURL = "https://users.roblox.com/v1/users/authenticated"
-	authValidationTimeout      = 10 * time.Second
+	authValidationTimeout = 10 * time.Second
 )
 
 type authenticatedUserResponse struct {
@@ -23,14 +22,8 @@ func validateRoblosecurityCookie(rawValue string) error {
 		return fmt.Errorf("cookie is empty")
 	}
 
-	httpClient := &http.Client{Timeout: authValidationTimeout}
-	request, err := http.NewRequest(http.MethodGet, robloxAuthenticatedUserURL, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Cookie", fmt.Sprintf(".ROBLOSECURITY=%s", normalizedValue))
-
-	response, err := httpClient.Do(request)
+	cookieHeader := fmt.Sprintf(".ROBLOSECURITY=%s", normalizedValue)
+	response, err := doRobloxAuthenticatedUserGet(cookieHeader, authValidationTimeout)
 	if err != nil {
 		return err
 	}

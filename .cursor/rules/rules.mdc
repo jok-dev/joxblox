@@ -31,3 +31,4 @@ Tip: check ./latest.log for latest logs of last run
 - Format code consistently before finishing changes.
 - Verify build/test passes after substantive edits.
 - Preserve existing behavior unless a change is intentional and documented.
+- Don't do stuff on the ui thread if it's gonna take a while

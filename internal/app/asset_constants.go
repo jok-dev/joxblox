@@ -8,7 +8,9 @@ import (
 const (
 	sourceAssetDeliveryInGame = "AssetDelivery (In-Game)"
 	sourceThumbnailsFallback  = "Thumbnails API (Fallback)"
+	sourceNoThumbnail         = "No Thumbnail (Unavailable)"
 	stateCompleted            = "Completed"
+	stateUnavailable          = "Unavailable"
 )
 
 type assetTypeInfo struct {
