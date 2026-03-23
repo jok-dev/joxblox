@@ -30,7 +30,7 @@ func Run() {
 	guiApp := app.New()
 	appIcon := fyne.NewStaticResource("app_icon.svg", appIconSVG)
 	guiApp.SetIcon(appIcon)
-	window := guiApp.NewWindow("Joxblox")
+	window := guiApp.NewWindow(appDisplayName)
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1350, 900))
 

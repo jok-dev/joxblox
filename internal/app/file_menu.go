@@ -47,7 +47,7 @@ func bindMainFileMenu(
 			selectScanContext,
 			allScanFileActions,
 		))
-		window.SetMainMenu(fyne.NewMainMenu(fileMenu))
+		window.SetMainMenu(fyne.NewMainMenu(fileMenu, buildHelpMenu(window)))
 	}
 
 	tabs.OnSelected = func(selectedTab *container.TabItem) {

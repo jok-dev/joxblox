@@ -15,6 +15,7 @@
 - Save and load scan results as JSON
 - Drag and drop results `.json` files onto the app window to import them
 - Generate PNG images in the `Image Generator` tab for manual Roblox upload workflows
+- View embedded changelog and about/license information from the Help menu
 - Use optional `.ROBLOSECURITY` authentication for gated AssetDelivery requests
 - Store `.ROBLOSECURITY` securely in the OS credential store/keychain
 
@@ -88,6 +89,14 @@ The `File` menu currently includes:
 - `Clear All Results` to clear every loaded scan table after confirmation
 - `Recent Files` for quick reload of previously imported results
 
+## Help Menu
+
+The `Help` menu currently includes:
+
+- `Changelog` to view the embedded project changelog
+- `About` to view the app version, author, source repository, and license summary
+- a license viewer accessible from the About dialog
+
 ## Authentication
 
 Joxblox supports optional `.ROBLOSECURITY` auth for requests that need a signed-in Roblox session.
@@ -103,6 +112,10 @@ Treat `.ROBLOSECURITY` like a password. Do not share it.
 
 - Go `1.23+`
 - Rust toolchain if you want to build the `.rbxl` extractor from source
+
+## License
+
+This project is licensed under the `GNU General Public License v3.0`. The full license text is available in [`LICENSE.md`](LICENSE.md) and is also viewable from the app UI.
 
 ## Run
 
@@ -134,9 +147,21 @@ Build one target at a time:
 ./build.sh rust
 ```
 
+## Releases
+
+Tagged pushes like `v1.0.0` now build per-platform single-binary releases in GitHub Actions and publish them as a GitHub release.
+
+Each release binary includes:
+
+- the `joxblox` app itself
+- the embedded changelog text
+- the embedded GPL v3 license text
+- the embedded RBXL extractor payload used for `.rbxl` scanning at runtime
+
 ## Notes
 
 - `.rbxl` scanning depends on the Rust helper under `tools/rbxl-id-extractor`
+- release builds extract the bundled RBXL helper to a temporary location when `.rbxl` scanning is used
 - Results JSON can represent either a single scan table or the full multi-context scan workspace
 - The app writes debug output to `latest.log`
 

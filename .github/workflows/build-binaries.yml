@@ -1,10 +1,13 @@
-name: Build Joxblox Binaries
+name: Build And Release Joxblox
 
 on:
   workflow_dispatch:
   push:
     tags:
       - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -33,23 +36,62 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build binary
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
         id: build
         shell: bash
         env:
           GOOS: ${{ matrix.goos }}
-          BINARY_NAME: joxblox
+          APP_NAME: joxblox
+          EXTRACTOR_NAME: rbxl-id-extractor
+          VERSION_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          mkdir -p dist
-          GOARCH="$(go env GOARCH)"
-          OUTPUT_PATH="dist/${BINARY_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          go build -v -trimpath -o "$OUTPUT_PATH" ./cmd/joxblox
-          echo "output_path=$OUTPUT_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Upload binary artifact
+          GOARCH="$(go env GOARCH)"
+          SAFE_VERSION_NAME="${VERSION_NAME//\//-}"
+          EXTRACTOR_BINARY_NAME="${EXTRACTOR_NAME}${{ matrix.ext }}"
+          OUTPUT_NAME="${APP_NAME}-${SAFE_VERSION_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          OUTPUT_PATH="dist/${OUTPUT_NAME}"
+          RELEASE_ASSETS_DIR="internal/app/release-assets"
+
+          mkdir -p dist "${RELEASE_ASSETS_DIR}"
+
+          cargo build --release --manifest-path tools/rbxl-id-extractor/Cargo.toml
+          cp "tools/rbxl-id-extractor/target/release/${EXTRACTOR_BINARY_NAME}" "${RELEASE_ASSETS_DIR}/rbxl-id-extractor.bin"
+          cp CHANGELOG.md "${RELEASE_ASSETS_DIR}/CHANGELOG.md"
+          cp LICENSE.md "${RELEASE_ASSETS_DIR}/LICENSE.md"
+
+          go build -v -tags release -trimpath -ldflags "-X joxblox/internal/app.appVersion=${VERSION_NAME}" -o "${OUTPUT_PATH}" ./cmd/joxblox
+          echo "output_path=${OUTPUT_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.goos }}-binary
+          name: release-${{ matrix.goos }}
           path: ${{ steps.build.outputs.output_path }}
           if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Joxblox ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true

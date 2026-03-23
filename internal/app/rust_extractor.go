@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,9 +13,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const rustExtractorDefaultLimit = 5_000
+
+var (
+	errBundledRustExtractorUnavailable = errors.New("bundled rust extractor unavailable")
+	bundledRustExtractorPathOnce       sync.Once
+	bundledRustExtractorPath           string
+	bundledRustExtractorPathErr        error
+)
 
 type rustExtractorResult struct {
 	ID           int64  `json:"id"`
@@ -41,17 +50,6 @@ func extractAssetIDsWithRustFromFileWithCounts(filePath string, assetTypeID int,
 		getAssetTypeName(assetTypeID),
 		assetTypeID,
 	)
-	repoRootPath, rootErr := getRepositoryRootPath()
-	if rootErr != nil {
-		logDebugf("Rust extractor skipped (repo root unavailable): %s", rootErr.Error())
-		return nil, map[int64]int{}, []rustExtractorResult{}, "", nil
-	}
-
-	toolDirectoryPath := filepath.Join(repoRootPath, "tools", "rbxl-id-extractor")
-	binaryPath := filepath.Join(toolDirectoryPath, "target", "release", "rbxl-id-extractor")
-	cargoHomePath := filepath.Join(os.TempDir(), "joxblox-cargo-home")
-	targetPath := filepath.Join(toolDirectoryPath, "target")
-	cargoManifestPath := filepath.Join(toolDirectoryPath, "Cargo.toml")
 
 	commandContext, cancelCommand := context.WithCancel(context.Background())
 	defer cancelCommand()
@@ -64,21 +62,39 @@ func extractAssetIDsWithRustFromFileWithCounts(filePath string, assetTypeID int,
 	}()
 
 	commandArgs := []string{}
-	commandName := binaryPath
-	if _, binaryErr := os.Stat(binaryPath); binaryErr == nil {
+	commandName := ""
+	if bundledBinaryPath, bundledErr := prepareBundledRustExtractorBinary(); bundledErr == nil {
+		commandName = bundledBinaryPath
+		commandArgs = []string{filePath, strconv.Itoa(limit)}
+		logDebugf("Using bundled Rust extractor binary: %s", bundledBinaryPath)
+	} else if !errors.Is(bundledErr, errBundledRustExtractorUnavailable) {
+		logDebugf("Bundled Rust extractor prepare failed: %s", bundledErr.Error())
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", bundledErr
+	} else if binaryPath, found := findRustExtractorBinaryPath(); found {
+		commandName = binaryPath
 		commandArgs = []string{filePath, strconv.Itoa(limit)}
 		logDebugf("Using Rust extractor binary: %s", binaryPath)
 	} else {
+		toolDirectoryPath, cargoManifestPath, found := findRustExtractorCargoManifestPath()
+		if !found {
+			logDebugf("Rust extractor unavailable: no bundled binary or Cargo manifest found")
+			return nil, map[int64]int{}, []rustExtractorResult{}, "", fmt.Errorf("Rust extractor unavailable: bundled binary not found")
+		}
 		commandName = "cargo"
 		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", filePath, strconv.Itoa(limit)}
-		logDebugf("Rust extractor binary missing, using cargo run")
+		logDebugf("Rust extractor binary missing, using cargo run from %s", toolDirectoryPath)
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
-	command.Env = append(os.Environ(),
-		fmt.Sprintf("CARGO_HOME=%s", cargoHomePath),
-		fmt.Sprintf("CARGO_TARGET_DIR=%s", targetPath),
-	)
+	command.Env = os.Environ()
+	if toolDirectoryPath, _, found := findRustExtractorCargoManifestPath(); found {
+		cargoHomePath := filepath.Join(os.TempDir(), "joxblox-cargo-home")
+		targetPath := filepath.Join(toolDirectoryPath, "target")
+		command.Env = append(command.Env,
+			fmt.Sprintf("CARGO_HOME=%s", cargoHomePath),
+			fmt.Sprintf("CARGO_TARGET_DIR=%s", targetPath),
+		)
+	}
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
 	command.Stdout = &stdoutBuffer
@@ -152,6 +168,84 @@ func getRepositoryRootPath() (string, error) {
 	internalDirectoryPath := filepath.Dir(appDirectoryPath)
 	repositoryRootPath := filepath.Dir(internalDirectoryPath)
 	return repositoryRootPath, nil
+}
+
+func rustExtractorBinaryFileName() string {
+	fileName := "rbxl-id-extractor"
+	if runtime.GOOS == "windows" {
+		fileName += ".exe"
+	}
+	return fileName
+}
+
+func rustExtractorRelativeBinaryPath() string {
+	return filepath.Join("tools", "rbxl-id-extractor", "target", "release", rustExtractorBinaryFileName())
+}
+
+func prepareBundledRustExtractorBinary() (string, error) {
+	bundledExtractorBytes := bundledRustExtractorBinary()
+	if len(bundledExtractorBytes) == 0 {
+		return "", errBundledRustExtractorUnavailable
+	}
+
+	bundledRustExtractorPathOnce.Do(func() {
+		tempDirectoryPath, tempDirErr := os.MkdirTemp("", "joxblox-rbxl-id-extractor-*")
+		if tempDirErr != nil {
+			bundledRustExtractorPathErr = fmt.Errorf("failed creating bundled rust extractor temp directory: %w", tempDirErr)
+			return
+		}
+		extractorPath := filepath.Join(tempDirectoryPath, rustExtractorBinaryFileName())
+		if writeErr := os.WriteFile(extractorPath, bundledExtractorBytes, 0755); writeErr != nil {
+			bundledRustExtractorPathErr = fmt.Errorf("failed writing bundled rust extractor: %w", writeErr)
+			return
+		}
+		if runtime.GOOS != "windows" {
+			if chmodErr := os.Chmod(extractorPath, 0755); chmodErr != nil {
+				bundledRustExtractorPathErr = fmt.Errorf("failed marking bundled rust extractor executable: %w", chmodErr)
+				return
+			}
+		}
+		bundledRustExtractorPath = extractorPath
+	})
+
+	if bundledRustExtractorPathErr != nil {
+		return "", bundledRustExtractorPathErr
+	}
+	if strings.TrimSpace(bundledRustExtractorPath) == "" {
+		return "", errBundledRustExtractorUnavailable
+	}
+	return bundledRustExtractorPath, nil
+}
+
+func findRustExtractorBinaryPath() (string, bool) {
+	candidatePaths := make([]string, 0, 4)
+	if executablePath, err := os.Executable(); err == nil && strings.TrimSpace(executablePath) != "" {
+		executableDirectory := filepath.Dir(executablePath)
+		candidatePaths = append(candidatePaths,
+			filepath.Join(executableDirectory, rustExtractorRelativeBinaryPath()),
+			filepath.Join(executableDirectory, rustExtractorBinaryFileName()),
+		)
+	}
+	if repositoryRootPath, err := getRepositoryRootPath(); err == nil && strings.TrimSpace(repositoryRootPath) != "" {
+		candidatePaths = append(candidatePaths, filepath.Join(repositoryRootPath, rustExtractorRelativeBinaryPath()))
+	}
+	for _, candidatePath := range candidatePaths {
+		if _, err := os.Stat(candidatePath); err == nil {
+			return candidatePath, true
+		}
+	}
+	return "", false
+}
+
+func findRustExtractorCargoManifestPath() (string, string, bool) {
+	if repositoryRootPath, err := getRepositoryRootPath(); err == nil && strings.TrimSpace(repositoryRootPath) != "" {
+		toolDirectoryPath := filepath.Join(repositoryRootPath, "tools", "rbxl-id-extractor")
+		cargoManifestPath := filepath.Join(toolDirectoryPath, "Cargo.toml")
+		if _, err := os.Stat(cargoManifestPath); err == nil {
+			return toolDirectoryPath, cargoManifestPath, true
+		}
+	}
+	return "", "", false
 }
 
 func extractAssetIDsFromRustDOMJSON(domJSON string, limit int) ([]int64, map[int64]int, []rustExtractorResult) {
