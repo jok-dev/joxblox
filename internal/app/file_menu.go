@@ -19,21 +19,7 @@ func bindMainFileMenu(
 	allScanFileActions []scanTabFileActionsProvider,
 	selectScanContext func(string),
 ) {
-	activeFileActionsProvider := scanTabFileActionsProvider(nil)
 	var rebuildMainMenu func()
-
-	runFileAction := func(refreshMenuAfterAction bool, action func(fileActions *scanTabFileActions)) {
-		fileActions := getActiveFileActions(activeFileActionsProvider)
-		if fileActions == nil {
-			showFileActionsUnavailableDialog(window)
-			return
-		}
-
-		action(fileActions)
-		if refreshMenuAfterAction {
-			rebuildMainMenu()
-		}
-	}
 
 	rebuildMainMenu = func() {
 		fileMenu := fyne.NewMenu(
@@ -66,16 +52,13 @@ func bindMainFileMenu(
 
 	tabs.OnSelected = func(selectedTab *container.TabItem) {
 		if selectedTab == nil {
-			activeFileActionsProvider = nil
 			rebuildMainMenu()
 			return
 		}
 
 		switch selectedTab.Text {
-		case tabTitleScan:
-			activeFileActionsProvider = scanFileActions
 		default:
-			activeFileActionsProvider = nil
+			_ = scanFileActions
 		}
 		rebuildMainMenu()
 	}

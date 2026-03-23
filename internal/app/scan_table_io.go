@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -408,4 +407,3 @@ func mapExportRowToScanResult(row scanTableExportRow) (scanResult, error) {
 		Resource:             importedResource,
 	}, nil
 }
-

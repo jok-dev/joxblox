@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -1317,10 +1316,10 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		container.NewBorder(statusLabel, nil, nil, nil, split),
 	)
 	fileActions := &scanTabFileActions{
-		ContextKey:     options.ScanContextKey,
-		SaveJSON:       saveResultsToJSON,
-		LoadJSON:       loadResultsFromPicker,
-		HandleDrop:     handleDroppedURIs,
+		ContextKey: options.ScanContextKey,
+		SaveJSON:   saveResultsToJSON,
+		LoadJSON:   loadResultsFromPicker,
+		HandleDrop: handleDroppedURIs,
 		RecentFiles: func() []string {
 			paths := make([]string, len(recentLoadedFiles))
 			copy(paths, recentLoadedFiles)
