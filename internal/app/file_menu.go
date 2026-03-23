@@ -55,11 +55,6 @@ func bindMainFileMenu(
 			rebuildMainMenu()
 			return
 		}
-
-		switch selectedTab.Text {
-		default:
-			_ = scanFileActions
-		}
 		rebuildMainMenu()
 	}
 
