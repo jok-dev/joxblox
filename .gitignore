@@ -26,3 +26,5 @@ large_1024.png
 # Rust build outputs
 tools/rbxl-id-extractor/target/
 tools/rbxl-id-extractor/NUL
+
+latest.log
