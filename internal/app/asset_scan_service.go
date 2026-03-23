@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 )
@@ -15,6 +16,7 @@ type scanResult struct {
 	State                string
 	Width                int
 	Height               int
+	Duration             time.Duration
 	BytesSize            int
 	RecompressedPNGSize  int
 	RecompressedJPEGSize int
@@ -32,6 +34,9 @@ type scanResult struct {
 	ChildAssets          []childAssetInfo
 	TotalBytesSize       int
 	Resource             *fyne.StaticResource
+	DownloadBytes        []byte
+	DownloadFileName     string
+	DownloadIsOriginal   bool
 }
 
 func loadAssetPreview(assetID int64) (*assetPreviewResult, error) {
@@ -65,6 +70,7 @@ func loadScanResult(hit scanHit) (scanResult, error) {
 		State:                previewResult.State,
 		Width:                statsInfo.Width,
 		Height:               statsInfo.Height,
+		Duration:             statsInfo.Duration,
 		BytesSize:            statsInfo.BytesSize,
 		RecompressedPNGSize:  statsInfo.RecompressedPNGByteSize,
 		RecompressedJPEGSize: statsInfo.RecompressedJPEGByteSize,
@@ -82,6 +88,9 @@ func loadScanResult(hit scanHit) (scanResult, error) {
 		ChildAssets:          previewResult.ChildAssets,
 		TotalBytesSize:       previewResult.TotalBytesSize,
 		Resource:             resource,
+		DownloadBytes:        append([]byte(nil), previewResult.DownloadBytes...),
+		DownloadFileName:     previewResult.DownloadFileName,
+		DownloadIsOriginal:   previewResult.DownloadIsOriginal,
 	}, nil
 }
 

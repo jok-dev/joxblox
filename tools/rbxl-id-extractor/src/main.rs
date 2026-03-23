@@ -10,7 +10,9 @@ use serde::Serialize;
 
 const RAW_ASSET_CONTEXT_WINDOW: usize = 80;
 const PHYSICS_DATA_PROPERTY_TOKEN: &str = "physicsdata";
-const IMAGE_PROPERTY_TOKENS: [&str; 9] = [
+const ASSET_REFERENCE_PROPERTY_TOKENS: [&str; 15] = [
+    "asset",
+    "assetid",
     "texture",
     "image",
     "decal",
@@ -20,6 +22,10 @@ const IMAGE_PROPERTY_TOKENS: [&str; 9] = [
     "face",
     "icon",
     "content",
+    "mesh",
+    "sound",
+    "animation",
+    "font",
 ];
 
 #[derive(Serialize)]
@@ -99,7 +105,9 @@ fn run() -> Result<(), String> {
                 {
                     continue;
                 }
-                if !is_image_property_name(&normalized_property_name) {
+                if !is_asset_reference_property_name(&normalized_property_name)
+                    && !has_asset_reference(&rendered_property_value)
+                {
                     continue;
                 }
                 extract_ids_from_text(
@@ -109,6 +117,11 @@ fn run() -> Result<(), String> {
                 );
             }
         }
+        extract_ids_from_text(
+            &String::from_utf8_lossy(&file_bytes),
+            &mut extracted_asset_ids,
+            &mut asset_use_counts,
+        );
     } else {
         extract_ids_from_text(
             &String::from_utf8_lossy(&file_bytes),
@@ -198,9 +211,9 @@ fn range_overlaps_explicit(start: usize, end: usize, explicit_ranges: &[(usize, 
     false
 }
 
-fn is_image_property_name(normalized_property_name: &str) -> bool {
-    for image_property_token in IMAGE_PROPERTY_TOKENS {
-        if normalized_property_name.contains(image_property_token) {
+fn is_asset_reference_property_name(normalized_property_name: &str) -> bool {
+    for property_token in ASSET_REFERENCE_PROPERTY_TOKENS {
+        if normalized_property_name.contains(property_token) {
             return true;
         }
     }
@@ -231,7 +244,9 @@ fn get_raw_large_number_regex() -> &'static Regex {
 fn get_image_context_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(r"(?i)(texture|image|decal|thumbnail|shirt|pants|face|icon|content)")
+        Regex::new(
+            r"(?i)(rbxassetid|assetid|texture|image|decal|thumbnail|shirt|pants|face|icon|content|mesh|sound|animation|font)",
+        )
             .expect("valid regex")
     })
 }

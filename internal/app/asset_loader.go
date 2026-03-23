@@ -52,6 +52,7 @@ type imageInfo struct {
 	Resource                 *fyne.StaticResource
 	Width                    int
 	Height                   int
+	Duration                 time.Duration
 	BytesSize                int
 	RecompressedPNGByteSize  int
 	RecompressedJPEGByteSize int
@@ -82,6 +83,9 @@ type assetPreviewResult struct {
 	RustExtractorJSON  string
 	AssetTypeID        int
 	AssetTypeName      string
+	DownloadBytes      []byte
+	DownloadFileName   string
+	DownloadIsOriginal bool
 }
 
 type thumbnailInfo struct {
@@ -122,6 +126,8 @@ type assetFileInfo struct {
 	IsImage            bool
 	ReferencedAssetIDs []int64
 	RustExtractorJSON  string
+	FileBytes          []byte
+	FileName           string
 }
 
 func parseAssetID(rawInput string) (int64, error) {
@@ -169,6 +175,9 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 	var statsInfo *imageInfo
 	referencedAssetIDs := []int64{}
 	rustExtractorRawJSON := ""
+	downloadBytes := []byte(nil)
+	downloadFileName := ""
+	downloadIsOriginal := false
 	if assetDeliveryErr == nil && deliveryInfo != nil {
 		deliveryFileInfo, deliveryFileErr := fetchAssetFileInfo(deliveryInfo.Location, assetID, assetTypeID, true)
 		if deliveryFileErr != nil {
@@ -180,6 +189,9 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 			statsInfo = deliveryFileInfo.Info
 			referencedAssetIDs = deliveryFileInfo.ReferencedAssetIDs
 			rustExtractorRawJSON = deliveryFileInfo.RustExtractorJSON
+			downloadBytes = append([]byte(nil), deliveryFileInfo.FileBytes...)
+			downloadFileName = deliveryFileInfo.FileName
+			downloadIsOriginal = !deliveryFileInfo.IsImage
 			if deliveryFileInfo.IsImage {
 				totalBytesSize, childAssets := computeChildAssetsAndTotal(deliveryFileInfo.Info.BytesSize, referencedAssetIDs)
 				return &assetPreviewResult{
@@ -197,6 +209,9 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 					RustExtractorJSON:  deliveryFileInfo.RustExtractorJSON,
 					AssetTypeID:        assetTypeID,
 					AssetTypeName:      assetTypeName,
+					DownloadBytes:      downloadBytes,
+					DownloadFileName:   downloadFileName,
+					DownloadIsOriginal: false,
 				}, nil
 			}
 			if assetTypeID > 0 && assetTypeID != assetTypeImage {
@@ -224,6 +239,9 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 				assetTypeID,
 				assetTypeName,
 				fmt.Sprintf("Thumbnail lookup failed (%s). AssetDelivery details are shown without a preview image.", thumbnailErr.Error()),
+				downloadBytes,
+				downloadFileName,
+				downloadIsOriginal,
 			), nil
 		}
 		return nil, fmt.Errorf("AssetDelivery failed (%s) and thumbnail lookup failed (%s)", assetDeliveryErrText, thumbnailErr.Error())
@@ -241,6 +259,9 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 				assetTypeID,
 				assetTypeName,
 				fmt.Sprintf("Thumbnail image URL is empty (state=%s). AssetDelivery details are shown without a preview image.", thumbnailInfo.State),
+				downloadBytes,
+				downloadFileName,
+				downloadIsOriginal,
 			), nil
 		}
 		return nil, fmt.Errorf("No image available. State: %s. AssetDelivery error: %s", thumbnailInfo.State, assetDeliveryErrText)
@@ -259,6 +280,9 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 				assetTypeID,
 				assetTypeName,
 				fmt.Sprintf("Thumbnail download failed (%s). AssetDelivery details are shown without a preview image.", thumbnailImageErr.Error()),
+				downloadBytes,
+				downloadFileName,
+				downloadIsOriginal,
 			), nil
 		}
 		return nil, fmt.Errorf("Thumbnail download failed (%s). AssetDelivery error: %s", thumbnailImageErr.Error(), assetDeliveryErrText)
@@ -280,6 +304,9 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 		RustExtractorJSON:  rustExtractorRawJSON,
 		AssetTypeID:        assetTypeID,
 		AssetTypeName:      assetTypeName,
+		DownloadBytes:      downloadBytes,
+		DownloadFileName:   downloadFileName,
+		DownloadIsOriginal: downloadIsOriginal,
 	}, nil
 }
 
@@ -300,6 +327,9 @@ func buildNoThumbnailPreviewResult(
 	assetTypeID int,
 	assetTypeName string,
 	warningMessage string,
+	downloadBytes []byte,
+	downloadFileName string,
+	downloadIsOriginal bool,
 ) *assetPreviewResult {
 	safeStatsInfo := ensureImageInfo(statsInfo)
 	totalBytesSize, childAssets := computeChildAssetsAndTotal(safeStatsInfo.BytesSize, referencedAssetIDs)
@@ -318,6 +348,9 @@ func buildNoThumbnailPreviewResult(
 		RustExtractorJSON:  rustExtractorRawJSON,
 		AssetTypeID:        assetTypeID,
 		AssetTypeName:      assetTypeName,
+		DownloadBytes:      append([]byte(nil), downloadBytes...),
+		DownloadFileName:   downloadFileName,
+		DownloadIsOriginal: downloadIsOriginal,
 	}
 }
 
@@ -485,6 +518,7 @@ func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeH
 	if includeHash {
 		sha256Value = computeSHA256Hex(fileBytes)
 	}
+	fileName := buildAssetDownloadFileName(assetID, assetTypeID, contentType, "", false)
 	info := &imageInfo{
 		Resource:                 nil,
 		Width:                    0,
@@ -499,6 +533,15 @@ func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeH
 
 	imageConfig, imageFormat, decodeErr := image.DecodeConfig(bytes.NewReader(fileBytes))
 	if decodeErr != nil {
+		if isAudioAssetContent(assetTypeID, contentType) {
+			audioMetadata, audioErr := extractAudioMetadata(fileName, contentType, fileBytes)
+			if audioErr == nil && audioMetadata != nil {
+				info.Duration = audioMetadata.Duration
+				if strings.TrimSpace(audioMetadata.Format) != "" {
+					info.Format = audioMetadata.Format
+				}
+			}
+		}
 		referencedAssetIDs := []int64{}
 		rustExtractorJSON := ""
 		var extractErr error
@@ -513,10 +556,13 @@ func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeH
 			IsImage:            false,
 			ReferencedAssetIDs: referencedAssetIDs,
 			RustExtractorJSON:  rustExtractorJSON,
+			FileBytes:          fileBytes,
+			FileName:           fileName,
 		}, nil
 	}
 
 	resourceName := fmt.Sprintf("asset_%d.%s", assetID, imageFormat)
+	fileName = buildAssetDownloadFileName(assetID, assetTypeID, contentType, imageFormat, true)
 	info.Resource = fyne.NewStaticResource(resourceName, fileBytes)
 	info.Width = imageConfig.Width
 	info.Height = imageConfig.Height
@@ -540,7 +586,23 @@ func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeH
 		IsImage:            true,
 		ReferencedAssetIDs: referencedAssetIDs,
 		RustExtractorJSON:  rustExtractorJSON,
+		FileBytes:          fileBytes,
+		FileName:           fileName,
 	}, nil
+}
+
+func buildAssetDownloadFileName(assetID int64, assetTypeID int, contentType string, imageFormat string, isImage bool) string {
+	fileExtension := "bin"
+	if isImage {
+		trimmedImageFormat := strings.ToLower(strings.TrimSpace(imageFormat))
+		if trimmedImageFormat != "" {
+			fileExtension = trimmedImageFormat
+		}
+	} else {
+		_ = contentType
+		fileExtension = getAssetDownloadExtension(assetTypeID)
+	}
+	return fmt.Sprintf("asset_%d.%s", assetID, fileExtension)
 }
 
 func buildFallbackWarningText(warningReason string) string {

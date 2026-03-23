@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	previewWidth  = 360
-	previewHeight = 240
+	previewWidth  = 440
+	previewHeight = 300
 	megabyte      = 1024 * 1024
 )
 
@@ -32,7 +32,7 @@ func Run() {
 	guiApp.SetIcon(appIcon)
 	window := guiApp.NewWindow("Joxblox")
 	window.SetIcon(appIcon)
-	window.Resize(fyne.NewSize(1100, 700))
+	window.Resize(fyne.NewSize(1350, 900))
 
 	singleAssetTab := container.NewTabItem("Single Asset", newSingleAssetTab(window))
 	scanContent, scanFileActions, allScanFileActions, selectScanContext := newScanTab(window)

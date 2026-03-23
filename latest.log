@@ -1,25 +1,4 @@
-[19:34:30] Loaded auth cookie from keychain
-[19:34:30] Application started
-[19:34:44] Scan started for source: C:\Users\Jok\Documents\DE-Water-Update-Optimized.rbxl (limit=1000)
-[19:34:44] RBXL scan started: C:\Users\Jok\Documents\DE-Water-Update-Optimized.rbxl (limit=1000)
-[19:34:44] Rust extractor requested for file: C:\Users\Jok\Documents\DE-Water-Update-Optimized.rbxl (limit=1000, assetType=Unknown (0))
-[19:34:44] Using Rust extractor binary: C:\Users\Jok\work\voldex\joxblox\tools\rbxl-id-extractor\target\release\rbxl-id-extractor
-[19:35:03] Rust extractor returned JSON bytes=25433 and parsed IDs=1000
-[19:35:03] RBXL scan completed with 1000 unique asset IDs
-[19:35:04] Scan result load failed for asset 0 (file=C:\Users\Jok\Documents\DE-Water-Update-Optimized.rbxl, useCount=1): AssetDelivery failed (Request asset was not found) and thumbnail lookup failed (No thumbnail response returned for this asset)
-[19:35:04] Rust extractor processing in-memory payload (545 bytes)
-[19:35:04] Rust extractor requested for file: C:\Users\Jok\AppData\Local\Temp\rbxl-id-extractor-1474455805.bin (limit=5000, assetType=Shirt (11))
-[19:35:04] Using Rust extractor binary: C:\Users\Jok\work\voldex\joxblox\tools\rbxl-id-extractor\target\release\rbxl-id-extractor
-[19:35:04] Rust extractor returned JSON bytes=59 and parsed IDs=1
-[19:35:04] Referenced asset extraction Rust path returned 1 IDs
-[19:35:14] Rust extractor processing in-memory payload (655 bytes)
-[19:35:14] Rust extractor requested for file: C:\Users\Jok\AppData\Local\Temp\rbxl-id-extractor-3994449398.bin (limit=5000, assetType=Decal (13))
-[19:35:14] Using Rust extractor binary: C:\Users\Jok\work\voldex\joxblox\tools\rbxl-id-extractor\target\release\rbxl-id-extractor
-[19:35:14] Rust extractor returned JSON bytes=63 and parsed IDs=1
-[19:35:14] Referenced asset extraction Rust path returned 1 IDs
-[19:35:22] Rust extractor processing in-memory payload (192 bytes)
-[19:35:22] Rust extractor requested for file: C:\Users\Jok\AppData\Local\Temp\rbxl-id-extractor-3776344813.bin (limit=5000, assetType=Type 63 (63))
-[19:35:22] Using Rust extractor binary: C:\Users\Jok\work\voldex\joxblox\tools\rbxl-id-extractor\target\release\rbxl-id-extractor
-[19:35:22] Rust extractor returned JSON bytes=63 and parsed IDs=1
-[19:35:22] Referenced asset extraction Rust path returned 1 IDs
-[19:35:22] Scan complete: 1000 assets shown, 1 failed to load
+[01:41:38] Loaded auth cookie from keychain
+[01:41:38] Application started
+[01:41:42] Single asset load started for asset 5410083549
+[01:41:42] Single asset load complete for 5410083549 (fallback thumbnail, state=Completed)

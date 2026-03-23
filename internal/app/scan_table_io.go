@@ -45,6 +45,7 @@ type scanTableExportRow struct {
 	State                string           `json:"state"`
 	Width                int              `json:"width"`
 	Height               int              `json:"height"`
+	DurationMillis       int64            `json:"durationMillis,omitempty"`
 	BytesSize            int              `json:"bytesSize"`
 	RecompressedPNGSize  int              `json:"recompressedPngSize"`
 	RecompressedJPEGSize int              `json:"recompressedJpegSize"`
@@ -187,6 +188,7 @@ func mapScanResultToExportRow(row scanResult) scanTableExportRow {
 		State:                row.State,
 		Width:                row.Width,
 		Height:               row.Height,
+		DurationMillis:       row.Duration.Milliseconds(),
 		BytesSize:            row.BytesSize,
 		RecompressedPNGSize:  row.RecompressedPNGSize,
 		RecompressedJPEGSize: row.RecompressedJPEGSize,
@@ -230,6 +232,7 @@ func mapExportRowToScanResult(row scanTableExportRow) (scanResult, error) {
 		State:                row.State,
 		Width:                row.Width,
 		Height:               row.Height,
+		Duration:             time.Duration(row.DurationMillis) * time.Millisecond,
 		BytesSize:            row.BytesSize,
 		RecompressedPNGSize:  row.RecompressedPNGSize,
 		RecompressedJPEGSize: row.RecompressedJPEGSize,

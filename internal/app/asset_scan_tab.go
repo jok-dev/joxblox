@@ -72,6 +72,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	showOnlyDuplicates := false
 	searchQuery := ""
 	typeFilterValue := scanFilterAllOption
+	suppressTypeFilterChange := false
 	recentLoadedFiles := loadRecentFilesFromPreferences(options.RecentFilesPreferenceKey)
 	columnHeaders := []string{"Asset ID", "Use Count", "Type", "Self Size", "Dimensions", "State", "Asset SHA256"}
 	sortField := "Self Size"
@@ -103,7 +104,11 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	dragDropHintLabel := widget.NewLabel("Tip: drag and drop a results .json file onto the window to import.")
 
 	assetDetailsView := newAssetView("Select a result row to preview", true)
+	selectedResultFilePath := ""
+	selectedTableColumn := 0
 	clearPreview := func() {
+		selectedResultFilePath = ""
+		selectedTableColumn = 0
 		assetDetailsView.Clear()
 	}
 	clearPreview()
@@ -143,6 +148,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			previewResult.ReferencedAssetIDs,
 			previewResult.AssetTypeID,
 			previewResult.AssetTypeName,
+			previewResult.DownloadBytes,
+			previewResult.DownloadFileName,
+			previewResult.DownloadIsOriginal,
 		)
 		assetDetailsView.SetHierarchy(explorerState.getRows(), selectedAssetID, func(assetID int64) {
 			if explorerState == nil {
@@ -204,13 +212,17 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			typeOptions = append(typeOptions, typeLabel)
 		}
 		sort.Strings(typeOptions[1:])
+		suppressTypeFilterChange = true
 		typeFilterSelect.SetOptions(typeOptions)
 		if !containsString(typeOptions, typeFilterValue) {
 			typeFilterValue = scanFilterAllOption
 		}
 		typeFilterSelect.SetSelected(typeFilterValue)
+		suppressTypeFilterChange = false
 	}
 	applySortAndFilters := func() {
+		previousSelectedAssetID := selectedAssetID
+		previousSelectedFilePath := selectedResultFilePath
 		filteredResults := make([]scanResult, 0, len(allResults))
 		hashCounts := buildHashCounts(allResults)
 		for _, result := range allResults {
@@ -238,8 +250,23 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			return compareResult < 0
 		})
 		displayResults = filteredResults
+		nextSelectedRowIndex := -1
+		if previousSelectedAssetID > 0 {
+			for rowIndex, result := range displayResults {
+				if result.AssetID == previousSelectedAssetID && result.FilePath == previousSelectedFilePath {
+					nextSelectedRowIndex = rowIndex
+					break
+				}
+			}
+		}
 		if table != nil {
 			table.Refresh()
+			if nextSelectedRowIndex >= 0 {
+				table.Select(widget.TableCellID{Row: nextSelectedRowIndex, Col: selectedTableColumn})
+			} else if previousSelectedAssetID > 0 {
+				selectedAssetID = 0
+				clearPreview()
+			}
 		}
 		updateStatsLabels()
 	}
@@ -247,11 +274,14 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	updatePreviewFromRow := func(rowIndex int) {
 		if rowIndex < 0 || rowIndex >= len(displayResults) {
 			selectedAssetID = 0
+			selectedResultFilePath = ""
+			selectedTableColumn = 0
 			return
 		}
 
 		selectedResult := displayResults[rowIndex]
 		selectedAssetID = selectedResult.AssetID
+		selectedResultFilePath = selectedResult.FilePath
 		rootPreview := &assetPreviewResult{
 			Image: &imageInfo{
 				Resource: selectedResult.Resource,
@@ -259,6 +289,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			Stats: &imageInfo{
 				Width:                    selectedResult.Width,
 				Height:                   selectedResult.Height,
+				Duration:                 selectedResult.Duration,
 				BytesSize:                selectedResult.BytesSize,
 				RecompressedPNGByteSize:  selectedResult.RecompressedPNGSize,
 				RecompressedJPEGByteSize: selectedResult.RecompressedJPEGSize,
@@ -277,6 +308,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			RustExtractorJSON:  selectedResult.RustExtractorJSON,
 			AssetTypeID:        selectedResult.AssetTypeID,
 			AssetTypeName:      selectedResult.AssetTypeName,
+			DownloadBytes:      append([]byte(nil), selectedResult.DownloadBytes...),
+			DownloadFileName:   selectedResult.DownloadFileName,
+			DownloadIsOriginal: selectedResult.DownloadIsOriginal,
 		}
 		explorerState = newAssetExplorerState(selectedResult.AssetID, rootPreview)
 		renderSelectedAsset(selectedResult.AssetID, selectedResult.FilePath, rootPreview)
@@ -395,6 +429,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	baseTable.OnSelected = func(id widget.TableCellID) {
 		if id.Row < 0 {
 			return
+		}
+		if id.Col >= 0 {
+			selectedTableColumn = id.Col
 		}
 		updatePreviewFromRow(id.Row)
 	}
@@ -530,6 +567,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		clearPreview()
 	}
 	typeFilterSelect.OnChanged = func(nextFilterValue string) {
+		if suppressTypeFilterChange {
+			return
+		}
 		if strings.TrimSpace(nextFilterValue) == "" {
 			typeFilterValue = scanFilterAllOption
 		} else {
@@ -1017,8 +1057,8 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	updateStatsLabels()
 
 	previewContent := container.NewVBox(
-		assetDetailsView.HierarchySection,
 		assetDetailsView.PreviewBox,
+		assetDetailsView.HierarchySection,
 		assetDetailsView.MetadataForm,
 		assetDetailsView.JSONAccordion,
 		assetDetailsView.NoteLabel,

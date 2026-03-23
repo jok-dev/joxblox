@@ -50,6 +50,9 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 			previewResult.ReferencedAssetIDs,
 			previewResult.AssetTypeID,
 			previewResult.AssetTypeName,
+			previewResult.DownloadBytes,
+			previewResult.DownloadFileName,
+			previewResult.DownloadIsOriginal,
 		)
 		assetDetailsView.SetHierarchy(explorerState.getRows(), selectedAssetID, func(assetID int64) {
 			if explorerState == nil {
@@ -133,11 +136,10 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	inputRow := container.NewBorder(nil, nil, nil, goButton, assetInput)
 
 	tabContent := container.NewVBox(
-		widget.NewLabel("Roblox Asset Image Preview"),
 		inputRow,
 		statusLabel,
-		assetDetailsView.HierarchySection,
 		previewBox,
+		assetDetailsView.HierarchySection,
 		assetDetailsView.MetadataForm,
 		assetDetailsView.JSONAccordion,
 		assetDetailsView.NoteLabel,
