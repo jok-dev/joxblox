@@ -13,7 +13,6 @@
 - Filter scan results by asset type, instance type, property name, duplicates, search text, and more
 - Show duplicate counts, duplicate size, shown size, dimensions, hashes, source/state, and asset metadata
 - Save and load scan results as JSON
-- Export scan tables as Markdown
 - Drag and drop results `.json` files onto the app window to import them
 - Generate PNG images in the `Image Generator` tab for manual Roblox upload workflows
 - Use optional `.ROBLOSECURITY` authentication for gated AssetDelivery requests
@@ -66,7 +65,6 @@ Current scan-table capabilities include:
 - Asset preview/details pane for the selected row
 - Recent imported files per scan context
 - JSON import/export with progress dialogs
-- Markdown export
 - Drag-and-drop JSON import
 
 ### Image Generator
@@ -87,7 +85,6 @@ The `File` menu currently includes:
 
 - `Save Results (.json)` to save all scan tables across contexts into one workspace JSON file
 - `Load Results (.json)` to restore all scan tables from a workspace JSON file
-- `Export Results (.md)` to export the currently active scan table as Markdown
 - `Clear All Results` to clear every loaded scan table after confirmation
 - `Recent Files` for quick reload of previously imported results
 

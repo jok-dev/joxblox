@@ -49,11 +49,6 @@ func bindMainFileMenu(
 					}
 				})
 			}),
-			fyne.NewMenuItem("Export Results (.md)", func() {
-				runFileAction(false, func(fileActions *scanTabFileActions) {
-					fileActions.ExportMarkdown()
-				})
-			}),
 			fyne.NewMenuItem("Clear All Results", func() {
 				clearAllScanResults(window, allScanFileActions)
 			}),

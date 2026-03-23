@@ -7,7 +7,6 @@ type scanTabFileActions struct {
 	SaveJSON       func()
 	LoadJSON       func()
 	HandleDrop     func([]fyne.URI)
-	ExportMarkdown func()
 	RecentFiles    func() []string
 	LoadRecent     func(string)
 	GetResults     func() []scanResult

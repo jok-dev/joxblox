@@ -930,52 +930,6 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}()
 	}
 
-	exportMarkdownResults := func() {
-		if len(allResults) == 0 {
-			statusLabel.SetText("Nothing to export yet. Run a scan or import results first.")
-			return
-		}
-		selectedExportPath, pickerErr := nativeDialog.File().
-			Filter("Markdown files", "md").
-			Title("Export scan results as markdown").
-			Save()
-		if pickerErr != nil {
-			if errors.Is(pickerErr, nativeDialog.Cancelled) {
-				return
-			}
-			statusLabel.SetText(fmt.Sprintf("Markdown export picker failed: %s", pickerErr.Error()))
-			return
-		}
-		if strings.TrimSpace(selectedExportPath) == "" {
-			statusLabel.SetText("Markdown export canceled.")
-			return
-		}
-		if !strings.HasSuffix(strings.ToLower(selectedExportPath), ".md") {
-			selectedExportPath += ".md"
-		}
-		resultsToExport := append([]scanResult(nil), allResults...)
-		statusLabel.SetText("Exporting markdown...")
-		go func() {
-			markdownBytes, markdownErr := marshalScanTableMarkdown(resultsToExport)
-			if markdownErr != nil {
-				fyne.Do(func() {
-					statusLabel.SetText(fmt.Sprintf("Markdown export failed: %s", markdownErr.Error()))
-				})
-				return
-			}
-			if writeErr := os.WriteFile(selectedExportPath, markdownBytes, 0644); writeErr != nil {
-				fyne.Do(func() {
-					statusLabel.SetText(fmt.Sprintf("Markdown export write failed: %s", writeErr.Error()))
-				})
-				return
-			}
-			fyne.Do(func() {
-				statusLabel.SetText(fmt.Sprintf("Exported markdown for %d results.", len(resultsToExport)))
-				logDebugf("Scan table markdown exported: %s (rows=%d)", selectedExportPath, len(resultsToExport))
-			})
-		}()
-	}
-
 	saveResultsToJSON := func() {
 		if len(allResults) == 0 {
 			statusLabel.SetText("Nothing to export yet. Run a scan or import a table first.")
@@ -1367,7 +1321,6 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		SaveJSON:       saveResultsToJSON,
 		LoadJSON:       loadResultsFromPicker,
 		HandleDrop:     handleDroppedURIs,
-		ExportMarkdown: exportMarkdownResults,
 		RecentFiles: func() []string {
 			paths := make([]string, len(recentLoadedFiles))
 			copy(paths, recentLoadedFiles)
