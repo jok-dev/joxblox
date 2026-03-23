@@ -3,6 +3,7 @@
 .gobin/
 *.app/
 /roblox-asset-explorer
+.scratch/
 
 # Logs/runtime output
 *.log
