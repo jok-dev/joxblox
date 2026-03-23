@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -23,15 +24,17 @@ import (
 )
 
 const (
-	defaultAssetScanLimit  = 100
-	scanTableEmojiTextSize = 18
-	failedScanRowState     = "Failed"
-	failedScanRowSource    = "Load Failed"
-	scanFilterAllOption    = "All"
-	minScanLoadWorkers     = 4
-	maxScanLoadWorkers     = 16
-	scanLoadUIBatchSize    = 25
-	scanLoadUIFlushDelay   = 150 * time.Millisecond
+	defaultAssetScanLimit   = 100
+	scanTableEmojiTextSize  = 18
+	failedScanRowState      = "Failed"
+	failedScanRowSource     = "Load Failed"
+	scanFilterAllOption     = "All"
+	minScanLoadWorkers      = 4
+	maxScanLoadWorkers      = 16
+	scanLoadUIBatchSize     = 25
+	scanLoadUIFlushDelay    = 150 * time.Millisecond
+	scanLoadUIRefreshDelay  = 400 * time.Millisecond
+	scanSearchDebounceDelay = 180 * time.Millisecond
 )
 
 type assetScanTabOptions struct {
@@ -57,6 +60,19 @@ type secondaryTappableTable struct {
 	onSecondaryTap func()
 }
 
+func buildScanLoadingStatus(completedCount int, totalCount int, elapsed time.Duration) string {
+	statusText := fmt.Sprintf("Loading results %d/%d...", completedCount, totalCount)
+	if totalCount <= 0 || completedCount <= 0 || completedCount >= totalCount {
+		return statusText
+	}
+	if completedCount < 5 || elapsed < 2*time.Second {
+		return statusText
+	}
+	remainingCount := totalCount - completedCount
+	estimatedRemaining := time.Duration(float64(elapsed) * float64(remainingCount) / float64(completedCount))
+	return fmt.Sprintf("%s ETA %s", statusText, formatDurationCompact(estimatedRemaining))
+}
+
 func (table *secondaryTappableTable) TappedSecondary(_ *fyne.PointEvent) {
 	if table == nil || table.onSecondaryTap == nil {
 		return
@@ -72,9 +88,22 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	showOnlyDuplicates := false
 	searchQuery := ""
 	typeFilterValue := scanFilterAllOption
+	typeDisplayToValue := map[string]string{
+		scanFilterAllOption: scanFilterAllOption,
+	}
+	instanceTypeFilterValue := scanFilterAllOption
+	instanceTypeDisplayToValue := map[string]string{
+		scanFilterAllOption: scanFilterAllOption,
+	}
+	propertyNameFilterValue := scanFilterAllOption
+	propertyNameDisplayToValue := map[string]string{
+		scanFilterAllOption: scanFilterAllOption,
+	}
 	suppressTypeFilterChange := false
+	suppressInstanceTypeFilterChange := false
+	suppressPropertyNameFilterChange := false
 	recentLoadedFiles := loadRecentFilesFromPreferences(options.RecentFilesPreferenceKey)
-	columnHeaders := []string{"Asset ID", "Use Count", "Type", "Self Size", "Dimensions", "State", "Asset SHA256"}
+	columnHeaders := []string{"Asset ID", "Use Count", "Type", "Self Size", "Dimensions", "Asset SHA256"}
 	sortField := "Self Size"
 	sortDescending := true
 	maxResultsDefault := options.MaxResultsDefault
@@ -92,14 +121,19 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	limitEntry.SetText(strconv.Itoa(maxResultsDefault))
 	limitEntry.SetPlaceHolder(strconv.Itoa(maxResultsDefault))
 	searchEntry := widget.NewEntry()
-	searchEntry.SetPlaceHolder("Search ID, type, state, source, hash, or path...")
+	searchEntry.SetPlaceHolder("Search ID, type, source, hash, or path...")
 	typeFilterSelect := widget.NewSelect([]string{scanFilterAllOption}, nil)
 	typeFilterSelect.SetSelected(scanFilterAllOption)
+	instanceTypeFilterSelect := widget.NewSelect([]string{scanFilterAllOption}, nil)
+	instanceTypeFilterSelect.SetSelected(scanFilterAllOption)
+	propertyNameFilterSelect := widget.NewSelect([]string{scanFilterAllOption}, nil)
+	propertyNameFilterSelect.SetSelected(scanFilterAllOption)
 	statusLabel := widget.NewLabel("Select a source and click Start Scan.")
 	statsRowsLabel := widget.NewLabel("Rows: 0")
 	statsShownLabel := widget.NewLabel("Shown: 0")
 	statsFailedLabel := widget.NewLabel("Failed: 0")
 	statsDuplicateLabel := widget.NewLabel("Duplicates: 0")
+	statsDuplicateSizeLabel := widget.NewLabel("Duplicate Size: 0 B")
 	statsSizeLabel := widget.NewLabel("Shown Size: 0 B")
 	dragDropHintLabel := widget.NewLabel("Tip: drag and drop a results .json file onto the window to import.")
 
@@ -115,6 +149,34 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	var explorerState *assetExplorerState
 	var renderSelectedAsset func(selectedAssetID int64, selectedFilePath string, previewResult *assetPreviewResult)
 	renderSelectedAsset = func(selectedAssetID int64, selectedFilePath string, previewResult *assetPreviewResult) {
+		referenceInstanceType := ""
+		referencePropertyName := ""
+		referenceInstancePath := ""
+		if explorerState != nil && selectedAssetID == explorerState.rootAssetID {
+			for _, row := range allResults {
+				if row.AssetID == selectedAssetID && row.FilePath == selectedFilePath {
+					referenceInstanceType = row.InstanceType
+					referencePropertyName = row.PropertyName
+					referenceInstancePath = row.InstancePath
+					if referenceInstancePath == "" {
+						referenceInstancePath = row.InstanceName
+					}
+					break
+				}
+			}
+		} else if explorerState != nil {
+			if selectedRow, found := explorerState.getRow(selectedAssetID); found {
+				referenceInstanceType = selectedRow.InstanceType
+				referencePropertyName = selectedRow.PropertyName
+				referenceInstancePath = explorerState.getInstancePath(selectedAssetID)
+				if referenceInstancePath == "" {
+					referenceInstancePath = selectedRow.InstancePath
+				}
+				if referenceInstancePath == "" {
+					referenceInstancePath = selectedRow.InstanceName
+				}
+			}
+		}
 		filePath := ""
 		fileSHA256 := ""
 		useCount := 0
@@ -146,6 +208,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			previewResult.EconomyJSON,
 			previewResult.RustExtractorJSON,
 			previewResult.ReferencedAssetIDs,
+			referenceInstanceType,
+			referencePropertyName,
+			referenceInstancePath,
 			previewResult.AssetTypeID,
 			previewResult.AssetTypeName,
 			previewResult.DownloadBytes,
@@ -173,6 +238,46 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 
 	var table *secondaryTappableTable
 	selectedAssetID := int64(0)
+	duplicateRowsCount := 0
+	duplicateBytesTotal := 0
+	var searchChangeToken atomic.Uint64
+	matchesActiveFilters := func(result scanResult, hashCounts map[string]int, ignoreTypeFilter bool, ignoreInstanceTypeFilter bool, ignorePropertyNameFilter bool) bool {
+		if showOnlyDuplicates && !isDuplicateByHash(result, hashCounts) {
+			return false
+		}
+		if !scanResultMatchesQuery(result, searchQuery) {
+			return false
+		}
+		if !ignoreTypeFilter && typeFilterValue != scanFilterAllOption && !strings.EqualFold(scanResultTypeFilterLabel(result), typeFilterValue) {
+			return false
+		}
+		if !ignoreInstanceTypeFilter && instanceTypeFilterValue != scanFilterAllOption && !strings.EqualFold(scanResultInstanceTypeLabel(result), instanceTypeFilterValue) {
+			return false
+		}
+		if !ignorePropertyNameFilter && propertyNameFilterValue != scanFilterAllOption && !strings.EqualFold(scanResultPropertyNameLabel(result), propertyNameFilterValue) {
+			return false
+		}
+		return true
+	}
+	countDuplicateRows := func(hashCounts map[string]int) int {
+		duplicateCount := 0
+		for _, row := range allResults {
+			if isDuplicateByHash(row, hashCounts) {
+				duplicateCount++
+			}
+		}
+		return duplicateCount
+	}
+	countDuplicateBytes := func(hashCounts map[string]int) int {
+		duplicateBytes := 0
+		for _, row := range allResults {
+			if !isDuplicateByHash(row, hashCounts) || row.BytesSize <= 0 {
+				continue
+			}
+			duplicateBytes += row.BytesSize
+		}
+		return duplicateBytes
+	}
 	updateStatsLabels := func() {
 		totalRowsCount := len(allResults)
 		shownRowsCount := len(displayResults)
@@ -186,53 +291,158 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				shownBytesTotal += row.BytesSize
 			}
 		}
-		duplicateRowsCount := 0
-		hashCounts := buildHashCounts(allResults)
-		for _, row := range allResults {
-			if isDuplicateByHash(row, hashCounts) {
-				duplicateRowsCount++
-			}
-		}
 		statsRowsLabel.SetText(fmt.Sprintf("Rows: %d", totalRowsCount))
 		statsShownLabel.SetText(fmt.Sprintf("Shown: %d", shownRowsCount))
 		statsFailedLabel.SetText(fmt.Sprintf("Failed: %d", failedRowsCount))
 		statsDuplicateLabel.SetText(fmt.Sprintf("Duplicates: %d", duplicateRowsCount))
+		statsDuplicateSizeLabel.SetText(fmt.Sprintf("Duplicate Size: %s", formatSizeAuto(duplicateBytesTotal)))
 		statsSizeLabel.SetText(fmt.Sprintf("Shown Size: %s", formatSizeAuto(shownBytesTotal)))
 	}
-	updateFilterOptions := func() {
-		uniqueTypes := map[string]bool{}
+	updateFilterOptions := func(hashCounts map[string]int) {
+		typeCounts := map[string]int{}
+		instanceTypeCounts := map[string]int{}
+		propertyNameCounts := map[string]int{}
 		for _, row := range allResults {
-			typeLabel := scanResultTypeLabel(row)
-			if typeLabel != "" {
-				uniqueTypes[typeLabel] = true
+			typeLabel := scanResultTypeFilterLabel(row)
+			if typeLabel != "" && matchesActiveFilters(row, hashCounts, true, false, false) {
+				typeCounts[typeLabel]++
+			}
+			instanceTypeLabel := scanResultInstanceTypeLabel(row)
+			if instanceTypeLabel != "" && matchesActiveFilters(row, hashCounts, false, true, false) {
+				instanceTypeCounts[instanceTypeLabel]++
+			}
+			propertyNameLabel := scanResultPropertyNameLabel(row)
+			if propertyNameLabel != "" && matchesActiveFilters(row, hashCounts, false, false, true) {
+				propertyNameCounts[propertyNameLabel]++
+			}
+		}
+		if typeFilterValue != scanFilterAllOption {
+			if _, found := typeCounts[typeFilterValue]; !found {
+				typeCounts[typeFilterValue] = 0
+			}
+		}
+		if instanceTypeFilterValue != scanFilterAllOption {
+			if _, found := instanceTypeCounts[instanceTypeFilterValue]; !found {
+				instanceTypeCounts[instanceTypeFilterValue] = 0
+			}
+		}
+		if propertyNameFilterValue != scanFilterAllOption {
+			if _, found := propertyNameCounts[propertyNameFilterValue]; !found {
+				propertyNameCounts[propertyNameFilterValue] = 0
 			}
 		}
 		typeOptions := []string{scanFilterAllOption}
-		for typeLabel := range uniqueTypes {
-			typeOptions = append(typeOptions, typeLabel)
+		typeDisplayToValue = map[string]string{
+			scanFilterAllOption: scanFilterAllOption,
 		}
-		sort.Strings(typeOptions[1:])
+		typeLabels := make([]string, 0, len(typeCounts))
+		for typeLabel := range typeCounts {
+			typeLabels = append(typeLabels, typeLabel)
+		}
+		instanceTypeOptions := []string{scanFilterAllOption}
+		instanceTypeDisplayToValue = map[string]string{
+			scanFilterAllOption: scanFilterAllOption,
+		}
+		instanceTypeLabels := make([]string, 0, len(instanceTypeCounts))
+		for instanceTypeLabel := range instanceTypeCounts {
+			instanceTypeLabels = append(instanceTypeLabels, instanceTypeLabel)
+		}
+		propertyNameOptions := []string{scanFilterAllOption}
+		propertyNameDisplayToValue = map[string]string{
+			scanFilterAllOption: scanFilterAllOption,
+		}
+		propertyNameLabels := make([]string, 0, len(propertyNameCounts))
+		for propertyNameLabel := range propertyNameCounts {
+			propertyNameLabels = append(propertyNameLabels, propertyNameLabel)
+		}
+		sort.Strings(typeLabels)
+		sort.Strings(instanceTypeLabels)
+		sort.Strings(propertyNameLabels)
+		for _, typeLabel := range typeLabels {
+			displayLabel := fmt.Sprintf("%s (%d)", typeLabel, typeCounts[typeLabel])
+			typeOptions = append(typeOptions, displayLabel)
+			typeDisplayToValue[displayLabel] = typeLabel
+		}
+		if containsString(instanceTypeLabels, "Unknown") {
+			instanceTypeOptions = append(instanceTypeOptions, fmt.Sprintf("Unknown (%d)", instanceTypeCounts["Unknown"]))
+			instanceTypeDisplayToValue[instanceTypeOptions[len(instanceTypeOptions)-1]] = "Unknown"
+		}
+		for _, instanceTypeLabel := range instanceTypeLabels {
+			if instanceTypeLabel == "Unknown" {
+				continue
+			}
+			displayLabel := fmt.Sprintf("%s (%d)", instanceTypeLabel, instanceTypeCounts[instanceTypeLabel])
+			instanceTypeOptions = append(instanceTypeOptions, displayLabel)
+			instanceTypeDisplayToValue[displayLabel] = instanceTypeLabel
+		}
+		if containsString(propertyNameLabels, "Unknown") {
+			propertyNameOptions = append(propertyNameOptions, fmt.Sprintf("Unknown (%d)", propertyNameCounts["Unknown"]))
+			propertyNameDisplayToValue[propertyNameOptions[len(propertyNameOptions)-1]] = "Unknown"
+		}
+		for _, propertyNameLabel := range propertyNameLabels {
+			if propertyNameLabel == "Unknown" {
+				continue
+			}
+			displayLabel := fmt.Sprintf("%s (%d)", propertyNameLabel, propertyNameCounts[propertyNameLabel])
+			propertyNameOptions = append(propertyNameOptions, displayLabel)
+			propertyNameDisplayToValue[displayLabel] = propertyNameLabel
+		}
 		suppressTypeFilterChange = true
 		typeFilterSelect.SetOptions(typeOptions)
-		if !containsString(typeOptions, typeFilterValue) {
-			typeFilterValue = scanFilterAllOption
+		selectedTypeOption := scanFilterAllOption
+		for optionLabel, optionValue := range typeDisplayToValue {
+			if optionValue == typeFilterValue {
+				selectedTypeOption = optionLabel
+				break
+			}
 		}
-		typeFilterSelect.SetSelected(typeFilterValue)
+		if !containsString(typeOptions, selectedTypeOption) {
+			typeFilterValue = scanFilterAllOption
+			selectedTypeOption = scanFilterAllOption
+		}
+		typeFilterSelect.SetSelected(selectedTypeOption)
 		suppressTypeFilterChange = false
+		suppressInstanceTypeFilterChange = true
+		instanceTypeFilterSelect.SetOptions(instanceTypeOptions)
+		selectedInstanceTypeOption := scanFilterAllOption
+		for optionLabel, optionValue := range instanceTypeDisplayToValue {
+			if optionValue == instanceTypeFilterValue {
+				selectedInstanceTypeOption = optionLabel
+				break
+			}
+		}
+		if !containsString(instanceTypeOptions, selectedInstanceTypeOption) {
+			instanceTypeFilterValue = scanFilterAllOption
+			selectedInstanceTypeOption = scanFilterAllOption
+		}
+		instanceTypeFilterSelect.SetSelected(selectedInstanceTypeOption)
+		suppressInstanceTypeFilterChange = false
+		suppressPropertyNameFilterChange = true
+		propertyNameFilterSelect.SetOptions(propertyNameOptions)
+		selectedPropertyNameOption := scanFilterAllOption
+		for optionLabel, optionValue := range propertyNameDisplayToValue {
+			if optionValue == propertyNameFilterValue {
+				selectedPropertyNameOption = optionLabel
+				break
+			}
+		}
+		if !containsString(propertyNameOptions, selectedPropertyNameOption) {
+			propertyNameFilterValue = scanFilterAllOption
+			selectedPropertyNameOption = scanFilterAllOption
+		}
+		propertyNameFilterSelect.SetSelected(selectedPropertyNameOption)
+		suppressPropertyNameFilterChange = false
 	}
 	applySortAndFilters := func() {
 		previousSelectedAssetID := selectedAssetID
 		previousSelectedFilePath := selectedResultFilePath
 		filteredResults := make([]scanResult, 0, len(allResults))
 		hashCounts := buildHashCounts(allResults)
+		duplicateRowsCount = countDuplicateRows(hashCounts)
+		duplicateBytesTotal = countDuplicateBytes(hashCounts)
+		updateFilterOptions(hashCounts)
 		for _, result := range allResults {
-			if showOnlyDuplicates && !isDuplicateByHash(result, hashCounts) {
-				continue
-			}
-			if typeFilterValue != scanFilterAllOption && !strings.EqualFold(scanResultTypeLabel(result), typeFilterValue) {
-				continue
-			}
-			if !scanResultMatchesQuery(result, searchQuery) {
+			if !matchesActiveFilters(result, hashCounts, false, false, false) {
 				continue
 			}
 			filteredResults = append(filteredResults, result)
@@ -337,16 +547,20 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				return
 			}
 			if id.Row < 0 || id.Row >= len(displayResults) || id.Col < 0 || id.Col >= len(columnHeaders) {
-				emojiText.Text = ""
-				emojiText.Refresh()
+				if emojiText.Text != "" {
+					emojiText.Text = ""
+					emojiText.Refresh()
+				}
 				label.SetText("")
 				return
 			}
 
 			row := displayResults[id.Row]
-			emojiText.Text = ""
-			emojiText.Refresh()
-			label.Importance = widget.MediumImportance
+			if emojiText.Text != "" {
+				emojiText.Text = ""
+				emojiText.Refresh()
+			}
+			nextImportance := widget.MediumImportance
 			switch id.Col {
 			case 0:
 				label.SetText(strconv.FormatInt(row.AssetID, 10))
@@ -357,8 +571,11 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 					label.SetText("-")
 				}
 			case 2:
-				emojiText.Text = getAssetTypeEmoji(row.AssetTypeID)
-				emojiText.Refresh()
+				nextEmoji := getAssetTypeEmoji(row.AssetTypeID)
+				if emojiText.Text != nextEmoji {
+					emojiText.Text = nextEmoji
+					emojiText.Refresh()
+				}
 				label.SetText(scanResultTypeLabel(row))
 			case 3:
 				label.SetText(formatSizeAuto(row.BytesSize))
@@ -369,16 +586,6 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 					label.SetText("-")
 				}
 			case 5:
-				if row.State == failedScanRowState {
-					label.SetText(fmt.Sprintf("⚠ %s", row.State))
-					label.Importance = widget.DangerImportance
-				} else if isThumbnailFallback(row.Source) && !isCompletedState(row.State) {
-					label.SetText(fmt.Sprintf("⚠ %s", row.State))
-					label.Importance = widget.DangerImportance
-				} else {
-					label.SetText(row.State)
-				}
-			case 6:
 				if strings.TrimSpace(row.FileSHA256) == "" {
 					label.SetText("-")
 				} else {
@@ -387,7 +594,10 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			default:
 				label.SetText("")
 			}
-			label.Refresh()
+			if label.Importance != nextImportance {
+				label.Importance = nextImportance
+				label.Refresh()
+			}
 		},
 	)
 	baseTable.CreateHeader = func() fyne.CanvasObject {
@@ -450,8 +660,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	table.SetColumnWidth(2, 190)
 	table.SetColumnWidth(3, 90)
 	table.SetColumnWidth(4, 120)
-	table.SetColumnWidth(5, 130)
-	table.SetColumnWidth(6, 500)
+	table.SetColumnWidth(5, 500)
 
 	var scanInProgress bool
 	var activeStopSignal *stopSignal
@@ -529,6 +738,8 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			limitEntry.Disable()
 			searchEntry.Disable()
 			typeFilterSelect.Disable()
+			instanceTypeFilterSelect.Disable()
+			propertyNameFilterSelect.Disable()
 		} else {
 			scanButton.SetText("Start Scan")
 			selectSourceButton.Enable()
@@ -538,6 +749,8 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			limitEntry.Enable()
 			searchEntry.Enable()
 			typeFilterSelect.Enable()
+			instanceTypeFilterSelect.Enable()
+			propertyNameFilterSelect.Enable()
 		}
 	}
 	requestStopScan := func() {
@@ -563,8 +776,17 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	showOnlyDuplicatesCheck.SetChecked(false)
 	searchEntry.OnChanged = func(nextQuery string) {
 		searchQuery = strings.TrimSpace(nextQuery)
-		applySortAndFilters()
-		clearPreview()
+		changeToken := searchChangeToken.Add(1)
+		go func(expectedToken uint64) {
+			time.Sleep(scanSearchDebounceDelay)
+			fyne.Do(func() {
+				if searchChangeToken.Load() != expectedToken {
+					return
+				}
+				applySortAndFilters()
+				clearPreview()
+			})
+		}(changeToken)
 	}
 	typeFilterSelect.OnChanged = func(nextFilterValue string) {
 		if suppressTypeFilterChange {
@@ -572,8 +794,38 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}
 		if strings.TrimSpace(nextFilterValue) == "" {
 			typeFilterValue = scanFilterAllOption
+		} else if mappedValue, found := typeDisplayToValue[nextFilterValue]; found {
+			typeFilterValue = mappedValue
 		} else {
 			typeFilterValue = nextFilterValue
+		}
+		applySortAndFilters()
+		clearPreview()
+	}
+	instanceTypeFilterSelect.OnChanged = func(nextFilterValue string) {
+		if suppressInstanceTypeFilterChange {
+			return
+		}
+		if strings.TrimSpace(nextFilterValue) == "" {
+			instanceTypeFilterValue = scanFilterAllOption
+		} else if mappedValue, found := instanceTypeDisplayToValue[nextFilterValue]; found {
+			instanceTypeFilterValue = mappedValue
+		} else {
+			instanceTypeFilterValue = nextFilterValue
+		}
+		applySortAndFilters()
+		clearPreview()
+	}
+	propertyNameFilterSelect.OnChanged = func(nextFilterValue string) {
+		if suppressPropertyNameFilterChange {
+			return
+		}
+		if strings.TrimSpace(nextFilterValue) == "" {
+			propertyNameFilterValue = scanFilterAllOption
+		} else if mappedValue, found := propertyNameDisplayToValue[nextFilterValue]; found {
+			propertyNameFilterValue = mappedValue
+		} else {
+			propertyNameFilterValue = nextFilterValue
 		}
 		applySortAndFilters()
 		clearPreview()
@@ -602,7 +854,6 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		allResults = importedResults
 		selectedAssetID = 0
 		clearPreview()
-		updateFilterOptions()
 		applySortAndFilters()
 		if strings.TrimSpace(statusMessage) != "" {
 			statusLabel.SetText(statusMessage)
@@ -611,9 +862,13 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 
 	importResultsFromPath := func(importPath string) {
 		statusLabel.SetText("Importing results...")
+		progress := newProgressDialog(window, "Load JSON", "Reading scan results...")
+		readProgress := progressRangeReporter(progress, 0, 0.3, "Reading scan results...")
+		parseProgress := progressRangeReporter(progress, 0.3, 0.9, "Parsing scan results...")
 		go func() {
-			importBytes, readErr := os.ReadFile(importPath)
+			importBytes, readErr := readFileWithProgress(importPath, readProgress)
 			if readErr != nil {
+				progress.Hide()
 				fyne.Do(func() {
 					statusLabel.SetText(fmt.Sprintf("Import read failed: %s", readErr.Error()))
 					fyneDialog.ShowError(fmt.Errorf("import read failed: %w", readErr), window)
@@ -623,10 +878,12 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 
 			var importedResults []scanResult
 			importFormat := detectScanImportFormat(importBytes)
+			progress.Update(0.3, "Parsing scan results...")
 			switch importFormat {
 			case scanImportFormatWorkspace:
-				tablesByContext, parseErr := unmarshalScanWorkspace(importBytes)
+				tablesByContext, parseErr := unmarshalScanWorkspace(importBytes, parseProgress)
 				if parseErr != nil {
+					progress.Hide()
 					fyne.Do(func() {
 						statusLabel.SetText(fmt.Sprintf("Import parse failed: %s", parseErr.Error()))
 						fyneDialog.ShowError(fmt.Errorf("import parse failed: %w", parseErr), window)
@@ -636,8 +893,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				importedResults = tablesByContext[options.ScanContextKey]
 			case scanImportFormatTable:
 				var parseErr error
-				importedResults, parseErr = unmarshalScanTable(importBytes)
+				importedResults, parseErr = unmarshalScanTable(importBytes, parseProgress)
 				if parseErr != nil {
+					progress.Hide()
 					fyne.Do(func() {
 						statusLabel.SetText(fmt.Sprintf("Import parse failed: %s", parseErr.Error()))
 						fyneDialog.ShowError(fmt.Errorf("import parse failed: %w", parseErr), window)
@@ -645,6 +903,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 					return
 				}
 			default:
+				progress.Hide()
 				fyne.Do(func() {
 					statusLabel.SetText("Import parse failed: unsupported scan JSON format.")
 					fyneDialog.ShowError(fmt.Errorf("import parse failed: unsupported scan JSON format"), window)
@@ -652,7 +911,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				return
 			}
 
+			progress.Update(0.95, "Applying imported results...")
 			fyne.Do(func() {
+				progress.Hide()
 				addRecentLoadedFile(importPath)
 				applyImportedResults(importedResults, fmt.Sprintf("Imported %d results.", len(importedResults)))
 				if importFormat == scanImportFormatWorkspace {
@@ -741,15 +1002,20 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}
 		resultsToExport := append([]scanResult(nil), allResults...)
 		statusLabel.SetText("Exporting results...")
+		progress := newProgressDialog(window, "Save JSON", "Serializing scan results...")
+		serializeProgress := progressRangeReporter(progress, 0.05, 0.8, "Serializing scan results...")
+		writeProgress := progressRangeReporter(progress, 0.8, 1, "Writing JSON file...")
 		go func() {
-			exportBytes, marshalErr := marshalScanTable(resultsToExport)
+			exportBytes, marshalErr := marshalScanTable(resultsToExport, serializeProgress)
 			if marshalErr != nil {
+				progress.Hide()
 				fyne.Do(func() {
 					statusLabel.SetText(fmt.Sprintf("Export failed: %s", marshalErr.Error()))
 				})
 				return
 			}
-			if writeErr := os.WriteFile(selectedExportPath, exportBytes, 0644); writeErr != nil {
+			if writeErr := writeFileWithProgress(selectedExportPath, exportBytes, writeProgress); writeErr != nil {
+				progress.Hide()
 				fyne.Do(func() {
 					statusLabel.SetText(fmt.Sprintf("Export write failed: %s", writeErr.Error()))
 				})
@@ -757,6 +1023,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 
 			fyne.Do(func() {
+				progress.Hide()
 				statusLabel.SetText(fmt.Sprintf("Saved %d results.", len(resultsToExport)))
 				logDebugf("Scan table exported: %s (rows=%d)", selectedExportPath, len(resultsToExport))
 			})
@@ -843,7 +1110,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		allResults = []scanResult{}
 		displayResults = []scanResult{}
 		selectedAssetID = 0
-		updateFilterOptions()
+		updateFilterOptions(map[string]int{})
 		table.Refresh()
 		clearPreview()
 		logDebugf("Scan started for source: %s (limit=%d)", combinedSourcePath(), limitValue)
@@ -928,6 +1195,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			completedCount := 0
 			pendingRows := make([]scanResult, 0, scanLoadUIBatchSize)
 			lastUIFlushAt := time.Now()
+			lastScheduledResultsRefreshAt := time.Time{}
+			lastScheduledFilterRefreshAt := time.Time{}
+			loadStartedAt := time.Now()
 			flushPendingRows := func(force bool) {
 				if len(pendingRows) == 0 {
 					return
@@ -939,11 +1209,22 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				publishedCount := completedCount
 				pendingRows = pendingRows[:0]
 				lastUIFlushAt = time.Now()
+				refreshResults := force || len(displayResults) == 0 || time.Since(lastScheduledResultsRefreshAt) >= scanLoadUIRefreshDelay
+				refreshFilters := force || len(allResults) == 0 || time.Since(lastScheduledFilterRefreshAt) >= scanLoadUIRefreshDelay
+				if refreshResults {
+					lastScheduledResultsRefreshAt = time.Now()
+				}
+				if refreshFilters {
+					lastScheduledFilterRefreshAt = time.Now()
+				}
 				fyne.Do(func() {
 					allResults = append(allResults, rowsToPublish...)
-					updateFilterOptions()
-					applySortAndFilters()
-					statusLabel.SetText(fmt.Sprintf("Loading results %d/%d...", publishedCount, len(hits)))
+					if refreshResults {
+						applySortAndFilters()
+					} else if refreshFilters {
+						updateFilterOptions(buildHashCounts(allResults))
+					}
+					statusLabel.SetText(buildScanLoadingStatus(publishedCount, len(hits), time.Since(loadStartedAt)))
 				})
 			}
 			for loadOutcome := range loadOutcomes {
@@ -1028,7 +1309,11 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			nil,
 			container.NewHBox(
 				widget.NewLabel("Type:"),
-				container.NewGridWrap(fyne.NewSize(220, 36), typeFilterSelect),
+				container.NewGridWrap(fyne.NewSize(260, 36), typeFilterSelect),
+				widget.NewLabel("Instance Type:"),
+				container.NewGridWrap(fyne.NewSize(280, 36), instanceTypeFilterSelect),
+				widget.NewLabel("Property Name:"),
+				container.NewGridWrap(fyne.NewSize(280, 36), propertyNameFilterSelect),
 				showOnlyDuplicatesCheck,
 			),
 			container.NewBorder(
@@ -1048,12 +1333,14 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			widget.NewSeparator(),
 			statsDuplicateLabel,
 			widget.NewSeparator(),
+			statsDuplicateSizeLabel,
+			widget.NewSeparator(),
 			statsSizeLabel,
 		),
 		dragDropHintLabel,
 		container.NewVBox(sourceLabels...),
 	)
-	updateFilterOptions()
+	updateFilterOptions(map[string]int{})
 	updateStatsLabels()
 
 	previewContent := container.NewVBox(

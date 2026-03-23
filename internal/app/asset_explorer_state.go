@@ -1,11 +1,17 @@
 package app
 
+import "strings"
+
 type assetExplorerRow struct {
 	AssetID       int64
 	Depth         int
 	SelfBytesSize int
 	AssetTypeID   int
 	Resolved      bool
+	InstanceType  string
+	InstanceName  string
+	InstancePath  string
+	PropertyName  string
 }
 
 type assetExplorerState struct {
@@ -53,6 +59,10 @@ func (state *assetExplorerState) addChildren(parentAssetID int64, childDepth int
 			SelfBytesSize: childAsset.BytesSize,
 			AssetTypeID:   childAsset.AssetTypeID,
 			Resolved:      childAsset.Resolved,
+			InstanceType:  childAsset.InstanceType,
+			InstanceName:  childAsset.InstanceName,
+			InstancePath:  childAsset.InstancePath,
+			PropertyName:  childAsset.PropertyName,
 		})
 	}
 }
@@ -63,6 +73,47 @@ func (state *assetExplorerState) getRows() []assetExplorerRow {
 
 func (state *assetExplorerState) getSelectedID() int64 {
 	return state.selectedID
+}
+
+func (state *assetExplorerState) getRow(assetID int64) (assetExplorerRow, bool) {
+	rowIndex, exists := state.indexByID[assetID]
+	if !exists || rowIndex < 0 || rowIndex >= len(state.rows) {
+		return assetExplorerRow{}, false
+	}
+	return state.rows[rowIndex], true
+}
+
+func (state *assetExplorerState) getInstancePath(assetID int64) string {
+	if state == nil {
+		return ""
+	}
+	rowIndex, exists := state.indexByID[assetID]
+	if !exists || rowIndex < 0 || rowIndex >= len(state.rows) {
+		return ""
+	}
+	if explicitPath := strings.TrimSpace(state.rows[rowIndex].InstancePath); explicitPath != "" {
+		return explicitPath
+	}
+	pathSegments := []string{}
+	currentDepth := state.rows[rowIndex].Depth
+	for index := rowIndex; index >= 0; index-- {
+		row := state.rows[index]
+		if row.Depth != currentDepth {
+			continue
+		}
+		segment := strings.TrimSpace(row.InstanceName)
+		if segment == "" {
+			segment = strings.TrimSpace(row.InstanceType)
+		}
+		if segment != "" {
+			pathSegments = append([]string{segment}, pathSegments...)
+		}
+		if currentDepth == 0 {
+			break
+		}
+		currentDepth--
+	}
+	return strings.Join(pathSegments, ".")
 }
 
 func (state *assetExplorerState) selectAsset(assetID int64) (*assetPreviewResult, error) {

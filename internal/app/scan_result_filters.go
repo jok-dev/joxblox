@@ -52,6 +52,10 @@ func scanResultMatchesQuery(result scanResult, query string) bool {
 		result.Source,
 		result.State,
 		result.AssetTypeName,
+		result.InstanceType,
+		result.PropertyName,
+		result.InstanceName,
+		result.InstancePath,
 		strconv.Itoa(result.AssetTypeID),
 		result.Format,
 		result.ContentType,
@@ -65,12 +69,33 @@ func scanResultMatchesQuery(result scanResult, query string) bool {
 }
 
 func scanResultTypeLabel(result scanResult) string {
-	trimmedTypeName := strings.TrimSpace(result.AssetTypeName)
-	if trimmedTypeName == "" {
-		trimmedTypeName = "Unknown"
-	}
+	trimmedTypeName := scanResultTypeFilterLabel(result)
 	if result.AssetTypeID > 0 {
 		return fmt.Sprintf("%s (%d)", trimmedTypeName, result.AssetTypeID)
 	}
 	return trimmedTypeName
+}
+
+func scanResultTypeFilterLabel(result scanResult) string {
+	trimmedTypeName := strings.TrimSpace(result.AssetTypeName)
+	if trimmedTypeName == "" {
+		trimmedTypeName = "Unknown"
+	}
+	return trimmedTypeName
+}
+
+func scanResultInstanceTypeLabel(result scanResult) string {
+	trimmedInstanceType := strings.TrimSpace(result.InstanceType)
+	if trimmedInstanceType == "" {
+		return "Unknown"
+	}
+	return trimmedInstanceType
+}
+
+func scanResultPropertyNameLabel(result scanResult) string {
+	trimmedPropertyName := strings.TrimSpace(result.PropertyName)
+	if trimmedPropertyName == "" {
+		return "Unknown"
+	}
+	return trimmedPropertyName
 }

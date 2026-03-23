@@ -62,10 +62,14 @@ type imageInfo struct {
 }
 
 type childAssetInfo struct {
-	AssetID     int64
-	BytesSize   int
-	AssetTypeID int
-	Resolved    bool
+	AssetID      int64
+	BytesSize    int
+	AssetTypeID  int
+	Resolved     bool
+	InstanceType string
+	InstanceName string
+	InstancePath string
+	PropertyName string
 }
 
 type assetPreviewResult struct {
@@ -122,12 +126,13 @@ type economyAssetDetailsInfo struct {
 }
 
 type assetFileInfo struct {
-	Info               *imageInfo
-	IsImage            bool
-	ReferencedAssetIDs []int64
-	RustExtractorJSON  string
-	FileBytes          []byte
-	FileName           string
+	Info                    *imageInfo
+	IsImage                 bool
+	ReferencedAssetIDs      []int64
+	RustExtractorReferences []rustExtractorResult
+	RustExtractorJSON       string
+	FileBytes               []byte
+	FileName                string
 }
 
 func parseAssetID(rawInput string) (int64, error) {
@@ -193,7 +198,11 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 			downloadFileName = deliveryFileInfo.FileName
 			downloadIsOriginal = !deliveryFileInfo.IsImage
 			if deliveryFileInfo.IsImage {
-				totalBytesSize, childAssets := computeChildAssetsAndTotal(deliveryFileInfo.Info.BytesSize, referencedAssetIDs)
+				totalBytesSize, childAssets := computeChildAssetsAndTotal(
+					deliveryFileInfo.Info.BytesSize,
+					referencedAssetIDs,
+					deliveryFileInfo.RustExtractorReferences,
+				)
 				return &assetPreviewResult{
 					Image:              deliveryFileInfo.Info,
 					Stats:              deliveryFileInfo.Info,
@@ -288,7 +297,11 @@ func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
 		return nil, fmt.Errorf("Thumbnail download failed (%s). AssetDelivery error: %s", thumbnailImageErr.Error(), assetDeliveryErrText)
 	}
 
-	totalBytesSize, childAssets := computeChildAssetsAndTotal(chooseStatsInfo(statsInfo, thumbnailImageInfo).BytesSize, referencedAssetIDs)
+	totalBytesSize, childAssets := computeChildAssetsAndTotal(
+		chooseStatsInfo(statsInfo, thumbnailImageInfo).BytesSize,
+		referencedAssetIDs,
+		nil,
+	)
 	return &assetPreviewResult{
 		Image:              thumbnailImageInfo,
 		Stats:              chooseStatsInfo(statsInfo, thumbnailImageInfo),
@@ -332,7 +345,7 @@ func buildNoThumbnailPreviewResult(
 	downloadIsOriginal bool,
 ) *assetPreviewResult {
 	safeStatsInfo := ensureImageInfo(statsInfo)
-	totalBytesSize, childAssets := computeChildAssetsAndTotal(safeStatsInfo.BytesSize, referencedAssetIDs)
+	totalBytesSize, childAssets := computeChildAssetsAndTotal(safeStatsInfo.BytesSize, referencedAssetIDs, nil)
 	return &assetPreviewResult{
 		Image:              &imageInfo{},
 		Stats:              safeStatsInfo,
@@ -543,21 +556,23 @@ func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeH
 			}
 		}
 		referencedAssetIDs := []int64{}
+		rustExtractorReferences := []rustExtractorResult{}
 		rustExtractorJSON := ""
 		var extractErr error
 		if !shouldSkipRustExtractionForAssetType(assetTypeID) {
-			referencedAssetIDs, rustExtractorJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
+			referencedAssetIDs, rustExtractorReferences, rustExtractorJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
 		}
 		if extractErr != nil {
 			return nil, extractErr
 		}
 		return &assetFileInfo{
-			Info:               info,
-			IsImage:            false,
-			ReferencedAssetIDs: referencedAssetIDs,
-			RustExtractorJSON:  rustExtractorJSON,
-			FileBytes:          fileBytes,
-			FileName:           fileName,
+			Info:                    info,
+			IsImage:                 false,
+			ReferencedAssetIDs:      referencedAssetIDs,
+			RustExtractorReferences: rustExtractorReferences,
+			RustExtractorJSON:       rustExtractorJSON,
+			FileBytes:               fileBytes,
+			FileName:                fileName,
 		}, nil
 	}
 
@@ -573,21 +588,23 @@ func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeH
 		info.RecompressedJPEGByteSize = recompressedJPEGByteSize
 	}
 	referencedAssetIDs := []int64{}
+	rustExtractorReferences := []rustExtractorResult{}
 	rustExtractorJSON := ""
 	var extractErr error
 	if !shouldSkipRustExtractionForAssetType(assetTypeID) {
-		referencedAssetIDs, rustExtractorJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
+		referencedAssetIDs, rustExtractorReferences, rustExtractorJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
 	}
 	if extractErr != nil {
 		return nil, extractErr
 	}
 	return &assetFileInfo{
-		Info:               info,
-		IsImage:            true,
-		ReferencedAssetIDs: referencedAssetIDs,
-		RustExtractorJSON:  rustExtractorJSON,
-		FileBytes:          fileBytes,
-		FileName:           fileName,
+		Info:                    info,
+		IsImage:                 true,
+		ReferencedAssetIDs:      referencedAssetIDs,
+		RustExtractorReferences: rustExtractorReferences,
+		RustExtractorJSON:       rustExtractorJSON,
+		FileBytes:               fileBytes,
+		FileName:                fileName,
 	}, nil
 }
 
@@ -689,26 +706,45 @@ func computeBestCompressedImageSizes(imageBytes []byte) (int, int, error) {
 	return recompressedBuffer.Len(), recompressedJPEGBuffer.Len(), nil
 }
 
-func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64) (int, []childAssetInfo) {
+func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64, rustExtractorReferences []rustExtractorResult) (int, []childAssetInfo) {
 	totalBytesSize := selfBytesSize
 	childAssets := make([]childAssetInfo, 0, len(referencedAssetIDs))
+	referenceByAssetID := map[int64]rustExtractorResult{}
+	for _, reference := range rustExtractorReferences {
+		if reference.ID <= 0 {
+			continue
+		}
+		if _, exists := referenceByAssetID[reference.ID]; exists {
+			continue
+		}
+		referenceByAssetID[reference.ID] = reference
+	}
 	for _, referencedAssetID := range referencedAssetIDs {
+		referenceContext := referenceByAssetID[referencedAssetID]
 		referencedAssetInfo, infoErr := getAssetSelfInfo(referencedAssetID)
 		if infoErr != nil || referencedAssetInfo.BytesSize <= 0 {
 			childAssets = append(childAssets, childAssetInfo{
-				AssetID:     referencedAssetID,
-				BytesSize:   0,
-				AssetTypeID: referencedAssetInfo.AssetTypeID,
-				Resolved:    false,
+				AssetID:      referencedAssetID,
+				BytesSize:    0,
+				AssetTypeID:  referencedAssetInfo.AssetTypeID,
+				Resolved:     false,
+				InstanceType: strings.TrimSpace(referenceContext.InstanceType),
+				InstanceName: strings.TrimSpace(referenceContext.InstanceName),
+				InstancePath: strings.TrimSpace(referenceContext.InstancePath),
+				PropertyName: strings.TrimSpace(referenceContext.PropertyName),
 			})
 			continue
 		}
 		totalBytesSize += referencedAssetInfo.BytesSize
 		childAssets = append(childAssets, childAssetInfo{
-			AssetID:     referencedAssetID,
-			BytesSize:   referencedAssetInfo.BytesSize,
-			AssetTypeID: referencedAssetInfo.AssetTypeID,
-			Resolved:    true,
+			AssetID:      referencedAssetID,
+			BytesSize:    referencedAssetInfo.BytesSize,
+			AssetTypeID:  referencedAssetInfo.AssetTypeID,
+			Resolved:     true,
+			InstanceType: strings.TrimSpace(referenceContext.InstanceType),
+			InstanceName: strings.TrimSpace(referenceContext.InstanceName),
+			InstancePath: strings.TrimSpace(referenceContext.InstancePath),
+			PropertyName: strings.TrimSpace(referenceContext.PropertyName),
 		})
 	}
 	return totalBytesSize, childAssets
@@ -749,12 +785,12 @@ func getAssetSelfInfo(assetID int64) (assetSelfInfo, error) {
 	return selfInfo, nil
 }
 
-func extractReferencedAssetIDsFromBytes(fileBytes []byte, assetTypeID int) ([]int64, string, error) {
-	rustAssetIDs, rustExtractorJSON, rustErr := extractAssetIDsWithRustFromBytes(fileBytes, assetTypeID, rustExtractorDefaultLimit)
+func extractReferencedAssetIDsFromBytes(fileBytes []byte, assetTypeID int) ([]int64, []rustExtractorResult, string, error) {
+	rustAssetIDs, _, rustExtractorReferences, rustExtractorJSON, rustErr := extractAssetIDsWithRustFromFileWithCountsFromBytes(fileBytes, assetTypeID, rustExtractorDefaultLimit)
 	if rustErr != nil {
 		logDebugf("Referenced asset extraction Rust path errored: %s", rustErr.Error())
-		return []int64{}, rustExtractorJSON, rustErr
+		return []int64{}, []rustExtractorResult{}, rustExtractorJSON, rustErr
 	}
 	logDebugf("Referenced asset extraction Rust path returned %d IDs", len(rustAssetIDs))
-	return rustAssetIDs, rustExtractorJSON, nil
+	return rustAssetIDs, rustExtractorReferences, rustExtractorJSON, nil
 }

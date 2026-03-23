@@ -435,6 +435,7 @@ name = "rbxl-id-extractor"
 version = "0.1.0"
 dependencies = [
  "rbx_binary",
+ "rbx_dom_weak",
  "regex",
  "serde",
  "serde_json",

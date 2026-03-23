@@ -162,7 +162,7 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 		return nil, readErr
 	}
 
-	rustAssetIDs, useCountsByAssetID, _, rustScanErr := extractAssetIDsWithRustFromFileWithCounts(filePath, 0, limit, stopChannel)
+	rustAssetIDs, useCountsByAssetID, extractedReferences, _, rustScanErr := extractAssetIDsWithRustFromFileWithCounts(filePath, 0, limit, stopChannel)
 	if errors.Is(rustScanErr, errScanStopped) {
 		logDebugf("RBXL scan stopped during Rust extraction")
 		return nil, errScanStopped
@@ -173,15 +173,30 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 	}
 
 	hits := make([]scanHit, 0, len(rustAssetIDs))
+	referenceByAssetID := map[int64]rustExtractorResult{}
+	for _, extractedReference := range extractedReferences {
+		if extractedReference.ID <= 0 {
+			continue
+		}
+		if _, exists := referenceByAssetID[extractedReference.ID]; exists {
+			continue
+		}
+		referenceByAssetID[extractedReference.ID] = extractedReference
+	}
 	for _, assetID := range rustAssetIDs {
 		useCount := useCountsByAssetID[assetID]
 		if useCount <= 0 {
 			useCount = 1
 		}
+		referenceContext := referenceByAssetID[assetID]
 		hits = append(hits, scanHit{
-			AssetID:  assetID,
-			FilePath: filePath,
-			UseCount: useCount,
+			AssetID:      assetID,
+			FilePath:     filePath,
+			UseCount:     useCount,
+			InstanceType: strings.TrimSpace(referenceContext.InstanceType),
+			InstanceName: strings.TrimSpace(referenceContext.InstanceName),
+			InstancePath: strings.TrimSpace(referenceContext.InstancePath),
+			PropertyName: strings.TrimSpace(referenceContext.PropertyName),
 		})
 	}
 	logDebugf("RBXL scan completed with %d unique asset IDs", len(hits))
@@ -212,7 +227,7 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	)
 
 	baselineAssetIDs := map[int64]bool{}
-	baselineFileAssetIDs, _, _, baselineErr := extractAssetIDsWithRustFromFileWithCounts(baselineFilePath, 0, 0, stopChannel)
+	baselineFileAssetIDs, _, _, _, baselineErr := extractAssetIDsWithRustFromFileWithCounts(baselineFilePath, 0, 0, stopChannel)
 	if errors.Is(baselineErr, errScanStopped) {
 		return nil, errScanStopped
 	}
@@ -224,12 +239,22 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	}
 
 	results := []scanHit{}
-	targetFileAssetIDs, targetUseCountsByAssetID, _, targetErr := extractAssetIDsWithRustFromFileWithCounts(targetFilePath, 0, 0, stopChannel)
+	targetFileAssetIDs, targetUseCountsByAssetID, targetReferences, _, targetErr := extractAssetIDsWithRustFromFileWithCounts(targetFilePath, 0, 0, stopChannel)
 	if errors.Is(targetErr, errScanStopped) {
 		return results, errScanStopped
 	}
 	if targetErr != nil {
 		return nil, targetErr
+	}
+	targetReferenceByAssetID := map[int64]rustExtractorResult{}
+	for _, extractedReference := range targetReferences {
+		if extractedReference.ID <= 0 {
+			continue
+		}
+		if _, exists := targetReferenceByAssetID[extractedReference.ID]; exists {
+			continue
+		}
+		targetReferenceByAssetID[extractedReference.ID] = extractedReference
 	}
 	seenTargetAssetIDs := map[int64]bool{}
 	for _, assetID := range targetFileAssetIDs {
@@ -241,10 +266,15 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 		if useCount <= 0 {
 			useCount = 1
 		}
+		referenceContext := targetReferenceByAssetID[assetID]
 		results = append(results, scanHit{
-			AssetID:  assetID,
-			FilePath: targetFilePath,
-			UseCount: useCount,
+			AssetID:      assetID,
+			FilePath:     targetFilePath,
+			UseCount:     useCount,
+			InstanceType: strings.TrimSpace(referenceContext.InstanceType),
+			InstanceName: strings.TrimSpace(referenceContext.InstanceName),
+			InstancePath: strings.TrimSpace(referenceContext.InstancePath),
+			PropertyName: strings.TrimSpace(referenceContext.PropertyName),
 		})
 		if limit > 0 && len(results) >= limit {
 			break

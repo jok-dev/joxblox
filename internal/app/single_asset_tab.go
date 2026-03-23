@@ -26,6 +26,22 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	var explorerState *assetExplorerState
 	var renderPreview func(selectedAssetID int64, previewResult *assetPreviewResult)
 	renderPreview = func(selectedAssetID int64, previewResult *assetPreviewResult) {
+		referenceInstanceType := ""
+		referencePropertyName := ""
+		referenceInstancePath := ""
+		if explorerState != nil {
+			if selectedRow, found := explorerState.getRow(selectedAssetID); found {
+				referenceInstanceType = selectedRow.InstanceType
+				referencePropertyName = selectedRow.PropertyName
+				referenceInstancePath = explorerState.getInstancePath(selectedAssetID)
+				if referenceInstancePath == "" {
+					referenceInstancePath = selectedRow.InstancePath
+				}
+				if referenceInstancePath == "" {
+					referenceInstancePath = selectedRow.InstanceName
+				}
+			}
+		}
 		downloadedSHA256 := ""
 		if previewResult.Stats != nil && strings.TrimSpace(previewResult.Stats.SHA256) != "" {
 			downloadedSHA256 = previewResult.Stats.SHA256
@@ -48,6 +64,9 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 			previewResult.EconomyJSON,
 			previewResult.RustExtractorJSON,
 			previewResult.ReferencedAssetIDs,
+			referenceInstanceType,
+			referencePropertyName,
+			referenceInstancePath,
 			previewResult.AssetTypeID,
 			previewResult.AssetTypeName,
 			previewResult.DownloadBytes,

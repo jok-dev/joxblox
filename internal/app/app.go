@@ -34,10 +34,10 @@ func Run() {
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1350, 900))
 
-	singleAssetTab := container.NewTabItem("Single Asset", newSingleAssetTab(window))
+	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, newSingleAssetTab(window))
 	scanContent, scanFileActions, allScanFileActions, selectScanContext := newScanTab(window)
-	scanTab := container.NewTabItem("Scan", scanContent)
-	imageUploaderTab := container.NewTabItem("Image Generator", newImageUploaderTab(window))
+	scanTab := container.NewTabItem(tabTitleScan, scanContent)
+	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, newImageUploaderTab(window))
 	tabs := container.NewAppTabs(singleAssetTab, scanTab, imageUploaderTab)
 	bindMainFileMenu(
 		window,

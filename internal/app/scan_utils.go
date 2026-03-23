@@ -27,9 +27,13 @@ var (
 )
 
 type scanHit struct {
-	AssetID  int64
-	FilePath string
-	UseCount int
+	AssetID      int64
+	FilePath     string
+	UseCount     int
+	InstanceType string
+	InstanceName string
+	InstancePath string
+	PropertyName string
 }
 
 type stopSignal struct {

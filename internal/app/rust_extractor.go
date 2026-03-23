@@ -17,18 +17,22 @@ import (
 const rustExtractorDefaultLimit = 5_000
 
 type rustExtractorResult struct {
-	AssetIDs       []int64        `json:"asset_ids"`
-	AssetUseCounts map[string]int `json:"asset_use_counts"`
+	ID           int64  `json:"id"`
+	InstanceType string `json:"instanceType"`
+	InstanceName string `json:"instanceName"`
+	InstancePath string `json:"instancePath"`
+	PropertyName string `json:"propertyName"`
+	Used         int    `json:"used"`
 }
 
 func extractAssetIDsWithRustFromFile(filePath string, assetTypeID int, limit int, stopChannel <-chan struct{}) ([]int64, string, error) {
-	assetIDs, _, commandOutputText, extractErr := extractAssetIDsWithRustFromFileWithCounts(filePath, assetTypeID, limit, stopChannel)
+	assetIDs, _, _, commandOutputText, extractErr := extractAssetIDsWithRustFromFileWithCounts(filePath, assetTypeID, limit, stopChannel)
 	return assetIDs, commandOutputText, extractErr
 }
 
-func extractAssetIDsWithRustFromFileWithCounts(filePath string, assetTypeID int, limit int, stopChannel <-chan struct{}) ([]int64, map[int64]int, string, error) {
+func extractAssetIDsWithRustFromFileWithCounts(filePath string, assetTypeID int, limit int, stopChannel <-chan struct{}) ([]int64, map[int64]int, []rustExtractorResult, string, error) {
 	if strings.TrimSpace(filePath) == "" {
-		return nil, map[int64]int{}, "", nil
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", nil
 	}
 	logDebugf(
 		"Rust extractor requested for file: %s (limit=%d, assetType=%s (%d))",
@@ -40,7 +44,7 @@ func extractAssetIDsWithRustFromFileWithCounts(filePath string, assetTypeID int,
 	repoRootPath, rootErr := getRepositoryRootPath()
 	if rootErr != nil {
 		logDebugf("Rust extractor skipped (repo root unavailable): %s", rootErr.Error())
-		return nil, map[int64]int{}, "", nil
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", nil
 	}
 
 	toolDirectoryPath := filepath.Join(repoRootPath, "tools", "rbxl-id-extractor")
@@ -82,39 +86,44 @@ func extractAssetIDsWithRustFromFileWithCounts(filePath string, assetTypeID int,
 	runErr := command.Run()
 	if commandContext.Err() != nil {
 		logDebugf("Rust extractor cancelled")
-		return nil, map[int64]int{}, "", errScanStopped
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", errScanStopped
 	}
 	if runErr != nil {
 		stderrText := strings.TrimSpace(stderrBuffer.String())
 		if stderrText == "" {
 			logDebugf("Rust extractor failed: %s", runErr.Error())
-			return nil, map[int64]int{}, "", fmt.Errorf("Rust extractor failed: %s", runErr.Error())
+			return nil, map[int64]int{}, []rustExtractorResult{}, "", fmt.Errorf("Rust extractor failed: %s", runErr.Error())
 		} else {
 			logDebugf("Rust extractor failed: %s | stderr: %s", runErr.Error(), stderrText)
-			return nil, map[int64]int{}, "", fmt.Errorf("Rust extractor failed: %s", stderrText)
+			return nil, map[int64]int{}, []rustExtractorResult{}, "", fmt.Errorf("Rust extractor failed: %s", stderrText)
 		}
 	}
 
 	commandOutput := stdoutBuffer.Bytes()
 	commandOutputText := string(commandOutput)
-	assetIDsFromDOM, useCountsByAssetID := extractAssetIDsFromRustDOMJSON(commandOutputText, limit)
+	assetIDsFromDOM, useCountsByAssetID, extractedReferences := extractAssetIDsFromRustDOMJSON(commandOutputText, limit)
 	logDebugf(
-		"Rust extractor returned JSON bytes=%d and parsed IDs=%d",
+		"Rust extractor returned JSON bytes=%d and parsed references=%d",
 		len(commandOutput),
-		len(assetIDsFromDOM),
+		len(extractedReferences),
 	)
-	return assetIDsFromDOM, useCountsByAssetID, commandOutputText, nil
+	return assetIDsFromDOM, useCountsByAssetID, extractedReferences, commandOutputText, nil
 }
 
 func extractAssetIDsWithRustFromBytes(fileBytes []byte, assetTypeID int, limit int) ([]int64, string, error) {
+	assetIDs, _, _, commandOutputText, extractErr := extractAssetIDsWithRustFromFileWithCountsFromBytes(fileBytes, assetTypeID, limit)
+	return assetIDs, commandOutputText, extractErr
+}
+
+func extractAssetIDsWithRustFromFileWithCountsFromBytes(fileBytes []byte, assetTypeID int, limit int) ([]int64, map[int64]int, []rustExtractorResult, string, error) {
 	if len(fileBytes) == 0 {
-		return nil, "", nil
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", nil
 	}
 
 	tempFile, createErr := os.CreateTemp("", "rbxl-id-extractor-*.bin")
 	if createErr != nil {
 		logDebugf("Rust byte extraction temp file create failed: %s", createErr.Error())
-		return nil, "", createErr
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", createErr
 	}
 	tempFilePath := tempFile.Name()
 	defer os.Remove(tempFilePath)
@@ -123,15 +132,15 @@ func extractAssetIDsWithRustFromBytes(fileBytes []byte, assetTypeID int, limit i
 	closeErr := tempFile.Close()
 	if writeErr != nil {
 		logDebugf("Rust byte extraction temp file write failed: %s", writeErr.Error())
-		return nil, "", writeErr
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", writeErr
 	}
 	if closeErr != nil {
 		logDebugf("Rust byte extraction temp file close failed: %s", closeErr.Error())
-		return nil, "", closeErr
+		return nil, map[int64]int{}, []rustExtractorResult{}, "", closeErr
 	}
 
 	logDebugf("Rust extractor processing in-memory payload (%d bytes)", len(fileBytes))
-	return extractAssetIDsWithRustFromFile(tempFilePath, assetTypeID, limit, nil)
+	return extractAssetIDsWithRustFromFileWithCounts(tempFilePath, assetTypeID, limit, nil)
 }
 
 func getRepositoryRootPath() (string, error) {
@@ -145,43 +154,48 @@ func getRepositoryRootPath() (string, error) {
 	return repositoryRootPath, nil
 }
 
-func extractAssetIDsFromRustDOMJSON(domJSON string, limit int) ([]int64, map[int64]int) {
-	extractorResult := rustExtractorResult{}
-	if unmarshalErr := json.Unmarshal([]byte(domJSON), &extractorResult); unmarshalErr != nil {
+func extractAssetIDsFromRustDOMJSON(domJSON string, limit int) ([]int64, map[int64]int, []rustExtractorResult) {
+	extractorResults := []rustExtractorResult{}
+	if unmarshalErr := json.Unmarshal([]byte(domJSON), &extractorResults); unmarshalErr != nil {
 		logDebugf("Rust extractor JSON parse failed: %s", unmarshalErr.Error())
-		return []int64{}, map[int64]int{}
+		return []int64{}, map[int64]int{}, []rustExtractorResult{}
 	}
 
-	uniqueAssetIDs := make([]int64, 0, len(extractorResult.AssetIDs))
+	uniqueAssetIDs := make([]int64, 0, len(extractorResults))
 	useCountsByAssetID := map[int64]int{}
-	for rawAssetID, useCount := range extractorResult.AssetUseCounts {
-		parsedAssetID, parseErr := strconv.ParseInt(rawAssetID, 10, 64)
-		if parseErr != nil {
-			continue
-		}
-		useCountsByAssetID[parsedAssetID] = useCount
-	}
+	filteredResults := make([]rustExtractorResult, 0, len(extractorResults))
 	seenAssetIDs := map[int64]bool{}
-	for _, assetID := range extractorResult.AssetIDs {
-		if seenAssetIDs[assetID] {
+	for _, extractorResult := range extractorResults {
+		if extractorResult.ID <= 0 {
 			continue
 		}
-		seenAssetIDs[assetID] = true
-		uniqueAssetIDs = append(uniqueAssetIDs, assetID)
+		if seenAssetIDs[extractorResult.ID] {
+			continue
+		}
+		seenAssetIDs[extractorResult.ID] = true
+		uniqueAssetIDs = append(uniqueAssetIDs, extractorResult.ID)
+		if extractorResult.Used > 0 {
+			useCountsByAssetID[extractorResult.ID] = extractorResult.Used
+		} else {
+			useCountsByAssetID[extractorResult.ID] = 1
+		}
+		filteredResults = append(filteredResults, extractorResult)
 	}
 	sort.Slice(uniqueAssetIDs, func(leftIndex int, rightIndex int) bool {
 		return uniqueAssetIDs[leftIndex] < uniqueAssetIDs[rightIndex]
 	})
-	if limit > 0 && len(uniqueAssetIDs) > limit {
-		uniqueAssetIDs = uniqueAssetIDs[:limit]
+	if limit > 0 && len(filteredResults) > limit {
+		filteredResults = filteredResults[:limit]
 	}
+	limitedAssetIDs := make([]int64, 0, len(filteredResults))
 	limitedUseCounts := map[int64]int{}
-	for _, assetID := range uniqueAssetIDs {
-		if useCount, found := useCountsByAssetID[assetID]; found {
-			limitedUseCounts[assetID] = useCount
-			continue
+	for _, extractorResult := range filteredResults {
+		limitedAssetIDs = append(limitedAssetIDs, extractorResult.ID)
+		if useCount, found := useCountsByAssetID[extractorResult.ID]; found {
+			limitedUseCounts[extractorResult.ID] = useCount
+		} else {
+			limitedUseCounts[extractorResult.ID] = 1
 		}
-		limitedUseCounts[assetID] = 1
 	}
-	return uniqueAssetIDs, limitedUseCounts
+	return limitedAssetIDs, limitedUseCounts, filteredResults
 }

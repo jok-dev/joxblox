@@ -1,10 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::OnceLock;
 
 use rbx_binary::from_reader;
+use rbx_dom_weak::{Instance, WeakDom};
 use regex::Regex;
 use serde::Serialize;
 
@@ -28,10 +29,15 @@ const ASSET_REFERENCE_PROPERTY_TOKENS: [&str; 15] = [
     "font",
 ];
 
-#[derive(Serialize)]
-struct ExtractResult {
-    asset_ids: Vec<i64>,
-    asset_use_counts: BTreeMap<i64, usize>,
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtractedAssetReference {
+    id: i64,
+    instance_type: String,
+    instance_name: String,
+    instance_path: String,
+    property_name: String,
+    used: usize,
 }
 
 fn main() {
@@ -63,37 +69,37 @@ fn run() -> Result<(), String> {
 
     let file_bytes =
         std::fs::read(file_path).map_err(|read_err| format!("read failed: {}", read_err))?;
-    let mut extracted_asset_ids = BTreeSet::<i64>::new();
-    let mut asset_use_counts = BTreeMap::<i64, usize>::new();
+    let mut extracted_asset_references = BTreeMap::<i64, ExtractedAssetReference>::new();
     let file = File::open(file_path).map_err(|open_err| format!("open failed: {}", open_err))?;
     if let Ok(dom) = from_reader(BufReader::new(file)) {
         for instance in dom.descendants() {
-            let meshpart_has_surface_color_map =
-                normalize_for_match(instance.class.as_ref()) == "meshpart"
-                    && instance.children().iter().any(|child_ref| {
-                        if let Some(child_instance) = dom.get_by_ref(*child_ref) {
-                            if normalize_for_match(child_instance.class.as_ref())
-                                != "surfaceappearance"
+            let instance_type = instance.class.as_ref();
+            let instance_name = instance.name.as_ref();
+            let instance_path = build_instance_path(&dom, instance);
+            let meshpart_has_surface_color_map = normalize_for_match(instance.class.as_ref())
+                == "meshpart"
+                && instance.children().iter().any(|child_ref| {
+                    if let Some(child_instance) = dom.get_by_ref(*child_ref) {
+                        if normalize_for_match(child_instance.class.as_ref()) != "surfaceappearance"
+                        {
+                            return false;
+                        }
+                        for (child_property_name, child_property_value) in
+                            child_instance.properties.iter()
+                        {
+                            if !normalize_for_match(child_property_name.as_ref())
+                                .contains("colormap")
                             {
-                                return false;
+                                continue;
                             }
-                            for (child_property_name, child_property_value) in
-                                child_instance.properties.iter()
-                            {
-                                if !normalize_for_match(child_property_name.as_ref())
-                                    .contains("colormap")
-                                {
-                                    continue;
-                                }
-                                let rendered_color_map_value =
-                                    format!("{:?}", child_property_value);
-                                if has_non_empty_content_value(&rendered_color_map_value) {
-                                    return true;
-                                }
+                            let rendered_color_map_value = format!("{:?}", child_property_value);
+                            if has_non_empty_content_value(&rendered_color_map_value) {
+                                return true;
                             }
                         }
-                        false
-                    });
+                    }
+                    false
+                });
             for (property_name, property_value) in instance.properties.iter() {
                 let normalized_property_name = normalize_for_match(property_name.as_ref());
                 let rendered_property_value = format!("{:?}", property_value);
@@ -112,42 +118,42 @@ fn run() -> Result<(), String> {
                 }
                 extract_ids_from_text(
                     &rendered_property_value,
-                    &mut extracted_asset_ids,
-                    &mut asset_use_counts,
+                    &mut extracted_asset_references,
+                    instance_type,
+                    instance_name,
+                    &instance_path,
+                    property_name.as_ref(),
                 );
             }
         }
         extract_ids_from_text(
             &String::from_utf8_lossy(&file_bytes),
-            &mut extracted_asset_ids,
-            &mut asset_use_counts,
+            &mut extracted_asset_references,
+            "",
+            "",
+            "",
+            "",
         );
     } else {
         extract_ids_from_text(
             &String::from_utf8_lossy(&file_bytes),
-            &mut extracted_asset_ids,
-            &mut asset_use_counts,
+            &mut extracted_asset_references,
+            "",
+            "",
+            "",
+            "",
         );
     }
 
-    let asset_ids = if let Some(max_results) = max_results {
-        extracted_asset_ids
-            .into_iter()
+    let extracted_asset_references = if let Some(max_results) = max_results {
+        extracted_asset_references
+            .into_values()
             .take(max_results)
             .collect::<Vec<_>>()
     } else {
-        extracted_asset_ids.into_iter().collect::<Vec<_>>()
+        extracted_asset_references.into_values().collect::<Vec<_>>()
     };
-    let mut limited_use_counts = BTreeMap::<i64, usize>::new();
-    for asset_id in &asset_ids {
-        if let Some(use_count) = asset_use_counts.get(asset_id) {
-            limited_use_counts.insert(*asset_id, *use_count);
-        }
-    }
-    let output = serde_json::to_string(&ExtractResult {
-        asset_ids,
-        asset_use_counts: limited_use_counts,
-    })
+    let output = serde_json::to_string(&extracted_asset_references)
         .map_err(|json_err| format!("json failed: {}", json_err))?;
     println!("{}", output);
     Ok(())
@@ -155,8 +161,11 @@ fn run() -> Result<(), String> {
 
 fn extract_ids_from_text(
     text: &str,
-    extracted_asset_ids: &mut BTreeSet<i64>,
-    asset_use_counts: &mut BTreeMap<i64, usize>,
+    extracted_asset_references: &mut BTreeMap<i64, ExtractedAssetReference>,
+    instance_type: &str,
+    instance_name: &str,
+    instance_path: &str,
+    property_name: &str,
 ) {
     let rbx_asset_regex = get_rbx_asset_regex();
     let asset_url_regex = get_asset_url_regex();
@@ -171,8 +180,14 @@ fn extract_ids_from_text(
         if let Some(asset_id_match) = regex_match.get(1) {
             explicit_ranges.push((asset_id_match.start(), asset_id_match.end()));
             if let Ok(asset_id) = asset_id_match.as_str().trim().parse::<i64>() {
-                extracted_asset_ids.insert(asset_id);
-                increment_use_count(asset_use_counts, asset_id);
+                record_asset_reference(
+                    extracted_asset_references,
+                    asset_id,
+                    instance_type,
+                    instance_name,
+                    instance_path,
+                    property_name,
+                );
             }
         }
     }
@@ -191,15 +206,73 @@ fn extract_ids_from_text(
             continue;
         }
         if let Ok(asset_id) = number_match.as_str().trim().parse::<i64>() {
-            extracted_asset_ids.insert(asset_id);
-            increment_use_count(asset_use_counts, asset_id);
+            record_asset_reference(
+                extracted_asset_references,
+                asset_id,
+                instance_type,
+                instance_name,
+                instance_path,
+                property_name,
+            );
         }
     }
 }
 
-fn increment_use_count(asset_use_counts: &mut BTreeMap<i64, usize>, asset_id: i64) {
-    let entry = asset_use_counts.entry(asset_id).or_insert(0);
-    *entry += 1;
+fn record_asset_reference(
+    extracted_asset_references: &mut BTreeMap<i64, ExtractedAssetReference>,
+    asset_id: i64,
+    instance_type: &str,
+    instance_name: &str,
+    instance_path: &str,
+    property_name: &str,
+) {
+    let entry = extracted_asset_references
+        .entry(asset_id)
+        .or_insert_with(|| ExtractedAssetReference {
+            id: asset_id,
+            instance_type: String::new(),
+            instance_name: String::new(),
+            instance_path: String::new(),
+            property_name: String::new(),
+            used: 0,
+        });
+    entry.used += 1;
+    if entry.instance_type.is_empty() && !instance_type.trim().is_empty() {
+        entry.instance_type = instance_type.trim().to_string();
+    }
+    if entry.instance_name.is_empty() && !instance_name.trim().is_empty() {
+        entry.instance_name = instance_name.trim().to_string();
+    }
+    if entry.instance_path.is_empty() && !instance_path.trim().is_empty() {
+        entry.instance_path = instance_path.trim().to_string();
+    }
+    if entry.property_name.is_empty() && !property_name.trim().is_empty() {
+        entry.property_name = property_name.trim().to_string();
+    }
+}
+
+fn build_instance_path(dom: &WeakDom, instance: &Instance) -> String {
+    let mut path_segments: Vec<String> = Vec::new();
+    let mut current_ref = instance.referent();
+    loop {
+        if current_ref == dom.root_ref() {
+            break;
+        }
+        let Some(current_instance) = dom.get_by_ref(current_ref) else {
+            break;
+        };
+        let trimmed_name = current_instance.name.trim();
+        if !trimmed_name.is_empty() {
+            path_segments.push(trimmed_name.to_string());
+        }
+        let parent_ref = current_instance.parent();
+        if dom.get_by_ref(parent_ref).is_none() {
+            break;
+        }
+        current_ref = parent_ref;
+    }
+    path_segments.reverse();
+    path_segments.join(".")
 }
 
 fn range_overlaps_explicit(start: usize, end: usize, explicit_ranges: &[(usize, usize)]) -> bool {

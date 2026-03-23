@@ -12,6 +12,10 @@ type scanResult struct {
 	UseCount             int
 	FilePath             string
 	FileSHA256           string
+	InstanceType         string
+	InstanceName         string
+	InstancePath         string
+	PropertyName         string
 	Source               string
 	State                string
 	Width                int
@@ -66,6 +70,10 @@ func loadScanResult(hit scanHit) (scanResult, error) {
 		UseCount:             hit.UseCount,
 		FilePath:             hit.FilePath,
 		FileSHA256:           statsInfo.SHA256,
+		InstanceType:         strings.TrimSpace(hit.InstanceType),
+		InstanceName:         strings.TrimSpace(hit.InstanceName),
+		InstancePath:         strings.TrimSpace(hit.InstancePath),
+		PropertyName:         strings.TrimSpace(hit.PropertyName),
 		Source:               previewResult.Source,
 		State:                previewResult.State,
 		Width:                statsInfo.Width,

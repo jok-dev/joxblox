@@ -3,7 +3,6 @@ package app
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -55,6 +54,9 @@ func bindMainFileMenu(
 					fileActions.ExportMarkdown()
 				})
 			}),
+			fyne.NewMenuItem("Clear All Results", func() {
+				clearAllScanResults(window, allScanFileActions)
+			}),
 			fyne.NewMenuItemSeparator(),
 		)
 		fileMenu.Items = append(fileMenu.Items, buildRecentFilesMenuItem(
@@ -75,7 +77,7 @@ func bindMainFileMenu(
 		}
 
 		switch selectedTab.Text {
-		case "Scan":
+		case tabTitleScan:
 			activeFileActionsProvider = scanFileActions
 		default:
 			activeFileActionsProvider = nil
@@ -162,6 +164,43 @@ func snapshotScanWorkspace(collectedActions []*scanTabFileActions) map[string][]
 	return tablesByContext
 }
 
+func clearAllScanResults(window fyne.Window, providers []scanTabFileActionsProvider) {
+	collectedActions := collectScanFileActions(providers)
+	if len(collectedActions) == 0 {
+		dialog.ShowInformation("File", "No scan tables are available to clear yet.", window)
+		return
+	}
+
+	totalRows := 0
+	for _, actions := range collectedActions {
+		if actions.GetResults == nil {
+			continue
+		}
+		totalRows += len(actions.GetResults())
+	}
+	if totalRows == 0 {
+		dialog.ShowInformation("File", "All scan tables are already empty.", window)
+		return
+	}
+
+	confirmMessage := fmt.Sprintf(
+		"Clear all scan results across every scan context?\n\nThis will remove %d loaded result(s) from the app.",
+		totalRows,
+	)
+	dialog.ShowConfirm("Clear All Results", confirmMessage, func(confirmed bool) {
+		if !confirmed {
+			return
+		}
+		for _, actions := range collectedActions {
+			if actions.SetResults == nil {
+				continue
+			}
+			actions.SetResults(nil)
+		}
+		logDebugf("All scan tables cleared from file menu (rows_cleared=%d)", totalRows)
+	}, window)
+}
+
 func saveAllScanResults(window fyne.Window, providers []scanTabFileActionsProvider) {
 	collectedActions := collectScanFileActions(providers)
 	if len(collectedActions) == 0 {
@@ -187,20 +226,26 @@ func saveAllScanResults(window fyne.Window, providers []scanTabFileActionsProvid
 		selectedExportPath += ".json"
 	}
 	tablesByContext := snapshotScanWorkspace(collectedActions)
+	progress := newProgressDialog(window, "Save JSON", "Serializing all scan tables...")
+	serializeProgress := progressRangeReporter(progress, 0.05, 0.8, "Serializing all scan tables...")
+	writeProgress := progressRangeReporter(progress, 0.8, 1, "Writing JSON file...")
 	go func() {
-		payloadBytes, marshalErr := marshalScanWorkspace(tablesByContext)
+		payloadBytes, marshalErr := marshalScanWorkspace(tablesByContext, serializeProgress)
 		if marshalErr != nil {
+			progress.Hide()
 			fyne.Do(func() {
 				dialog.ShowError(fmt.Errorf("save failed: %w", marshalErr), window)
 			})
 			return
 		}
-		if writeErr := os.WriteFile(selectedExportPath, payloadBytes, 0644); writeErr != nil {
+		if writeErr := writeFileWithProgress(selectedExportPath, payloadBytes, writeProgress); writeErr != nil {
+			progress.Hide()
 			fyne.Do(func() {
 				dialog.ShowError(fmt.Errorf("save write failed: %w", writeErr), window)
 			})
 			return
 		}
+		progress.Hide()
 		logDebugf("Scan workspace exported: %s", selectedExportPath)
 	}()
 }
@@ -268,9 +313,13 @@ func loadAllScanResultsFromPathWithActionsAsync(
 	importPath string,
 	onComplete func(string, bool),
 ) {
+	progress := newProgressDialog(window, "Load JSON", "Reading scan tables...")
+	readProgress := progressRangeReporter(progress, 0, 0.3, "Reading scan tables...")
+	parseProgress := progressRangeReporter(progress, 0.3, 0.9, "Parsing scan tables...")
 	go func() {
-		payloadBytes, readErr := os.ReadFile(importPath)
+		payloadBytes, readErr := readFileWithProgress(importPath, readProgress)
 		if readErr != nil {
+			progress.Hide()
 			fyne.Do(func() {
 				dialog.ShowError(fmt.Errorf("load read failed: %w", readErr), window)
 				if onComplete != nil {
@@ -279,8 +328,10 @@ func loadAllScanResultsFromPathWithActionsAsync(
 			})
 			return
 		}
-		tablesByContext, parseErr := unmarshalScanWorkspace(payloadBytes)
+		progress.Update(0.3, "Parsing scan tables...")
+		tablesByContext, parseErr := unmarshalScanWorkspace(payloadBytes, parseProgress)
 		if parseErr != nil {
+			progress.Hide()
 			fyne.Do(func() {
 				dialog.ShowError(fmt.Errorf("load parse failed: %w", parseErr), window)
 				if onComplete != nil {
@@ -289,7 +340,9 @@ func loadAllScanResultsFromPathWithActionsAsync(
 			})
 			return
 		}
+		progress.Update(0.95, "Applying imported tables...")
 		fyne.Do(func() {
+			progress.Hide()
 			firstContextWithRows := ""
 			for _, actions := range collectedActions {
 				if actions.SetResults == nil {
