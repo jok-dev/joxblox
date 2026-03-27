@@ -28,10 +28,10 @@ func (view *assetView) renderJSONDetails() {
 	} else {
 		view.EconomyJSONValue.SetText("-")
 	}
-	if view.pendingRustExtractorJSON != "" {
-		view.RustExtractorJSONValue.SetText(truncateJSONForDisplay(view.pendingRustExtractorJSON, maxRustJSONDisplayChars))
+	if view.pendingRustyAssetToolJSON != "" {
+		view.RustyAssetToolJSONValue.SetText(truncateJSONForDisplay(view.pendingRustyAssetToolJSON, maxRustJSONDisplayChars))
 	} else {
-		view.RustExtractorJSONValue.SetText("-")
+		view.RustyAssetToolJSONValue.SetText("-")
 	}
 	if len(view.pendingReferencedAssetIDs) > 0 {
 		view.ReferencedAssetsValue.SetText(formatReferencedAssetIDsForDisplay(view.pendingReferencedAssetIDs))
@@ -44,7 +44,7 @@ func (view *assetView) showLazyJSONPlaceholder() {
 	view.AssetDeliveryJSONValue.SetText("(lazy-loaded) Open this section to view")
 	view.ThumbnailJSONValue.SetText("(lazy-loaded) Open this section to view")
 	view.EconomyJSONValue.SetText("(lazy-loaded) Open this section to view")
-	view.RustExtractorJSONValue.SetText("(lazy-loaded) Open this section to view")
+	view.RustyAssetToolJSONValue.SetText("(lazy-loaded) Open this section to view")
 	if len(view.pendingReferencedAssetIDs) > 0 {
 		view.ReferencedAssetsValue.SetText("(lazy-loaded) Open this section to view")
 	} else {
@@ -92,7 +92,7 @@ func (view *assetView) saveJSONExportToFile() {
 		AssetDeliveryJSON:  parseJSONOrRawString(view.pendingAssetDeliveryJSON),
 		ThumbnailJSON:      parseJSONOrRawString(view.pendingThumbnailJSON),
 		EconomyJSON:        parseJSONOrRawString(view.pendingEconomyJSON),
-		RustExtractorJSON:  parseJSONOrRawString(view.pendingRustExtractorJSON),
+		RustyAssetToolJSON: parseJSONOrRawString(view.pendingRustyAssetToolJSON),
 		ReferencedAssetIDs: append([]int64(nil), view.pendingReferencedAssetIDs...),
 	}
 

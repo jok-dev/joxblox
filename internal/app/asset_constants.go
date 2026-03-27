@@ -7,6 +7,7 @@ import (
 
 const (
 	sourceAssetDeliveryInGame = "AssetDelivery (In-Game)"
+	sourceThumbnailsDirect    = "Thumbnails API (Direct)"
 	sourceThumbnailsFallback  = "Thumbnails API (Fallback)"
 	sourceNoThumbnail         = "No Thumbnail (Unavailable)"
 	stateCompleted            = "Completed"

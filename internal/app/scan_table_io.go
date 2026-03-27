@@ -43,6 +43,7 @@ type scanWorkspaceExportPayload struct {
 
 type scanTableExportRow struct {
 	AssetID              int64            `json:"assetId"`
+	AssetInput           string           `json:"assetInput,omitempty"`
 	UseCount             int              `json:"useCount"`
 	FilePath             string           `json:"filePath"`
 	FileSHA256           string           `json:"fileSha256"`
@@ -67,10 +68,12 @@ type scanTableExportRow struct {
 	AssetDeliveryJSON    string           `json:"assetDeliveryJson"`
 	ThumbnailJSON        string           `json:"thumbnailJson"`
 	EconomyJSON          string           `json:"economyJson"`
-	RustExtractorJSON    string           `json:"rustExtractorJson"`
+	RustyAssetToolJSON   string           `json:"rustExtractorJson"`
 	ReferencedAssetIDs   []int64          `json:"referencedAssetIds"`
 	ChildAssets          []childAssetInfo `json:"childAssets"`
 	TotalBytesSize       int              `json:"totalBytesSize"`
+	MeshNumFaces         uint32           `json:"meshNumFaces,omitempty"`
+	MeshNumVerts         uint32           `json:"meshNumVerts,omitempty"`
 	ImageResourceName    string           `json:"imageResourceName,omitempty"`
 	ImageBytesBase64     string           `json:"imageBytesBase64,omitempty"`
 }
@@ -328,6 +331,7 @@ func mapScanResultToExportRow(row scanResult) scanTableExportRow {
 	}
 	return scanTableExportRow{
 		AssetID:              row.AssetID,
+		AssetInput:           row.AssetInput,
 		UseCount:             row.UseCount,
 		FilePath:             row.FilePath,
 		FileSHA256:           row.FileSHA256,
@@ -352,10 +356,12 @@ func mapScanResultToExportRow(row scanResult) scanTableExportRow {
 		AssetDeliveryJSON:    row.AssetDeliveryJSON,
 		ThumbnailJSON:        row.ThumbnailJSON,
 		EconomyJSON:          row.EconomyJSON,
-		RustExtractorJSON:    row.RustExtractorJSON,
+		RustyAssetToolJSON:   row.RustyAssetToolJSON,
 		ReferencedAssetIDs:   row.ReferencedAssetIDs,
 		ChildAssets:          row.ChildAssets,
 		TotalBytesSize:       row.TotalBytesSize,
+		MeshNumFaces:         row.MeshNumFaces,
+		MeshNumVerts:         row.MeshNumVerts,
 		ImageResourceName:    imageResourceName,
 		ImageBytesBase64:     imageBytesBase64,
 	}
@@ -376,6 +382,7 @@ func mapExportRowToScanResult(row scanTableExportRow) (scanResult, error) {
 	}
 	return scanResult{
 		AssetID:              row.AssetID,
+		AssetInput:           strings.TrimSpace(row.AssetInput),
 		UseCount:             row.UseCount,
 		FilePath:             row.FilePath,
 		FileSHA256:           strings.TrimSpace(row.FileSHA256),
@@ -400,10 +407,12 @@ func mapExportRowToScanResult(row scanTableExportRow) (scanResult, error) {
 		AssetDeliveryJSON:    row.AssetDeliveryJSON,
 		ThumbnailJSON:        row.ThumbnailJSON,
 		EconomyJSON:          row.EconomyJSON,
-		RustExtractorJSON:    row.RustExtractorJSON,
+		RustyAssetToolJSON:   row.RustyAssetToolJSON,
 		ReferencedAssetIDs:   row.ReferencedAssetIDs,
 		ChildAssets:          row.ChildAssets,
 		TotalBytesSize:       row.TotalBytesSize,
+		MeshNumFaces:         row.MeshNumFaces,
+		MeshNumVerts:         row.MeshNumVerts,
 		Resource:             importedResource,
 	}, nil
 }

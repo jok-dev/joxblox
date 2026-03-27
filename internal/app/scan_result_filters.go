@@ -45,7 +45,9 @@ func scanResultMatchesQuery(result scanResult, query string) bool {
 		return true
 	}
 	searchFields := []string{
+		result.Side,
 		strconv.FormatInt(result.AssetID, 10),
+		result.AssetInput,
 		strconv.Itoa(result.UseCount),
 		result.FilePath,
 		result.FileSHA256,
@@ -56,6 +58,7 @@ func scanResultMatchesQuery(result scanResult, query string) bool {
 		result.PropertyName,
 		result.InstanceName,
 		result.InstancePath,
+		fmt.Sprintf("%.1f %.1f %.1f", result.WorldX, result.WorldY, result.WorldZ),
 		strconv.Itoa(result.AssetTypeID),
 		result.Format,
 		result.ContentType,

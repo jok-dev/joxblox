@@ -58,7 +58,7 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           APP_NAME: joxblox
-          EXTRACTOR_NAME: rbxl-id-extractor
+          EXTRACTOR_NAME: joxblox-rusty-asset-tool
           VERSION_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail

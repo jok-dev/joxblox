@@ -32,3 +32,6 @@ Tip: check ./latest.log for latest logs of last run
 - Verify build/test passes after substantive edits.
 - Preserve existing behavior unless a change is intentional and documented.
 - Don't do stuff on the ui thread if it's gonna take a while
+- Always use the same logic for showing byte sizes, show mb if >1mb, kb if >1kb and if not then show bytes
+- Make sure that any feature that uses assets also supports rbxthumb:// notation since this returns different asset sizes than just using the asset id itself! don't strip this from ids it's important!
+- Make sure to use the same shared methods as other systems in the app so that each feature uses the same backend and therefore has the same consistent behavior and features

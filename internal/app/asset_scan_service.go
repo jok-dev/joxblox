@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 
 type scanResult struct {
 	AssetID              int64
+	AssetInput           string
+	Side                 string
 	UseCount             int
 	FilePath             string
 	FileSHA256           string
@@ -30,13 +33,21 @@ type scanResult struct {
 	AssetTypeName        string
 	Warning              bool
 	WarningCause         string
+	WorldX               float64
+	WorldY               float64
+	WorldZ               float64
+	TextureBytes         int
+	MeshBytes            int
+	PixelCount           int64
 	AssetDeliveryJSON    string
 	ThumbnailJSON        string
 	EconomyJSON          string
-	RustExtractorJSON    string
+	RustyAssetToolJSON   string
 	ReferencedAssetIDs   []int64
 	ChildAssets          []childAssetInfo
 	TotalBytesSize       int
+	MeshNumFaces         uint32
+	MeshNumVerts         uint32
 	Resource             *fyne.StaticResource
 	DownloadBytes        []byte
 	DownloadFileName     string
@@ -44,62 +55,50 @@ type scanResult struct {
 }
 
 func loadAssetPreview(assetID int64) (*assetPreviewResult, error) {
-	return loadBestImageInfo(assetID)
+	return loadAssetPreviewWithTrace(assetID, nil)
+}
+
+func loadAssetPreviewWithTrace(assetID int64, trace *assetRequestTrace) (*assetPreviewResult, error) {
+	return loadBestImageInfoWithOptionsAndTrace(assetID, false, trace)
+}
+
+func loadScanPreview(hit scanHit) (*assetPreviewResult, error) {
+	return loadAssetStatsPreviewForReference(hit.AssetID, hit.AssetInput)
+}
+
+func loadScanPreviewWithTrace(hit scanHit, trace *assetRequestTrace) (*assetPreviewResult, error) {
+	return loadAssetStatsPreviewForReferenceWithTrace(hit.AssetID, hit.AssetInput, trace)
+}
+
+func loadAssetStatsOnly(assetID int64) (*assetPreviewResult, error) {
+	return loadBestImageInfoWithOptions(assetID, true)
 }
 
 func loadScanResult(hit scanHit) (scanResult, error) {
-	previewResult, err := loadAssetPreview(hit.AssetID)
+	previewResult, err := loadScanPreview(hit)
 	if err != nil {
 		return scanResult{}, err
 	}
-	statsInfo := previewResult.Stats
-	if statsInfo == nil {
-		statsInfo = previewResult.Image
-	}
-	if statsInfo == nil {
-		statsInfo = &imageInfo{}
-	}
-	resource := (*fyne.StaticResource)(nil)
-	if previewResult.Image != nil {
-		resource = previewResult.Image.Resource
-	}
+	result := buildBaseScanResultFromHit(hit)
+	return applyPreviewToScanResult(result, previewResult), nil
+}
 
-	warning := isThumbnailFallback(previewResult.Source) && !isCompletedState(previewResult.State)
-	return scanResult{
-		AssetID:              hit.AssetID,
-		UseCount:             hit.UseCount,
-		FilePath:             hit.FilePath,
-		FileSHA256:           statsInfo.SHA256,
-		InstanceType:         strings.TrimSpace(hit.InstanceType),
-		InstanceName:         strings.TrimSpace(hit.InstanceName),
-		InstancePath:         strings.TrimSpace(hit.InstancePath),
-		PropertyName:         strings.TrimSpace(hit.PropertyName),
-		Source:               previewResult.Source,
-		State:                previewResult.State,
-		Width:                statsInfo.Width,
-		Height:               statsInfo.Height,
-		Duration:             statsInfo.Duration,
-		BytesSize:            statsInfo.BytesSize,
-		RecompressedPNGSize:  statsInfo.RecompressedPNGByteSize,
-		RecompressedJPEGSize: statsInfo.RecompressedJPEGByteSize,
-		Format:               statsInfo.Format,
-		ContentType:          statsInfo.ContentType,
-		AssetTypeID:          previewResult.AssetTypeID,
-		AssetTypeName:        previewResult.AssetTypeName,
-		Warning:              warning,
-		WarningCause:         previewResult.WarningMessage,
-		AssetDeliveryJSON:    previewResult.AssetDeliveryJSON,
-		ThumbnailJSON:        previewResult.ThumbnailJSON,
-		EconomyJSON:          previewResult.EconomyJSON,
-		RustExtractorJSON:    previewResult.RustExtractorJSON,
-		ReferencedAssetIDs:   previewResult.ReferencedAssetIDs,
-		ChildAssets:          previewResult.ChildAssets,
-		TotalBytesSize:       previewResult.TotalBytesSize,
-		Resource:             resource,
-		DownloadBytes:        append([]byte(nil), previewResult.DownloadBytes...),
-		DownloadFileName:     previewResult.DownloadFileName,
-		DownloadIsOriginal:   previewResult.DownloadIsOriginal,
-	}, nil
+func loadScanResultWithRequestSource(hit scanHit) (scanResult, error, heatmapAssetRequestSource) {
+	trace := &assetRequestTrace{}
+	previewResult, err := loadScanPreviewWithTrace(hit, trace)
+	if err != nil {
+		return scanResult{}, err, trace.classifyRequestSource()
+	}
+	result := buildBaseScanResultFromHit(hit)
+	return applyPreviewToScanResult(result, previewResult), nil, trace.classifyRequestSource()
+}
+
+func thumbnailTypeNameFromScanInput(assetID int64, assetInput string) string {
+	loadRequest, err := buildSingleAssetLoadRequest(assetID, assetInput)
+	if err != nil || loadRequest.ThumbnailRequest == nil {
+		return ""
+	}
+	return "Thumbnail"
 }
 
 func compareScanResults(leftResult scanResult, rightResult scanResult, sortField string) int {
@@ -108,6 +107,8 @@ func compareScanResults(leftResult scanResult, rightResult scanResult, sortField
 		return compareInt64(leftResult.AssetID, rightResult.AssetID)
 	case "Use Count":
 		return compareInt(leftResult.UseCount, rightResult.UseCount)
+	case "Side":
+		return strings.Compare(leftResult.Side, rightResult.Side)
 	case "Width":
 		return compareInt(leftResult.Width, rightResult.Width)
 	case "Height":
@@ -126,6 +127,28 @@ func compareScanResults(leftResult scanResult, rightResult scanResult, sortField
 		return strings.Compare(leftResult.State, rightResult.State)
 	case "Source":
 		return strings.Compare(leftResult.Source, rightResult.Source)
+	case "Triangles":
+		return compareUint32(leftResult.MeshNumFaces, rightResult.MeshNumFaces)
+	case "Total Byte Size":
+		return compareInt(leftResult.TotalBytesSize, rightResult.TotalBytesSize)
+	case "Texture Bytes":
+		return compareInt(leftResult.TextureBytes, rightResult.TextureBytes)
+	case "Texture Pixels":
+		return compareInt64(leftResult.PixelCount, rightResult.PixelCount)
+	case "Mesh Bytes":
+		return compareInt(leftResult.MeshBytes, rightResult.MeshBytes)
+	case "Mesh Triangles":
+		return compareUint32(leftResult.MeshNumFaces, rightResult.MeshNumFaces)
+	case "Instance Type":
+		return strings.Compare(leftResult.InstanceType, rightResult.InstanceType)
+	case "Property":
+		return strings.Compare(leftResult.PropertyName, rightResult.PropertyName)
+	case "Instance Path":
+		return strings.Compare(leftResult.InstancePath, rightResult.InstancePath)
+	case "World Position":
+		leftPosition := fmt.Sprintf("%.4f:%.4f:%.4f", leftResult.WorldX, leftResult.WorldY, leftResult.WorldZ)
+		rightPosition := fmt.Sprintf("%.4f:%.4f:%.4f", rightResult.WorldX, rightResult.WorldY, rightResult.WorldZ)
+		return strings.Compare(leftPosition, rightPosition)
 	case "Asset SHA256":
 		return strings.Compare(leftResult.FileSHA256, rightResult.FileSHA256)
 	default:
@@ -134,6 +157,16 @@ func compareScanResults(leftResult scanResult, rightResult scanResult, sortField
 }
 
 func compareInt(left int, right int) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func compareUint32(left uint32, right uint32) int {
 	if left < right {
 		return -1
 	}

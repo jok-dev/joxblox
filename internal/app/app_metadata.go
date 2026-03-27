@@ -13,7 +13,7 @@ const (
 	appLicenseName = "GNU General Public License v3.0"
 )
 
-var appVersion = "v1.0.0"
+var appVersion = "v1.1.0"
 
 func appAboutSummary() string {
 	return fmt.Sprintf(

@@ -5,18 +5,26 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/jpeg"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
+)
+
+var (
+	lastUploadCreatorType = uploadCreatorModeUser
+	lastUploadCreatorID   = ""
 )
 
 func (view *assetView) saveSelectedPreviewVariantToFile() {
@@ -40,6 +48,127 @@ func (view *assetView) saveSelectedPreviewVariantToFile() {
 	view.savePreviewVariantToFile(selectedOption)
 }
 
+func (view *assetView) uploadSelectedPreviewVariant() {
+	window := getPrimaryWindow()
+	if window == nil {
+		return
+	}
+
+	var uploadBytes []byte
+	var uploadFileName string
+
+	if view.downloadOriginalAsset && len(view.assetDownloadBytes) > 0 {
+		uploadBytes = view.assetDownloadBytes
+		uploadFileName = view.assetDownloadFileName
+		if uploadFileName == "" {
+			uploadFileName = fmt.Sprintf("asset_%d.bin", view.currentAssetID)
+		}
+	} else {
+		selectedOption, found := view.selectedPreviewDownloadOption()
+		if !found {
+			dialog.ShowInformation("Upload", "No preview image is available to upload.", window)
+			return
+		}
+		uploadBytes = selectedOption.bytes
+		uploadFileName = selectedOption.fileName
+	}
+
+	if len(uploadBytes) == 0 {
+		dialog.ShowInformation("Upload", "No image bytes available to upload.", window)
+		return
+	}
+
+	apiKeyEntry := widget.NewPasswordEntry()
+	apiKeyEntry.SetPlaceHolder("Open Cloud API key")
+	if storedKey, loadErr := LoadOpenCloudAPIKeyFromKeyring(); loadErr == nil && storedKey != "" {
+		apiKeyEntry.SetText(storedKey)
+	}
+
+	creatorTypeSelect := widget.NewSelect([]string{uploadCreatorModeUser, uploadCreatorModeGroup}, nil)
+	creatorTypeSelect.SetSelected(lastUploadCreatorType)
+
+	creatorIDEntry := widget.NewEntry()
+	creatorIDEntry.SetPlaceHolder("Creator user/group ID")
+	creatorIDEntry.SetText(lastUploadCreatorID)
+
+	displayNameEntry := widget.NewEntry()
+	displayNameEntry.SetText(fmt.Sprintf("Asset %d reupload", view.currentAssetID))
+
+	content := container.NewVBox(
+		container.NewBorder(nil, nil, widget.NewLabel("API Key:"), nil, apiKeyEntry),
+		container.NewGridWithColumns(2,
+			container.NewBorder(nil, nil, widget.NewLabel("Creator Type:"), nil, creatorTypeSelect),
+			container.NewBorder(nil, nil, widget.NewLabel("Creator ID:"), nil, creatorIDEntry),
+		),
+		container.NewBorder(nil, nil, widget.NewLabel("Display Name:"), nil, displayNameEntry),
+	)
+
+	dialog.ShowCustomConfirm("Upload to Roblox", "Upload", "Cancel", content, func(confirmed bool) {
+		if !confirmed {
+			return
+		}
+
+		apiKey := strings.TrimSpace(apiKeyEntry.Text)
+		if apiKey == "" {
+			dialog.ShowError(fmt.Errorf("API key is required"), window)
+			return
+		}
+
+		creatorID, parseErr := strconv.ParseInt(strings.TrimSpace(creatorIDEntry.Text), 10, 64)
+		if parseErr != nil || creatorID <= 0 {
+			dialog.ShowError(fmt.Errorf("creator ID must be a positive integer"), window)
+			return
+		}
+
+		displayName := strings.TrimSpace(displayNameEntry.Text)
+		if displayName == "" {
+			displayName = fmt.Sprintf("Asset %d", view.currentAssetID)
+		}
+
+		lastUploadCreatorType = creatorTypeSelect.Selected
+		lastUploadCreatorID = strings.TrimSpace(creatorIDEntry.Text)
+
+		creator := robloxOpenCloudCreator{
+			IsGroup: creatorTypeSelect.Selected == uploadCreatorModeGroup,
+			ID:      creatorID,
+		}
+
+		progressDialog := dialog.NewCustomWithoutButtons("Uploading...", widget.NewProgressBarInfinite(), window)
+		progressDialog.Show()
+
+		go func() {
+			stopCh := make(chan struct{})
+			assetID, uploadErr := uploadDecalToRobloxOpenCloud(
+				apiKey,
+				creator,
+				displayName,
+				"",
+				uploadFileName,
+				uploadBytes,
+				stopCh,
+			)
+
+			fyne.Do(func() {
+				progressDialog.Hide()
+				if uploadErr != nil {
+					dialog.ShowError(fmt.Errorf("upload failed: %w", uploadErr), window)
+					return
+				}
+
+				assetIDStr := strconv.FormatInt(assetID, 10)
+				idEntry := widget.NewEntry()
+				idEntry.SetText(assetIDStr)
+
+				resultContent := container.NewVBox(
+					widget.NewLabel("Uploaded successfully! Asset ID:"),
+					idEntry,
+				)
+				dialog.ShowCustom("Upload Complete", "Close", resultContent, window)
+			})
+		}()
+	}, window)
+}
+
 func (view *assetView) saveRawAssetToFile(fileName string, fileBytes []byte) {
 	window := getPrimaryWindow()
 	if window == nil {
@@ -60,7 +189,29 @@ func (view *assetView) saveRawAssetToFile(fileName string, fileBytes []byte) {
 	logDebugf("Saved original asset file for asset %d (%s)", view.currentAssetID, fileName)
 }
 
+func formatVariantSizeInfo(option previewDownloadOption) string {
+	sizeText := formatSizeAuto(len(option.bytes))
+	if option.width > 0 && option.height > 0 {
+		return fmt.Sprintf("%dx%d · %s", option.width, option.height, sizeText)
+	}
+	return sizeText
+}
+
+func findOptionIndex(options []previewDownloadOption, label string) int {
+	for i, opt := range options {
+		if opt.labelText == label {
+			return i
+		}
+	}
+	return 0
+}
+
 func (view *assetView) showExpandedImageWindow() {
+	if len(view.currentMeshPreviewData.Positions) > 0 && len(view.currentMeshPreviewData.Indices) > 0 {
+		view.showExpandedMeshWindow()
+		return
+	}
+
 	selectedOption, found := view.selectedPreviewDownloadOption()
 	if !found {
 		return
@@ -74,42 +225,155 @@ func (view *assetView) showExpandedImageWindow() {
 	imageWindow := guiApp.NewWindow(fmt.Sprintf("Asset %d", view.currentAssetID))
 	imageViewer := newZoomPanImage(selectedOption)
 	currentOption := selectedOption
+	localOptions := append([]previewDownloadOption{}, view.previewDownloadOptions...)
+	selectedIndex := findOptionIndex(localOptions, selectedOption.labelText)
+	fileSizeLabel := widget.NewLabel(formatVariantSizeInfo(currentOption))
+	capturedAssetID := view.currentAssetID
+	capturedResource := view.currentPreviewResource
 
 	applyExpandedPreviewState := func() {
 		imageViewer.SetOption(currentOption)
+		fileSizeLabel.SetText(formatVariantSizeInfo(currentOption))
 	}
 
-	variantLabels := make([]string, 0, len(view.previewDownloadOptions))
-	for _, option := range view.previewDownloadOptions {
+	variantLabels := make([]string, 0, len(localOptions))
+	for _, option := range localOptions {
 		variantLabels = append(variantLabels, option.labelText)
 	}
-	selectedVariantLabel := selectedOption.labelText
-	variantSelect := widget.NewSelect(variantLabels, func(selectedLabel string) {
-		for _, option := range view.previewDownloadOptions {
+
+	variantSelect := widget.NewSelect(variantLabels, nil)
+	interpolationSelect := widget.NewSelect(sampleModeOptions, nil)
+	backgroundSelect := widget.NewSelect([]string{expandedBackgroundBlack, expandedBackgroundWhite}, nil)
+	interpolationSelect.SetSelected(view.interpolationSelect.Selected)
+	backgroundSelect.SetSelected(expandedBackgroundBlack)
+
+	variantSelect.OnChanged = func(selectedLabel string) {
+		for i, option := range localOptions {
 			if option.labelText != selectedLabel {
 				continue
 			}
 			currentOption = option
+			selectedIndex = i
 			applyExpandedPreviewState()
 			return
 		}
-	})
-	if view.downloadOriginalAsset {
-		variantLabels = []string{selectedOption.labelText}
-		selectedVariantLabel = selectedOption.labelText
-		variantSelect.SetOptions(variantLabels)
-		variantSelect.Disable()
 	}
-	variantSelect.SetSelected(selectedVariantLabel)
+
+	interpolationSelect.OnChanged = func(mode string) {
+		view.interpolationSelect.SetSelected(mode)
+		if capturedResource == nil {
+			return
+		}
+		scaler := sampleModeInterpolator(mode)
+		go func() {
+			newOptions, buildErr := buildPreviewDownloadOptions(capturedResource, capturedAssetID, scaler)
+			if buildErr != nil || len(newOptions) == 0 {
+				return
+			}
+			fyne.Do(func() {
+				localOptions = newOptions
+				newLabels := make([]string, 0, len(newOptions))
+				for _, opt := range newOptions {
+					newLabels = append(newLabels, opt.labelText)
+				}
+				idx := selectedIndex
+				if idx >= len(newOptions) {
+					idx = 0
+				}
+				currentOption = newOptions[idx]
+				selectedIndex = idx
+				variantSelect.SetOptions(newLabels)
+				variantSelect.SetSelected(newLabels[idx])
+				applyExpandedPreviewState()
+			})
+		}()
+	}
+
+	backgroundSelect.OnChanged = func(mode string) {
+		imageViewer.SetBackground(mode)
+	}
+
+	if view.downloadOriginalAsset {
+		variantSelect.SetOptions([]string{selectedOption.labelText})
+		variantSelect.Disable()
+		interpolationSelect.Disable()
+	}
+	variantSelect.SetSelected(selectedOption.labelText)
+	imageViewer.SetBackground(backgroundSelect.Selected)
 	applyExpandedPreviewState()
 
 	topBar := container.NewHBox(
 		widget.NewLabel("Preview Version:"),
 		container.NewGridWrap(fyne.NewSize(280, 36), variantSelect),
+		widget.NewLabel("Interpolation:"),
+		container.NewGridWrap(fyne.NewSize(160, 36), interpolationSelect),
+		fileSizeLabel,
 	)
-	imageWindow.SetContent(container.NewBorder(topBar, nil, nil, nil, container.NewPadded(imageViewer)))
+	bottomBar := container.NewHBox(
+		widget.NewLabel("View Background:"),
+		container.NewGridWrap(fyne.NewSize(120, 36), backgroundSelect),
+	)
+	imageWindow.SetContent(container.NewBorder(topBar, bottomBar, nil, nil, container.NewPadded(imageViewer)))
 	imageWindow.Resize(fyne.NewSize(980, 760))
 	imageWindow.Show()
+}
+
+func (view *assetView) showExpandedMeshWindow() {
+	guiApp := fyne.CurrentApp()
+	if guiApp == nil {
+		return
+	}
+
+	meshWindow := guiApp.NewWindow(fmt.Sprintf("Asset %d Model", view.currentAssetID))
+	meshViewer := newMeshPreviewWidget()
+	meshViewer.SetData(view.currentMeshPreviewData)
+	backgroundSelect := widget.NewSelect([]string{expandedBackgroundBlack, expandedBackgroundWhite}, nil)
+	backgroundSelect.SetSelected(expandedBackgroundBlack)
+	backgroundSelect.OnChanged = func(mode string) {
+		meshViewer.SetBackground(zoomPanBackgroundColor(mode))
+	}
+	meshViewer.SetBackground(zoomPanBackgroundColor(backgroundSelect.Selected))
+
+	meshInfoText := fmt.Sprintf(
+		"Shown Triangles: %s / %s",
+		formatIntCommas(int64(view.currentMeshPreviewData.PreviewTriangleCount)),
+		formatIntCommas(int64(view.currentMeshPreviewData.TriangleCount)),
+	)
+	if view.currentMeshPreviewData.PreviewTriangleCount == 0 || view.currentMeshPreviewData.PreviewTriangleCount == view.currentMeshPreviewData.TriangleCount {
+		meshInfoText = fmt.Sprintf(
+			"Triangles: %s",
+			formatIntCommas(int64(view.currentMeshPreviewData.TriangleCount)),
+		)
+	}
+	topBar := container.NewHBox(
+		widget.NewLabel(meshInfoText),
+		layout.NewSpacer(),
+		widget.NewLabel("Drag to rotate, scroll to zoom"),
+	)
+	bottomBar := container.NewHBox(
+		widget.NewLabel("View Background:"),
+		container.NewGridWrap(fyne.NewSize(120, 36), backgroundSelect),
+	)
+	meshWindow.SetContent(container.NewBorder(topBar, bottomBar, nil, nil, container.NewPadded(meshViewer)))
+	meshWindow.Resize(fyne.NewSize(980, 760))
+	meshWindow.Show()
+	go func() {
+		for attempt := 0; attempt < 12; attempt++ {
+			time.Sleep(25 * time.Millisecond)
+			rendered := false
+			fyne.Do(func() {
+				size := meshViewer.Size()
+				if size.Width < minMeshPreviewRenderDimension || size.Height < minMeshPreviewRenderDimension {
+					return
+				}
+				meshViewer.render()
+				rendered = true
+			})
+			if rendered {
+				return
+			}
+		}
+	}()
 }
 
 func (view *assetView) savePreviewVariantToFile(option previewDownloadOption) {
@@ -154,7 +418,7 @@ func formatPreviewOptionLabel(baseLabel string, optionByteCount int, originalByt
 	if trimmedBaseLabel == "" {
 		trimmedBaseLabel = "Preview"
 	}
-	sizeText := formatSizeInMB(optionByteCount)
+	sizeText := formatSizeAuto(optionByteCount)
 	if originalByteCount <= 0 || optionByteCount <= 0 || optionByteCount == originalByteCount {
 		return fmt.Sprintf("%s (%s)", trimmedBaseLabel, sizeText)
 	}
@@ -175,7 +439,7 @@ func applyPreviewOptionLabels(options []previewDownloadOption) []previewDownload
 	return labeledOptions
 }
 
-func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64) ([]previewDownloadOption, error) {
+func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64, scaler xdraw.Interpolator) ([]previewDownloadOption, error) {
 	if resource == nil {
 		return nil, nil
 	}
@@ -198,7 +462,7 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64) ([]previ
 		return options, nil
 	}
 	baseExtension := previewOutputExtension(resourceName, imageFormat)
-	threeQuarterBytes, threeQuarterErr := encodeScaledPreview(decodedImage, imageFormat, 0.75)
+	threeQuarterBytes, threeQuarterErr := encodeScaledPreview(decodedImage, imageFormat, 0.75, scaler)
 	if threeQuarterErr == nil {
 		threeQuarterWidth := maxInt(1, int(float64(baseBounds.Dx())*0.75))
 		threeQuarterHeight := maxInt(1, int(float64(baseBounds.Dy())*0.75))
@@ -210,7 +474,7 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64) ([]previ
 			height:    threeQuarterHeight,
 		})
 	}
-	halfBytes, halfErr := encodeResizedPreview(decodedImage, imageFormat, 2)
+	halfBytes, halfErr := encodeResizedPreview(decodedImage, imageFormat, 2, scaler)
 	if halfErr == nil {
 		halfWidth := maxInt(1, baseBounds.Dx()/2)
 		halfHeight := maxInt(1, baseBounds.Dy()/2)
@@ -222,7 +486,7 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64) ([]previ
 			height:    halfHeight,
 		})
 	}
-	thirdBytes, thirdErr := encodeScaledPreview(decodedImage, imageFormat, 1.0/3.0)
+	thirdBytes, thirdErr := encodeScaledPreview(decodedImage, imageFormat, 1.0/3.0, scaler)
 	if thirdErr == nil {
 		thirdWidth := maxInt(1, int(float64(baseBounds.Dx())/3.0))
 		thirdHeight := maxInt(1, int(float64(baseBounds.Dy())/3.0))
@@ -234,7 +498,7 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64) ([]previ
 			height:    thirdHeight,
 		})
 	}
-	quarterBytes, quarterErr := encodeResizedPreview(decodedImage, imageFormat, 4)
+	quarterBytes, quarterErr := encodeResizedPreview(decodedImage, imageFormat, 4, scaler)
 	if quarterErr == nil {
 		quarterWidth := maxInt(1, baseBounds.Dx()/4)
 		quarterHeight := maxInt(1, baseBounds.Dy()/4)
@@ -275,6 +539,49 @@ func (view *assetView) setOriginalOnlyPreviewVariant() {
 	view.previewVariantSelect.Disable()
 }
 
+func (view *assetView) rebuildPreviewVariants() {
+	resource := view.currentPreviewResource
+	if resource == nil || view.downloadOriginalAsset {
+		return
+	}
+	selectedAssetID := view.currentAssetID
+	previousIndex := findOptionIndex(view.previewDownloadOptions, view.selectedPreviewOption)
+	buildToken := view.previewVariantBuildToken.Add(1)
+	scaler := sampleModeInterpolator(view.interpolationSelect.Selected)
+	go func() {
+		downloadOptions, buildErr := buildPreviewDownloadOptions(resource, selectedAssetID, scaler)
+		if buildErr != nil || len(downloadOptions) == 0 {
+			return
+		}
+		fyne.Do(func() {
+			if view.previewVariantBuildToken.Load() != buildToken || view.currentAssetID != selectedAssetID {
+				return
+			}
+			view.previewDownloadOptions = downloadOptions
+			optionLabels := make([]string, 0, len(downloadOptions))
+			for _, option := range downloadOptions {
+				optionLabels = append(optionLabels, option.labelText)
+			}
+			idx := previousIndex
+			if idx >= len(optionLabels) {
+				idx = 0
+			}
+			selectedLabel := optionLabels[idx]
+			view.suppressPreviewVariant = true
+			view.previewVariantSelect.SetOptions(optionLabels)
+			view.previewVariantSelect.SetSelected(selectedLabel)
+			view.suppressPreviewVariant = false
+			view.selectedPreviewOption = selectedLabel
+			if len(optionLabels) > 1 {
+				view.previewVariantSelect.Enable()
+			} else {
+				view.previewVariantSelect.Disable()
+			}
+			view.applySelectedPreviewVariant()
+		})
+	}()
+}
+
 func (view *assetView) applySelectedPreviewVariant() {
 	selectedOption, found := view.selectedPreviewDownloadOption()
 	if !found {
@@ -287,6 +594,7 @@ func (view *assetView) applySelectedPreviewVariant() {
 		view.PreviewPlaceholder.Show()
 		view.expandImageButton.Disable()
 		view.downloadImageButton.Disable()
+		view.uploadImageButton.Disable()
 		view.PreviewContainer.Refresh()
 		return
 	}
@@ -299,6 +607,7 @@ func (view *assetView) applySelectedPreviewVariant() {
 	view.PreviewPlaceholder.Hide()
 	view.expandImageButton.Enable()
 	view.downloadImageButton.Enable()
+	view.uploadImageButton.Enable()
 	view.PreviewContainer.Refresh()
 }
 
@@ -355,17 +664,8 @@ func previewFileExtension(fileName string) string {
 	return extension
 }
 
-func previewOutputExtension(fileName string, imageFormat string) string {
-	currentExtension := previewFileExtension(fileName)
-	if currentExtension != ".png" && currentExtension != ".jpg" && currentExtension != ".jpeg" {
-		switch strings.ToLower(strings.TrimSpace(imageFormat)) {
-		case "jpeg":
-			return ".jpg"
-		default:
-			return ".png"
-		}
-	}
-	return currentExtension
+func previewOutputExtension(_ string, _ string) string {
+	return ".png"
 }
 
 func previewVariantFileName(baseFileName string, variantLabel string, extension string) string {
@@ -379,7 +679,7 @@ func previewVariantFileName(baseFileName string, variantLabel string, extension 
 	return fmt.Sprintf("%s_%s%s", baseName, variantLabel, extension)
 }
 
-func encodeResizedPreview(sourceImage image.Image, imageFormat string, divisor int) ([]byte, error) {
+func encodeResizedPreview(sourceImage image.Image, _ string, divisor int, scaler xdraw.Interpolator) ([]byte, error) {
 	if sourceImage == nil {
 		return nil, fmt.Errorf("preview image is unavailable")
 	}
@@ -389,25 +689,10 @@ func encodeResizedPreview(sourceImage image.Image, imageFormat string, divisor i
 	sourceBounds := sourceImage.Bounds()
 	targetWidth := maxInt(1, sourceBounds.Dx()/divisor)
 	targetHeight := maxInt(1, sourceBounds.Dy()/divisor)
-	targetImage := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
-	xdraw.CatmullRom.Scale(targetImage, targetImage.Bounds(), sourceImage, sourceBounds, xdraw.Over, nil)
-
-	var outputBuffer bytes.Buffer
-	switch strings.ToLower(strings.TrimSpace(imageFormat)) {
-	case "jpeg", "jpg":
-		if encodeErr := jpeg.Encode(&outputBuffer, targetImage, &jpeg.Options{Quality: 95}); encodeErr != nil {
-			return nil, encodeErr
-		}
-	default:
-		encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-		if encodeErr := encoder.Encode(&outputBuffer, targetImage); encodeErr != nil {
-			return nil, encodeErr
-		}
-	}
-	return outputBuffer.Bytes(), nil
+	return encodeScaledPNG(sourceImage, targetWidth, targetHeight, scaler)
 }
 
-func encodeScaledPreview(sourceImage image.Image, imageFormat string, scale float64) ([]byte, error) {
+func encodeScaledPreview(sourceImage image.Image, _ string, scale float64, scaler xdraw.Interpolator) ([]byte, error) {
 	if sourceImage == nil {
 		return nil, fmt.Errorf("preview image is unavailable")
 	}
@@ -417,26 +702,148 @@ func encodeScaledPreview(sourceImage image.Image, imageFormat string, scale floa
 	sourceBounds := sourceImage.Bounds()
 	targetWidth := maxInt(1, int(float64(sourceBounds.Dx())*scale))
 	targetHeight := maxInt(1, int(float64(sourceBounds.Dy())*scale))
-	targetImage := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
-	xdraw.CatmullRom.Scale(targetImage, targetImage.Bounds(), sourceImage, sourceBounds, xdraw.Over, nil)
+	return encodeScaledPNG(sourceImage, targetWidth, targetHeight, scaler)
+}
+
+func encodeScaledPNG(sourceImage image.Image, targetWidth int, targetHeight int, scaler xdraw.Interpolator) ([]byte, error) {
+	preparedImage := cloneImageToNRGBA(sourceImage)
+	if preparedImage == nil {
+		return nil, fmt.Errorf("preview image is unavailable")
+	}
+	preparedImage = bleedTransparentPixels(preparedImage)
+
+	targetImage := image.NewNRGBA(image.Rect(0, 0, targetWidth, targetHeight))
+	scaler.Scale(targetImage, targetImage.Bounds(), preparedImage, preparedImage.Bounds(), xdraw.Src, nil)
+	targetImage = bleedTransparentPixels(targetImage)
 
 	var outputBuffer bytes.Buffer
-	switch strings.ToLower(strings.TrimSpace(imageFormat)) {
-	case "jpeg", "jpg":
-		if encodeErr := jpeg.Encode(&outputBuffer, targetImage, &jpeg.Options{Quality: 95}); encodeErr != nil {
-			return nil, encodeErr
-		}
-	default:
-		encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-		if encodeErr := encoder.Encode(&outputBuffer, targetImage); encodeErr != nil {
-			return nil, encodeErr
-		}
+	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+	if encodeErr := encoder.Encode(&outputBuffer, targetImage); encodeErr != nil {
+		return nil, encodeErr
 	}
 	return outputBuffer.Bytes(), nil
 }
 
-func formatSizeInMB(byteCount int) string {
-	return fmt.Sprintf("%.2f MB", float64(byteCount)/float64(megabyte))
+func cloneImageToNRGBA(sourceImage image.Image) *image.NRGBA {
+	if sourceImage == nil {
+		return nil
+	}
+	sourceBounds := sourceImage.Bounds()
+	width := sourceBounds.Dx()
+	height := sourceBounds.Dy()
+	clonedImage := image.NewNRGBA(image.Rect(0, 0, width, height))
+
+	switch typedImage := sourceImage.(type) {
+	case *image.NRGBA:
+		for y := 0; y < height; y++ {
+			srcOffset := typedImage.PixOffset(sourceBounds.Min.X, sourceBounds.Min.Y+y)
+			dstOffset := clonedImage.PixOffset(0, y)
+			copy(clonedImage.Pix[dstOffset:dstOffset+width*4], typedImage.Pix[srcOffset:srcOffset+width*4])
+		}
+		return clonedImage
+	default:
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				clonedImage.SetNRGBA(x, y, color.NRGBAModel.Convert(sourceImage.At(sourceBounds.Min.X+x, sourceBounds.Min.Y+y)).(color.NRGBA))
+			}
+		}
+		return clonedImage
+	}
+}
+
+type transparentPixelPoint struct {
+	x int
+	y int
+}
+
+// Fill transparent RGB with nearby visible colors so later filtering does not pull in black edges.
+func bleedTransparentPixels(sourceImage *image.NRGBA) *image.NRGBA {
+	if sourceImage == nil {
+		return nil
+	}
+	bounds := sourceImage.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width == 0 || height == 0 {
+		return sourceImage
+	}
+
+	resultImage := image.NewNRGBA(image.Rect(0, 0, width, height))
+	copy(resultImage.Pix, sourceImage.Pix)
+
+	visited := make([]bool, width*height)
+	queue := make([]transparentPixelPoint, 0, width)
+	neighborOffsets := [8][2]int{
+		{-1, -1}, {0, -1}, {1, -1},
+		{-1, 0}, {1, 0},
+		{-1, 1}, {0, 1}, {1, 1},
+	}
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			pixelOffset := sourceImage.PixOffset(x, y)
+			if sourceImage.Pix[pixelOffset+3] != 0 {
+				continue
+			}
+
+			var redSum int
+			var greenSum int
+			var blueSum int
+			neighborCount := 0
+			for _, offset := range neighborOffsets {
+				neighborX := x + offset[0]
+				neighborY := y + offset[1]
+				if neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height {
+					continue
+				}
+				neighborOffset := sourceImage.PixOffset(neighborX, neighborY)
+				if sourceImage.Pix[neighborOffset+3] == 0 {
+					continue
+				}
+				redSum += int(sourceImage.Pix[neighborOffset+0])
+				greenSum += int(sourceImage.Pix[neighborOffset+1])
+				blueSum += int(sourceImage.Pix[neighborOffset+2])
+				neighborCount++
+			}
+			if neighborCount == 0 {
+				continue
+			}
+
+			resultImage.Pix[pixelOffset+0] = uint8(redSum / neighborCount)
+			resultImage.Pix[pixelOffset+1] = uint8(greenSum / neighborCount)
+			resultImage.Pix[pixelOffset+2] = uint8(blueSum / neighborCount)
+			visited[y*width+x] = true
+			queue = append(queue, transparentPixelPoint{x: x, y: y})
+		}
+	}
+
+	for queueIndex := 0; queueIndex < len(queue); queueIndex++ {
+		currentPoint := queue[queueIndex]
+		currentOffset := resultImage.PixOffset(currentPoint.x, currentPoint.y)
+		for _, offset := range neighborOffsets {
+			neighborX := currentPoint.x + offset[0]
+			neighborY := currentPoint.y + offset[1]
+			if neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height {
+				continue
+			}
+			visitedIndex := neighborY*width + neighborX
+			if visited[visitedIndex] {
+				continue
+			}
+			neighborOffset := resultImage.PixOffset(neighborX, neighborY)
+			if resultImage.Pix[neighborOffset+3] != 0 {
+				continue
+			}
+
+			resultImage.Pix[neighborOffset+0] = resultImage.Pix[currentOffset+0]
+			resultImage.Pix[neighborOffset+1] = resultImage.Pix[currentOffset+1]
+			resultImage.Pix[neighborOffset+2] = resultImage.Pix[currentOffset+2]
+			visited[visitedIndex] = true
+			queue = append(queue, transparentPixelPoint{x: neighborX, y: neighborY})
+		}
+	}
+
+	return resultImage
 }
 
 func maxInt(left int, right int) int {

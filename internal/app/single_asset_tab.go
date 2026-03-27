@@ -12,9 +12,9 @@ import (
 
 func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	assetInput := widget.NewEntry()
-	assetInput.SetPlaceHolder("Paste Roblox asset ID (e.g. 138155379338302 or rbxassetid://138155379338302)")
+	assetInput.SetPlaceHolder("Paste an asset ID, rbxassetid URL, or rbxthumb URL")
 
-	statusLabel := widget.NewLabel("Enter an asset ID and click Go.")
+	statusLabel := widget.NewLabel("Enter an asset ID or rbxthumb URL and click Go.")
 	assetDetailsView := newAssetView("No image loaded", false)
 	loadingSpinner := widget.NewProgressBarInfinite()
 	loadingSpinner.Hide()
@@ -26,53 +26,8 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	var explorerState *assetExplorerState
 	var renderPreview func(selectedAssetID int64, previewResult *assetPreviewResult)
 	renderPreview = func(selectedAssetID int64, previewResult *assetPreviewResult) {
-		referenceInstanceType := ""
-		referencePropertyName := ""
-		referenceInstancePath := ""
-		if explorerState != nil {
-			if selectedRow, found := explorerState.getRow(selectedAssetID); found {
-				referenceInstanceType = selectedRow.InstanceType
-				referencePropertyName = selectedRow.PropertyName
-				referenceInstancePath = explorerState.getInstancePath(selectedAssetID)
-				if referenceInstancePath == "" {
-					referenceInstancePath = selectedRow.InstancePath
-				}
-				if referenceInstancePath == "" {
-					referenceInstancePath = selectedRow.InstanceName
-				}
-			}
-		}
-		downloadedSHA256 := ""
-		if previewResult.Stats != nil && strings.TrimSpace(previewResult.Stats.SHA256) != "" {
-			downloadedSHA256 = previewResult.Stats.SHA256
-		} else if previewResult.Image != nil {
-			downloadedSHA256 = previewResult.Image.SHA256
-		}
-		assetDetailsView.SetData(
-			selectedAssetID,
-			"",
-			downloadedSHA256,
-			0,
-			previewResult.Image,
-			previewResult.Stats,
-			previewResult.TotalBytesSize,
-			previewResult.Source,
-			previewResult.State,
-			previewResult.WarningMessage,
-			previewResult.AssetDeliveryJSON,
-			previewResult.ThumbnailJSON,
-			previewResult.EconomyJSON,
-			previewResult.RustExtractorJSON,
-			previewResult.ReferencedAssetIDs,
-			referenceInstanceType,
-			referencePropertyName,
-			referenceInstancePath,
-			previewResult.AssetTypeID,
-			previewResult.AssetTypeName,
-			previewResult.DownloadBytes,
-			previewResult.DownloadFileName,
-			previewResult.DownloadIsOriginal,
-		)
+		context := buildExplorerSelectionReferenceContext(explorerState, selectedAssetID)
+		assetDetailsView.SetData(buildAssetViewDataFromPreview(selectedAssetID, previewResult, context))
 		assetDetailsView.SetHierarchy(explorerState.getRows(), selectedAssetID, func(assetID int64) {
 			if explorerState == nil {
 				return
@@ -81,7 +36,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 			loadingSpinner.Show()
 			loadingSpinner.Start()
 			go func() {
-				selectedPreview, selectErr := explorerState.selectAsset(assetID)
+				selectedPreview, selectErr, requestSource := explorerState.selectAssetWithRequestSource(assetID)
 				fyne.Do(func() {
 					loadingSpinner.Stop()
 					loadingSpinner.Hide()
@@ -90,7 +45,11 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 						return
 					}
 					renderPreview(assetID, selectedPreview)
-					statusLabel.SetText(fmt.Sprintf("Showing asset %d.", assetID))
+					statusLabel.SetText(fmt.Sprintf(
+						"Showing asset %d. %s",
+						assetID,
+						formatSingleRequestSourceBreakdown(requestSource),
+					))
 					previewBox.Refresh()
 				})
 			}()
@@ -103,12 +62,13 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 			return
 		}
 
-		assetID, err := parseAssetID(assetInput.Text)
+		loadRequest, err := parseSingleAssetLoadRequest(assetInput.Text)
 		if err != nil {
 			statusLabel.SetText(err.Error())
 			return
 		}
-		logDebugf("Single asset load started for asset %d", assetID)
+		selectedTargetID := loadRequest.TargetID
+		logDebugf("Single asset load started for %s", loadRequest.logDescription())
 
 		statusLabel.SetText("Loading image...")
 		goButton.Disable()
@@ -120,15 +80,30 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 		assetDetailsView.PreviewPlaceholder.Show()
 		previewBox.Refresh()
 
-		go func(selectedAssetID int64) {
-			previewResult, loadErr := loadAssetPreview(selectedAssetID)
+		go func(selectedAssetID int64, request singleAssetLoadRequest) {
+			if request.requiresAuth() {
+				authErr := validateCurrentAuthCookie()
+				if authErr != nil {
+					fyne.Do(func() {
+						loadingSpinner.Stop()
+						loadingSpinner.Hide()
+						goButton.Enable()
+						statusLabel.SetText("Auth cookie expired or invalid")
+						fyneDialog.ShowError(authErr, window)
+					})
+					return
+				}
+			}
+
+			trace := &assetRequestTrace{}
+			previewResult, loadErr := loadSingleAssetPreviewWithTrace(request, trace)
 			fyne.Do(func() {
 				loadingSpinner.Stop()
 				loadingSpinner.Hide()
 				goButton.Enable()
 				if loadErr != nil {
 					statusLabel.SetText(loadErr.Error())
-					logDebugf("Single asset load failed for %d: %s", selectedAssetID, loadErr.Error())
+					logDebugf("Single asset load failed for %s: %s", request.logDescription(), loadErr.Error())
 					fyneDialog.ShowError(loadErr, window)
 					return
 				}
@@ -136,15 +111,27 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 				explorerState = newAssetExplorerState(selectedAssetID, previewResult)
 				renderPreview(selectedAssetID, previewResult)
 				previewBox.Refresh()
-				if strings.EqualFold(previewResult.Source, sourceAssetDeliveryInGame) {
-					statusLabel.SetText("Image loaded.")
+				requestSourceBreakdown := formatSingleRequestSourceBreakdown(trace.classifyRequestSource())
+				if isMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
+					if strings.EqualFold(previewResult.Source, sourceAssetDeliveryInGame) {
+						statusLabel.SetText(fmt.Sprintf("Mesh loaded. %s", requestSourceBreakdown))
+						logDebugf("Single asset load complete for %d (mesh via AssetDelivery)", selectedAssetID)
+					} else {
+						statusLabel.SetText(fmt.Sprintf("Mesh loaded with thumbnail metadata fallback (state: %s). %s", previewResult.State, requestSourceBreakdown))
+						logDebugf("Single asset load complete for %d (mesh with thumbnail fallback, state=%s)", selectedAssetID, previewResult.State)
+					}
+				} else if strings.EqualFold(previewResult.Source, sourceAssetDeliveryInGame) {
+					statusLabel.SetText(fmt.Sprintf("Image loaded. %s", requestSourceBreakdown))
 					logDebugf("Single asset load complete for %d (AssetDelivery)", selectedAssetID)
+				} else if strings.EqualFold(previewResult.Source, sourceThumbnailsDirect) {
+					statusLabel.SetText(fmt.Sprintf("Thumbnail loaded (state: %s). %s", previewResult.State, requestSourceBreakdown))
+					logDebugf("Single asset load complete for %d (direct thumbnail, state=%s)", selectedAssetID, previewResult.State)
 				} else {
-					statusLabel.SetText(fmt.Sprintf("Loaded fallback thumbnail (state: %s).", previewResult.State))
+					statusLabel.SetText(fmt.Sprintf("Loaded fallback thumbnail (state: %s). %s", previewResult.State, requestSourceBreakdown))
 					logDebugf("Single asset load complete for %d (fallback thumbnail, state=%s)", selectedAssetID, previewResult.State)
 				}
 			})
-		}(assetID)
+		}(selectedTargetID, loadRequest)
 	}
 
 	goButton = widget.NewButton("Go", loadAsset)

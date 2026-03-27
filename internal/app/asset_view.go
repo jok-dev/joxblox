@@ -31,6 +31,7 @@ const (
 
 type assetView struct {
 	PreviewImage       *canvas.Image
+	MeshPreview        *meshPreviewWidget
 	PreviewPlaceholder *widget.Label
 	PreviewContainer   fyne.CanvasObject
 	PreviewBox         fyne.CanvasObject
@@ -54,17 +55,18 @@ type assetView struct {
 	FileValue                  *widget.Label
 	FileSHA256Value            *widget.Label
 
-	AssetDeliveryJSONValue *widget.Entry
-	ThumbnailJSONValue     *widget.Entry
-	EconomyJSONValue       *widget.Entry
-	RustExtractorJSONValue *widget.Entry
-	ReferencedAssetsValue  *widget.Entry
-	JSONAccordion          *widget.Accordion
-	NoteLabel              *widget.Label
-	MetadataForm           fyne.CanvasObject
+	AssetDeliveryJSONValue  *widget.Entry
+	ThumbnailJSONValue      *widget.Entry
+	EconomyJSONValue        *widget.Entry
+	RustyAssetToolJSONValue *widget.Entry
+	ReferencedAssetsValue   *widget.Entry
+	JSONAccordion           *widget.Accordion
+	NoteLabel               *widget.Label
+	MetadataForm            fyne.CanvasObject
 
 	expandImageButton         *widget.Button
 	downloadImageButton       *widget.Button
+	uploadImageButton         *widget.Button
 	previewVariantSelect      *widget.Select
 	playAudioButton           *widget.Button
 	stopAudioButton           *widget.Button
@@ -89,7 +91,7 @@ type assetView struct {
 	pendingAssetDeliveryJSON  string
 	pendingThumbnailJSON      string
 	pendingEconomyJSON        string
-	pendingRustExtractorJSON  string
+	pendingRustyAssetToolJSON string
 	pendingReferencedAssetIDs []int64
 	lastJSONAccordionOpen     bool
 	previewDownloadOptions    []previewDownloadOption
@@ -98,6 +100,10 @@ type assetView struct {
 	assetDownloadBytes        []byte
 	assetDownloadFileName     string
 	downloadOriginalAsset     bool
+	interpolationSelect       *widget.Select
+	currentPreviewResource    fyne.Resource
+	meshPreviewLoadToken      atomic.Uint64
+	currentMeshPreviewData    meshPreviewData
 }
 
 type assetJSONExport struct {
@@ -106,7 +112,7 @@ type assetJSONExport struct {
 	AssetDeliveryJSON  any     `json:"asset_delivery_json"`
 	ThumbnailJSON      any     `json:"thumbnail_json"`
 	EconomyJSON        any     `json:"economy_json"`
-	RustExtractorJSON  any     `json:"rust_extractor_json"`
+	RustyAssetToolJSON any     `json:"rust_extractor_json"`
 	ReferencedAssetIDs []int64 `json:"referenced_asset_ids"`
 }
 
@@ -120,12 +126,14 @@ type previewDownloadOption struct {
 
 type zoomPanImage struct {
 	widget.BaseWidget
-	background *canvas.Rectangle
-	image      *canvas.Image
-	option     previewDownloadOption
-	zoom       float64
-	offsetX    float32
-	offsetY    float32
+	background    *canvas.Rectangle
+	image         *canvas.Image
+	option        previewDownloadOption
+	zoom          float64
+	offsetX       float32
+	offsetY       float32
+	hoverCallback func(imageX float64, imageY float64, pointer fyne.Position, inside bool)
+	tapCallback   func(imageX float64, imageY float64, pointer fyne.Position, inside bool)
 }
 
 func newAssetView(placeholderText string, includeFileRow bool) *assetView {
@@ -133,17 +141,20 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 	previewImage.FillMode = canvas.ImageFillContain
 	previewImage.ScaleMode = canvas.ImageScaleFastest
 	previewImage.SetMinSize(fyne.NewSize(previewWidth, previewHeight))
+	meshPreview := newMeshPreviewWidget()
+	meshPreview.Hide()
 	previewPlaceholder := widget.NewLabel(placeholderText)
 	previewContainer := container.NewMax(
 		container.NewCenter(previewPlaceholder),
 		container.NewCenter(previewImage),
+		container.NewCenter(meshPreview),
 	)
 
 	assetDeliveryJSONValue := newReadOnlyMultilineEntry(6)
 	thumbnailJSONValue := newReadOnlyMultilineEntry(6)
 	economyJSONValue := newReadOnlyMultilineEntry(6)
 	referencedAssetsValue := newReadOnlyMultilineEntry(6)
-	rustExtractorJSONValue := newReadOnlyMultilineEntry(6)
+	rustyAssetToolJSONValue := newReadOnlyMultilineEntry(6)
 	saveJSONButton := widget.NewButton("Save Full JSON to File", nil)
 	dimensionsLabel := widget.NewLabel("Dimensions:")
 
@@ -158,8 +169,8 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 				thumbnailJSONValue,
 				widget.NewLabel("Economy Details JSON:"),
 				economyJSONValue,
-				widget.NewLabel("Rust Extractor JSON:"),
-				rustExtractorJSONValue,
+				widget.NewLabel("Rusty Asset Tool JSON:"),
+				rustyAssetToolJSONValue,
 				widget.NewLabel("Referenced Asset IDs:"),
 				referencedAssetsValue,
 			),
@@ -182,6 +193,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 
 	view := &assetView{
 		PreviewImage:               previewImage,
+		MeshPreview:                meshPreview,
 		PreviewPlaceholder:         previewPlaceholder,
 		PreviewContainer:           previewContainer,
 		PreviewBox:                 nil,
@@ -206,7 +218,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		AssetDeliveryJSONValue:     assetDeliveryJSONValue,
 		ThumbnailJSONValue:         thumbnailJSONValue,
 		EconomyJSONValue:           economyJSONValue,
-		RustExtractorJSONValue:     rustExtractorJSONValue,
+		RustyAssetToolJSONValue:    rustyAssetToolJSONValue,
 		ReferencedAssetsValue:      referencedAssetsValue,
 		JSONAccordion:              jsonAccordion,
 		NoteLabel:                  noteLabel,
@@ -234,7 +246,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		pendingAssetDeliveryJSON:   "",
 		pendingThumbnailJSON:       "",
 		pendingEconomyJSON:         "",
-		pendingRustExtractorJSON:   "",
+		pendingRustyAssetToolJSON:  "",
 		pendingReferencedAssetIDs:  []int64{},
 		previewDownloadOptions:     []previewDownloadOption{},
 		selectedPreviewOption:      "",
@@ -242,6 +254,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		assetDownloadBytes:         []byte{},
 		assetDownloadFileName:      "",
 		downloadOriginalAsset:      false,
+		currentMeshPreviewData:     meshPreviewData{},
 	}
 	saveJSONButton.OnTapped = func() {
 		view.saveJSONExportToFile()
@@ -258,6 +271,10 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		view.saveSelectedPreviewVariantToFile()
 	})
 	view.downloadImageButton.Disable()
+	view.uploadImageButton = widget.NewButtonWithIcon("", theme.UploadIcon(), func() {
+		view.uploadSelectedPreviewVariant()
+	})
+	view.uploadImageButton.Disable()
 	view.playAudioButton = widget.NewButtonWithIcon("Play", theme.MediaPlayIcon(), func() {
 		if view.audioPlayer == nil {
 			return
@@ -331,8 +348,14 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		view.applySelectedPreviewVariant()
 	})
 	view.previewVariantSelect.Disable()
+	view.interpolationSelect = widget.NewSelect(sampleModeOptions, func(string) {
+		view.rebuildPreviewVariants()
+	})
+	view.interpolationSelect.SetSelected(defaultSampleMode)
+	view.interpolationSelect.Disable()
 	previewVariantControl := container.NewGridWrap(fyne.NewSize(240, 36), view.previewVariantSelect)
-	expandButtonRow := container.NewHBox(layout.NewSpacer(), previewVariantControl, view.downloadImageButton, view.expandImageButton)
+	interpolationControl := container.NewGridWrap(fyne.NewSize(160, 36), view.interpolationSelect)
+	expandButtonRow := container.NewHBox(layout.NewSpacer(), previewVariantControl, interpolationControl, view.uploadImageButton, view.downloadImageButton, view.expandImageButton)
 	previewBody := container.NewVBox(view.PreviewContainer, view.audioControls)
 	view.PreviewBox = container.NewBorder(nil, expandButtonRow, nil, nil, previewBody)
 	hierarchyMinHeight := canvas.NewRectangle(color.Transparent)
@@ -382,6 +405,9 @@ func (view *assetView) Clear() {
 	view.PreviewImage.Resource = nil
 	view.PreviewImage.Refresh()
 	view.PreviewImage.Hide()
+	view.MeshPreview.Clear()
+	view.MeshPreview.Hide()
+	view.currentMeshPreviewData = meshPreviewData{}
 	view.PreviewPlaceholder.Show()
 	view.PreviewContainer.Refresh()
 	view.AssetIDValue.SetText("-")
@@ -402,18 +428,22 @@ func (view *assetView) Clear() {
 	view.AssetDeliveryJSONValue.SetText("-")
 	view.ThumbnailJSONValue.SetText("-")
 	view.EconomyJSONValue.SetText("-")
-	view.RustExtractorJSONValue.SetText("-")
+	view.RustyAssetToolJSONValue.SetText("-")
 	view.ReferencedAssetsValue.SetText("-")
 	view.pendingAssetDeliveryJSON = ""
 	view.pendingThumbnailJSON = ""
 	view.pendingEconomyJSON = ""
-	view.pendingRustExtractorJSON = ""
+	view.pendingRustyAssetToolJSON = ""
 	view.pendingReferencedAssetIDs = []int64{}
 	view.previewDownloadOptions = []previewDownloadOption{}
 	view.selectedPreviewOption = ""
 	view.assetDownloadBytes = []byte{}
 	view.assetDownloadFileName = ""
 	view.downloadOriginalAsset = false
+	view.currentPreviewResource = nil
+	view.currentMeshPreviewData = meshPreviewData{}
+	view.meshPreviewLoadToken.Add(1)
+	view.interpolationSelect.Disable()
 	view.selectedHierarchyAssetID = 0
 	view.hierarchyRows = []assetExplorerRow{}
 	view.hierarchySelectAsset = nil
@@ -434,6 +464,7 @@ func (view *assetView) Clear() {
 	view.previewVariantSelect.Disable()
 	view.expandImageButton.Disable()
 	view.downloadImageButton.Disable()
+	view.uploadImageButton.Disable()
 	if view.audioPlayer != nil {
 		view.audioPlayer.Reset()
 	}
@@ -478,8 +509,32 @@ func setLabelTextOrDash(label *widget.Label, value string) {
 	label.SetText(trimmedValue)
 }
 
-func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string, useCount int, previewImageInfo *imageInfo, statsInfo *imageInfo, totalBytesSize int, sourceDescription string, stateDescription string, warningMessage string, assetDeliveryRawJSON string, thumbnailRawJSON string, economyRawJSON string, rustExtractorRawJSON string, referencedAssetIDs []int64, referenceInstanceType string, referencePropertyName string, referenceInstancePath string, assetTypeID int, assetTypeName string, downloadBytes []byte, downloadFileName string, downloadIsOriginal bool) {
-	previewBuildToken := view.previewVariantBuildToken.Add(1)
+func (view *assetView) SetData(data assetViewData) {
+	view.previewVariantBuildToken.Add(1)
+	view.meshPreviewLoadToken.Add(1)
+	assetID := data.AssetID
+	filePath := data.FilePath
+	fileSHA256 := data.FileSHA256
+	useCount := data.UseCount
+	previewImageInfo := data.PreviewImageInfo
+	statsInfo := data.StatsInfo
+	totalBytesSize := data.TotalBytesSize
+	sourceDescription := data.SourceDescription
+	stateDescription := data.StateDescription
+	warningMessage := data.WarningMessage
+	assetDeliveryRawJSON := data.AssetDeliveryRawJSON
+	thumbnailRawJSON := data.ThumbnailRawJSON
+	economyRawJSON := data.EconomyRawJSON
+	rustyAssetToolRawJSON := data.RustyAssetToolRawJSON
+	referencedAssetIDs := data.ReferencedAssetIDs
+	referenceInstanceType := data.ReferenceInstanceType
+	referencePropertyName := data.ReferencePropertyName
+	referenceInstancePath := data.ReferenceInstancePath
+	assetTypeID := data.AssetTypeID
+	assetTypeName := data.AssetTypeName
+	downloadBytes := data.DownloadBytes
+	downloadFileName := data.DownloadFileName
+	downloadIsOriginal := data.DownloadIsOriginal
 	if statsInfo == nil {
 		statsInfo = previewImageInfo
 	}
@@ -489,10 +544,23 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 
 	view.currentAssetID = assetID
 	view.AssetIDValue.SetText(strconv.FormatInt(assetID, 10))
-	view.DimensionsLabel.SetText("Dimensions:")
-	if isAudioAssetContent(assetTypeID, statsInfo.ContentType) {
+	if isMeshAssetType(assetTypeID) {
+		view.DimensionsLabel.SetText("Mesh Info:")
+		if len(downloadBytes) > 0 {
+			meshInfo, meshErr := parseMeshHeader(downloadBytes)
+			if meshErr == nil {
+				view.DimensionsValue.SetText(formatMeshInfo(meshInfo))
+			} else {
+				view.DimensionsValue.SetText("-")
+			}
+		} else {
+			view.DimensionsValue.SetText("-")
+		}
+	} else if isAudioAssetContent(assetTypeID, statsInfo.ContentType) {
+		view.DimensionsLabel.SetText("Dimensions:")
 		view.DimensionsValue.SetText("-")
 	} else {
+		view.DimensionsLabel.SetText("Dimensions:")
 		if statsInfo.Width > 0 && statsInfo.Height > 0 {
 			view.DimensionsValue.SetText(fmt.Sprintf("%dx%d", statsInfo.Width, statsInfo.Height))
 		} else {
@@ -515,7 +583,7 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 	view.pendingAssetDeliveryJSON = assetDeliveryRawJSON
 	view.pendingThumbnailJSON = thumbnailRawJSON
 	view.pendingEconomyJSON = economyRawJSON
-	view.pendingRustExtractorJSON = rustExtractorRawJSON
+	view.pendingRustyAssetToolJSON = rustyAssetToolRawJSON
 	view.pendingReferencedAssetIDs = append([]int64(nil), referencedAssetIDs...)
 	view.assetDownloadBytes = append([]byte(nil), downloadBytes...)
 	view.assetDownloadFileName = strings.TrimSpace(downloadFileName)
@@ -570,7 +638,12 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 	if previewImageInfo != nil && previewImageInfo.Resource != nil {
 		previewResource = previewImageInfo.Resource
 	}
-	if previewResource != nil {
+	view.MeshPreview.Clear()
+	view.MeshPreview.Hide()
+	if isMeshAssetType(assetTypeID) && len(downloadBytes) > 0 {
+		view.showMeshPreview(downloadBytes)
+	} else if previewResource != nil {
+		view.currentPreviewResource = previewResource
 		originalPreviewOption := buildOriginalPreviewOption(previewResource, view.currentAssetID)
 		originalPreviewOption.labelText = formatPreviewOptionLabel(originalPreviewOption.labelText, len(originalPreviewOption.bytes), len(originalPreviewOption.bytes))
 		view.previewDownloadOptions = []previewDownloadOption{originalPreviewOption}
@@ -582,6 +655,7 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 		view.PreviewImage.Show()
 		view.PreviewPlaceholder.Hide()
 		view.downloadImageButton.Enable()
+		view.uploadImageButton.Enable()
 		view.expandImageButton.Enable()
 		view.suppressPreviewVariant = true
 		view.previewVariantSelect.SetOptions([]string{originalPreviewOption.labelText})
@@ -589,45 +663,19 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 		view.suppressPreviewVariant = false
 		view.previewVariantSelect.Disable()
 		if !view.downloadOriginalAsset {
-			go func(selectedAssetID int64, buildToken uint64, resource fyne.Resource) {
-				downloadOptions, buildErr := buildPreviewDownloadOptions(resource, selectedAssetID)
-				if buildErr != nil || len(downloadOptions) == 0 {
-					return
-				}
-				fyne.Do(func() {
-					if view.previewVariantBuildToken.Load() != buildToken || view.currentAssetID != selectedAssetID {
-						return
-					}
-					view.previewDownloadOptions = downloadOptions
-					optionLabels := make([]string, 0, len(downloadOptions))
-					for _, option := range downloadOptions {
-						optionLabels = append(optionLabels, option.labelText)
-					}
-					selectedLabel := view.selectedPreviewOption
-					if !containsString(optionLabels, selectedLabel) {
-						selectedLabel = optionLabels[0]
-					}
-					view.suppressPreviewVariant = true
-					view.previewVariantSelect.SetOptions(optionLabels)
-					view.previewVariantSelect.SetSelected(selectedLabel)
-					view.suppressPreviewVariant = false
-					view.selectedPreviewOption = selectedLabel
-					if len(optionLabels) > 1 {
-						view.previewVariantSelect.Enable()
-					} else {
-						view.previewVariantSelect.Disable()
-					}
-					view.applySelectedPreviewVariant()
-				})
-			}(view.currentAssetID, previewBuildToken, previewResource)
+			view.interpolationSelect.Enable()
+			view.rebuildPreviewVariants()
 		}
 	} else {
+		view.currentPreviewResource = nil
+		view.interpolationSelect.Disable()
 		view.PreviewImage.Hide()
 		view.PreviewPlaceholder.SetText("No preview image available")
 		view.PreviewPlaceholder.Show()
 		if view.downloadOriginalAsset && len(view.assetDownloadBytes) > 0 {
 			view.setOriginalOnlyPreviewVariant()
 			view.downloadImageButton.Enable()
+			view.uploadImageButton.Enable()
 		} else {
 			view.suppressPreviewVariant = true
 			view.previewVariantSelect.ClearSelected()
@@ -635,13 +683,100 @@ func (view *assetView) SetData(assetID int64, filePath string, fileSHA256 string
 			view.suppressPreviewVariant = false
 			view.previewVariantSelect.Disable()
 			view.downloadImageButton.Disable()
+			view.uploadImageButton.Disable()
 		}
 		view.expandImageButton.Disable()
 	}
 	view.PreviewContainer.Refresh()
 }
 
+func (view *assetView) showMeshPreview(downloadBytes []byte) {
+	view.currentPreviewResource = nil
+	view.currentMeshPreviewData = meshPreviewData{}
+	view.interpolationSelect.Disable()
+	view.PreviewImage.Hide()
+	view.MeshPreview.Clear()
+	view.MeshPreview.Hide()
+	view.expandImageButton.Disable()
+	if view.downloadOriginalAsset && len(view.assetDownloadBytes) > 0 {
+		view.setOriginalOnlyPreviewVariant()
+		view.downloadImageButton.Enable()
+		view.uploadImageButton.Enable()
+	} else {
+		view.suppressPreviewVariant = true
+		view.previewVariantSelect.ClearSelected()
+		view.previewVariantSelect.SetOptions([]string{})
+		view.suppressPreviewVariant = false
+		view.previewVariantSelect.Disable()
+		view.downloadImageButton.Disable()
+		view.uploadImageButton.Disable()
+	}
+	view.PreviewPlaceholder.SetText("Rendering mesh preview...")
+	view.PreviewPlaceholder.Show()
+
+	selectedAssetID := view.currentAssetID
+	loadToken := view.meshPreviewLoadToken.Add(1)
+	meshBytes := append([]byte(nil), downloadBytes...)
+	go func() {
+		meshData, previewErr := extractMeshPreviewWithRustyAssetToolFromBytes(meshBytes)
+		fyne.Do(func() {
+			if view.currentAssetID != selectedAssetID || view.meshPreviewLoadToken.Load() != loadToken {
+				return
+			}
+			if previewErr == nil {
+				view.currentMeshPreviewData = meshData
+				view.MeshPreview.SetData(meshData)
+				view.MeshPreview.Show()
+				view.PreviewImage.Hide()
+				view.PreviewPlaceholder.Hide()
+				view.expandImageButton.Enable()
+				view.PreviewContainer.Refresh()
+				return
+			}
+			logDebugf("Mesh preview unavailable for asset %d: %s", selectedAssetID, previewErr.Error())
+			view.PreviewImage.Hide()
+			view.MeshPreview.Hide()
+			view.PreviewPlaceholder.SetText("Mesh preview unavailable")
+			view.PreviewPlaceholder.Show()
+			view.PreviewContainer.Refresh()
+		})
+	}()
+}
+
+func (view *assetView) showImagePreviewFallback(previewResource fyne.Resource) {
+	view.currentPreviewResource = previewResource
+	view.currentMeshPreviewData = meshPreviewData{}
+	originalPreviewOption := buildOriginalPreviewOption(previewResource, view.currentAssetID)
+	originalPreviewOption.labelText = formatPreviewOptionLabel(originalPreviewOption.labelText, len(originalPreviewOption.bytes), len(originalPreviewOption.bytes))
+	view.previewDownloadOptions = []previewDownloadOption{originalPreviewOption}
+	view.selectedPreviewOption = originalPreviewOption.labelText
+	view.PreviewImage.File = ""
+	view.PreviewImage.Image = nil
+	view.PreviewImage.Resource = previewResource
+	view.PreviewImage.Refresh()
+	view.PreviewImage.Show()
+	view.MeshPreview.Hide()
+	view.PreviewPlaceholder.Hide()
+	view.downloadImageButton.Enable()
+	view.uploadImageButton.Enable()
+	view.expandImageButton.Enable()
+	view.suppressPreviewVariant = true
+	view.previewVariantSelect.SetOptions([]string{originalPreviewOption.labelText})
+	view.previewVariantSelect.SetSelected(originalPreviewOption.labelText)
+	view.suppressPreviewVariant = false
+	view.previewVariantSelect.Disable()
+	if !view.downloadOriginalAsset {
+		view.interpolationSelect.Enable()
+		view.rebuildPreviewVariants()
+	}
+	view.PreviewContainer.Refresh()
+}
+
 func formatSizeAuto(bytesSize int) string {
+	return formatSizeAuto64(int64(bytesSize))
+}
+
+func formatSizeAuto64(bytesSize int64) string {
 	if bytesSize >= megabyte {
 		return fmt.Sprintf("%.2f MB", float64(bytesSize)/megabyte)
 	}

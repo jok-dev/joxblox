@@ -4,9 +4,15 @@ import (
 	"image/color"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+)
+
+const (
+	expandedBackgroundBlack = "Black"
+	expandedBackgroundWhite = "White"
 )
 
 func newZoomPanImage(option previewDownloadOption) *zoomPanImage {
@@ -22,6 +28,15 @@ func newZoomPanImage(option previewDownloadOption) *zoomPanImage {
 	viewer.image.ScaleMode = canvas.ImageScaleFastest
 	viewer.ExtendBaseWidget(viewer)
 	return viewer
+}
+
+func zoomPanBackgroundColor(mode string) color.Color {
+	switch mode {
+	case expandedBackgroundWhite:
+		return color.White
+	default:
+		return color.Black
+	}
 }
 
 func (viewer *zoomPanImage) CreateRenderer() fyne.WidgetRenderer {
@@ -76,6 +91,22 @@ func (viewer *zoomPanImage) SetZoom(nextZoom float64) {
 	viewer.updateLayout()
 }
 
+func (viewer *zoomPanImage) SetBackground(mode string) {
+	if viewer == nil || viewer.background == nil {
+		return
+	}
+	viewer.background.FillColor = zoomPanBackgroundColor(mode)
+	viewer.background.Refresh()
+}
+
+func (viewer *zoomPanImage) SetHoverCallback(callback func(imageX float64, imageY float64, pointer fyne.Position, inside bool)) {
+	viewer.hoverCallback = callback
+}
+
+func (viewer *zoomPanImage) SetTapCallback(callback func(imageX float64, imageY float64, pointer fyne.Position, inside bool)) {
+	viewer.tapCallback = callback
+}
+
 func (viewer *zoomPanImage) Dragged(event *fyne.DragEvent) {
 	viewer.offsetX += event.Dragged.DX
 	viewer.offsetY += event.Dragged.DY
@@ -95,6 +126,60 @@ func (viewer *zoomPanImage) Scrolled(event *fyne.ScrollEvent) {
 	if event.Scrolled.DY < 0 {
 		viewer.SetZoom(viewer.zoom / 1.1)
 	}
+}
+
+func (viewer *zoomPanImage) MouseIn(event *desktop.MouseEvent) {
+	viewer.handleHoverEvent(event)
+}
+
+func (viewer *zoomPanImage) MouseMoved(event *desktop.MouseEvent) {
+	viewer.handleHoverEvent(event)
+}
+
+func (viewer *zoomPanImage) MouseOut() {
+	if viewer.hoverCallback != nil {
+		viewer.hoverCallback(0, 0, fyne.NewPos(0, 0), false)
+	}
+}
+
+func (viewer *zoomPanImage) handleHoverEvent(event *desktop.MouseEvent) {
+	if viewer == nil || viewer.hoverCallback == nil || event == nil {
+		return
+	}
+	imageX, imageY, inside := viewer.imagePointForPointer(event.Position)
+	viewer.hoverCallback(imageX, imageY, event.Position, inside)
+}
+
+func (viewer *zoomPanImage) Tapped(event *fyne.PointEvent) {
+	if viewer == nil || viewer.tapCallback == nil || event == nil {
+		return
+	}
+	imageX, imageY, inside := viewer.imagePointForPointer(event.Position)
+	viewer.tapCallback(imageX, imageY, event.Position, inside)
+}
+
+func (viewer *zoomPanImage) TappedSecondary(_ *fyne.PointEvent) {}
+
+func (viewer *zoomPanImage) imagePointForPointer(position fyne.Position) (float64, float64, bool) {
+	if viewer == nil {
+		return 0, 0, false
+	}
+	positionX, positionY, scaledWidth, scaledHeight := viewer.layoutMetrics()
+	if scaledWidth <= 0 || scaledHeight <= 0 {
+		return 0, 0, false
+	}
+	localX := float64(position.X - positionX)
+	localY := float64(position.Y - positionY)
+	if localX < 0 || localY < 0 || localX > float64(scaledWidth) || localY > float64(scaledHeight) {
+		return 0, 0, false
+	}
+	imageWidth, imageHeight := viewer.optionDimensions()
+	if imageWidth <= 0 || imageHeight <= 0 {
+		return 0, 0, false
+	}
+	imageX := (localX / float64(scaledWidth)) * float64(imageWidth)
+	imageY := (localY / float64(scaledHeight)) * float64(imageHeight)
+	return imageX, imageY, true
 }
 
 func (viewer *zoomPanImage) updateLayout() {

@@ -10,7 +10,7 @@ import (
 
 const (
 	scanSourceFolders = "Folders"
-	scanSourceRBXL    = "RBXL"
+	scanSourceRBXL    = "RBXL/RBXM"
 	scanModeSingle    = "Single"
 	scanModeDiff      = "Diff"
 )
@@ -56,34 +56,36 @@ func newScanTab(
 		ExtractHits:                      scanFolderDiffForAssetIDs,
 	})
 	rbxlSingleScan, rbxlSingleActions := newAssetScanTab(window, assetScanTabOptions{
-		NoSourceSelectedText:     "No .rbxl file selected.",
-		SelectButtonText:         "Select .rbxl File",
+		NoSourceSelectedText:     "No .rbxl/.rbxm file selected.",
+		SelectButtonText:         "Select .rbxl/.rbxm File",
 		ReadyStatusText:          "Ready.",
-		MissingSourceStatusText:  "Select an .rbxl file first.",
+		MissingSourceStatusText:  "Select an .rbxl or .rbxm file first.",
 		ScanningStatusText:       "Scanning...",
 		NoResultsStatusText:      "No results found.",
-		MaxResultsDefault:        rustExtractorDefaultLimit,
+		MaxResultsDefault:        rustyAssetToolDefaultLimit,
 		ScanContextKey:           scanContextRBXLSingle,
 		RecentFilesPreferenceKey: "scan.recent.rbxl.single",
 		SelectSource:             pickRBXLSource,
 		ExtractHits:              scanRBXLFileForAssetIDs,
+		PathFilteredExtractHits:  scanRBXLFileForAssetIDsFiltered,
 	})
 	rbxlDiffScan, rbxlDiffActions := newAssetScanTab(window, assetScanTabOptions{
-		NoSourceSelectedText:             "Baseline: no .rbxl file selected.",
+		NoSourceSelectedText:             "Baseline: no .rbxl/.rbxm file selected.",
 		SelectButtonText:                 "Select Baseline",
-		NoSecondarySourceText:            "Target: no .rbxl file selected.",
+		NoSecondarySourceText:            "Target: no .rbxl/.rbxm file selected.",
 		SelectSecondaryButtonText:        "Select Target",
 		ReadyStatusText:                  "Ready.",
-		MissingSourceStatusText:          "Select baseline and target .rbxl files first.",
-		MissingSecondarySourceStatusText: "Select a target .rbxl file.",
+		MissingSourceStatusText:          "Select baseline and target .rbxl/.rbxm files first.",
+		MissingSecondarySourceStatusText: "Select a target .rbxl or .rbxm file.",
 		ScanningStatusText:               "Diffing...",
 		NoResultsStatusText:              "No new results found.",
-		MaxResultsDefault:                rustExtractorDefaultLimit,
+		MaxResultsDefault:                rustyAssetToolDefaultLimit,
 		ScanContextKey:                   scanContextRBXLDiff,
 		RecentFilesPreferenceKey:         "scan.recent.rbxl.diff",
 		SelectSource:                     pickRBXLBaselineSource,
 		SelectSecondarySource:            pickRBXLTargetSource,
 		ExtractHits:                      scanRBXLFileDiffForAssetIDs,
+		PathFilteredExtractHits:          scanRBXLFileForAssetIDsFiltered,
 	})
 
 	variants := []scanTabVariant{

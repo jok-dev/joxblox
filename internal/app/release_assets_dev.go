@@ -2,7 +2,7 @@
 
 package app
 
-func bundledRustExtractorBinary() []byte {
+func bundledRustyAssetToolBinary() []byte {
 	return nil
 }
 

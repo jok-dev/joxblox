@@ -47,6 +47,38 @@ func validateRoblosecurityCookie(rawValue string) error {
 	return nil
 }
 
+func validateCurrentAuthCookie() error {
+	if !IsAuthenticationEnabled() {
+		return nil
+	}
+	cookieHeader := GetRoblosecurityCookieHeader()
+	if cookieHeader == "" {
+		return nil
+	}
+	response, err := doRobloxAuthenticatedUserGet(cookieHeader, authValidationTimeout)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("your .ROBLOSECURITY cookie is expired or invalid — please update it in the Auth panel")
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("auth check returned HTTP %d", response.StatusCode)
+	}
+
+	var userResponse authenticatedUserResponse
+	if err := json.NewDecoder(response.Body).Decode(&userResponse); err != nil {
+		return fmt.Errorf("invalid auth response")
+	}
+	if userResponse.ID <= 0 {
+		return fmt.Errorf("auth check returned no user")
+	}
+
+	return nil
+}
+
 func sanitizeAuthErrorMessage(err error) string {
 	if err == nil {
 		return ""

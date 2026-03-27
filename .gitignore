@@ -30,3 +30,5 @@ tools/rbxl-id-extractor/NUL
 internal/app/release-assets/
 
 latest.log
+
+.tmp

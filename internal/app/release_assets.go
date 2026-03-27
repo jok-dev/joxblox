@@ -6,7 +6,7 @@ import _ "embed"
 
 var (
 	//go:embed release-assets/rbxl-id-extractor.bin
-	bundledRustExtractorBinaryData []byte
+	bundledRustyAssetToolBinaryData []byte
 
 	//go:embed release-assets/CHANGELOG.md
 	bundledChangelogMarkdownData string
@@ -15,8 +15,8 @@ var (
 	bundledLicenseTextData string
 )
 
-func bundledRustExtractorBinary() []byte {
-	return bundledRustExtractorBinaryData
+func bundledRustyAssetToolBinary() []byte {
+	return bundledRustyAssetToolBinaryData
 }
 
 func bundledChangelogMarkdown() string {

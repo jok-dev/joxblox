@@ -20,6 +20,7 @@ const (
 
 var (
 	rbxAssetIDPattern        = regexp.MustCompile(`(?i)rbxassetid://\s*(\d+)`)
+	rbxThumbPattern          = regexp.MustCompile(`(?i)rbxthumb://[^\s"'<>]+`)
 	rawLargeNumberPattern    = regexp.MustCompile(`\b\d{8,}\b`)
 	robloxContextLinePattern = regexp.MustCompile(`(?i)(rbxassetid|assetid|texture|image|decal|thumbnail|meshid|soundid)`)
 	errScanLimitReached      = errors.New("scan limit reached")
@@ -27,13 +28,20 @@ var (
 )
 
 type scanHit struct {
-	AssetID      int64
-	FilePath     string
-	UseCount     int
-	InstanceType string
-	InstanceName string
-	InstancePath string
-	PropertyName string
+	AssetID          int64
+	AssetInput       string
+	FilePath         string
+	UseCount         int
+	InstanceType     string
+	InstanceName     string
+	InstancePath     string
+	PropertyName     string
+	AllInstancePaths []string
+}
+
+type extractedScanReference struct {
+	AssetID    int64
+	AssetInput string
 }
 
 type stopSignal struct {
@@ -58,7 +66,7 @@ func (signal *stopSignal) Stop() {
 
 func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
 	results := []scanHit{}
-	seenAssetIDs := map[int64]bool{}
+	seenReferenceKeys := map[string]bool{}
 
 	walkErr := filepath.WalkDir(rootPath, func(path string, entry os.DirEntry, err error) error {
 		select {
@@ -75,7 +83,7 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 			return nil
 		}
 
-		assetIDs, parseErr := extractAssetIDsFromFile(path, stopChannel)
+		assetReferences, parseErr := extractAssetReferencesFromFile(path, stopChannel)
 		if parseErr != nil {
 			if errors.Is(parseErr, errScanStopped) {
 				return errScanStopped
@@ -83,22 +91,24 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 			return nil
 		}
 
-		for _, assetID := range assetIDs {
+		for _, assetReference := range assetReferences {
 			select {
 			case <-stopChannel:
 				return errScanStopped
 			default:
 			}
 
-			if seenAssetIDs[assetID] {
+			referenceKey := scanAssetReferenceKey(assetReference.AssetID, assetReference.AssetInput)
+			if seenReferenceKeys[referenceKey] {
 				continue
 			}
 
-			seenAssetIDs[assetID] = true
+			seenReferenceKeys[referenceKey] = true
 			results = append(results, scanHit{
-				AssetID:  assetID,
-				FilePath: path,
-				UseCount: 1,
+				AssetID:    assetReference.AssetID,
+				AssetInput: assetReference.AssetInput,
+				FilePath:   path,
+				UseCount:   1,
 			})
 			if limit > 0 && len(results) >= limit {
 				return errScanLimitReached
@@ -119,15 +129,15 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 	return results, nil
 }
 
-func extractAssetIDsFromFile(filePath string, stopChannel <-chan struct{}) ([]int64, error) {
+func extractAssetReferencesFromFile(filePath string, stopChannel <-chan struct{}) ([]extractedScanReference, error) {
 	fileHandle, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	defer fileHandle.Close()
 
-	assetIDs := []int64{}
-	seenAssetIDs := map[int64]bool{}
+	assetReferences := []extractedScanReference{}
+	seenReferenceKeys := map[string]bool{}
 
 	fileScanner := bufio.NewScanner(fileHandle)
 	fileScanner.Buffer(make([]byte, maxBinarySample), scannerBufferCapacity)
@@ -137,17 +147,34 @@ func extractAssetIDsFromFile(filePath string, stopChannel <-chan struct{}) ([]in
 			return nil, errScanStopped
 		default:
 		}
-		extractAssetIDsFromLine(fileScanner.Text(), seenAssetIDs, &assetIDs)
+		extractAssetReferencesFromLine(fileScanner.Text(), seenReferenceKeys, &assetReferences)
 	}
 
 	if err := fileScanner.Err(); err != nil {
 		return nil, err
 	}
 
-	return assetIDs, nil
+	return assetReferences, nil
 }
 
-func extractAssetIDsFromLine(line string, seenAssetIDs map[int64]bool, output *[]int64) {
+func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bool, output *[]extractedScanReference) {
+	thumbMatches := rbxThumbPattern.FindAllString(line, -1)
+	for _, thumbMatch := range thumbMatches {
+		loadRequest, err := parseSingleAssetLoadRequest(thumbMatch)
+		if err != nil {
+			continue
+		}
+		referenceKey := scanAssetReferenceKey(loadRequest.TargetID, thumbMatch)
+		if seenReferenceKeys[referenceKey] {
+			continue
+		}
+		seenReferenceKeys[referenceKey] = true
+		*output = append(*output, extractedScanReference{
+			AssetID:    loadRequest.TargetID,
+			AssetInput: strings.TrimSpace(thumbMatch),
+		})
+	}
+
 	matches := rbxAssetIDPattern.FindAllStringSubmatch(line, -1)
 	for _, match := range matches {
 		if len(match) < 2 {
@@ -155,12 +182,13 @@ func extractAssetIDsFromLine(line string, seenAssetIDs map[int64]bool, output *[
 		}
 
 		assetID, err := strconv.ParseInt(match[1], 10, 64)
-		if err != nil || seenAssetIDs[assetID] {
+		referenceKey := scanAssetReferenceKey(assetID, "")
+		if err != nil || seenReferenceKeys[referenceKey] {
 			continue
 		}
 
-		seenAssetIDs[assetID] = true
-		*output = append(*output, assetID)
+		seenReferenceKeys[referenceKey] = true
+		*output = append(*output, extractedScanReference{AssetID: assetID})
 	}
 
 	if !robloxContextLinePattern.MatchString(line) {
@@ -170,12 +198,13 @@ func extractAssetIDsFromLine(line string, seenAssetIDs map[int64]bool, output *[
 	rawMatches := rawLargeNumberPattern.FindAllString(line, -1)
 	for _, rawMatch := range rawMatches {
 		assetID, err := strconv.ParseInt(rawMatch, 10, 64)
-		if err != nil || seenAssetIDs[assetID] {
+		referenceKey := scanAssetReferenceKey(assetID, "")
+		if err != nil || seenReferenceKeys[referenceKey] {
 			continue
 		}
 
-		seenAssetIDs[assetID] = true
-		*output = append(*output, assetID)
+		seenReferenceKeys[referenceKey] = true
+		*output = append(*output, extractedScanReference{AssetID: assetID})
 	}
 }
 
@@ -242,13 +271,13 @@ func scanFolderDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan 
 		return nil, targetScanErr
 	}
 
-	baselineIDs := map[int64]bool{}
+	baselineReferenceKeys := map[string]bool{}
 	for _, hit := range baselineHits {
-		baselineIDs[hit.AssetID] = true
+		baselineReferenceKeys[scanAssetReferenceKey(hit.AssetID, hit.AssetInput)] = true
 	}
 	diffHits := make([]scanHit, 0, len(targetHits))
 	for _, hit := range targetHits {
-		if baselineIDs[hit.AssetID] {
+		if baselineReferenceKeys[scanAssetReferenceKey(hit.AssetID, hit.AssetInput)] {
 			continue
 		}
 		diffHits = append(diffHits, hit)

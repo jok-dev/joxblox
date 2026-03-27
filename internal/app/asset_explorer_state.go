@@ -117,14 +117,20 @@ func (state *assetExplorerState) getInstancePath(assetID int64) string {
 }
 
 func (state *assetExplorerState) selectAsset(assetID int64) (*assetPreviewResult, error) {
+	preview, err, _ := state.selectAssetWithRequestSource(assetID)
+	return preview, err
+}
+
+func (state *assetExplorerState) selectAssetWithRequestSource(assetID int64) (*assetPreviewResult, error, heatmapAssetRequestSource) {
 	state.selectedID = assetID
 	if knownPreview, exists := state.knownByID[assetID]; exists {
-		return knownPreview, nil
+		return knownPreview, nil, heatmapAssetRequestSourceMemory
 	}
 
-	loadedPreview, loadErr := loadAssetPreview(assetID)
+	trace := &assetRequestTrace{}
+	loadedPreview, loadErr := loadAssetPreviewWithTrace(assetID, trace)
 	if loadErr != nil {
-		return nil, loadErr
+		return nil, loadErr, trace.classifyRequestSource()
 	}
 	state.knownByID[assetID] = loadedPreview
 	if rowIndex, exists := state.indexByID[assetID]; exists {
@@ -137,5 +143,5 @@ func (state *assetExplorerState) selectAsset(assetID int64) (*assetPreviewResult
 		parentDepth = state.rows[rowIndex].Depth
 	}
 	state.addChildren(assetID, parentDepth+1, loadedPreview.ChildAssets)
-	return loadedPreview, nil
+	return loadedPreview, nil, trace.classifyRequestSource()
 }

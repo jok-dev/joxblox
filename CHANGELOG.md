@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.1.0 - 2026-03-26
+
+Expanded `Joxblox` with new RBXL analysis, optimization, and mesh-inspection workflows for larger asset review sessions.
+
+### Added
+
+- `Heatmap` tab for generating weighted `.rbxl` asset heatmaps, optional map underlays, and diff comparisons
+- `Optimize Assets` tab for filtering place references, resizing image assets, and re-uploading optimized copies through Roblox Open Cloud
+- Interactive mesh preview rendering and richer mesh stats in the asset preview flow
+- Shared results explorer support for similarity-ranked asset browsing and richer scan/heatmap stats
+- `Settings` dialog for configuring an on-disk asset download cache
+- Go and Rust test coverage for the new request-source, mesh, cache, and HTTP helper paths
+
+### Changed
+
+- Improved `.rbxl` scanning and asset preview plumbing with shared request-source metadata, preview adapters, and download caching support
+- Added startup validation and clearer status reporting for saved `.ROBLOSECURITY` cookies
+- Expanded release packaging and CI coverage for the bundled Rust helper, changelog/license assets, and cross-language test runs
+
+### Notes
+
+- Release builds continue to embed the `joxblox-rusty-asset-tool` payload used for `.rbxl`, heatmap, and mesh workflows
+- `COREMESH` mesh support remains most validated on Windows MSVC even though Linux/macOS paths are expected to work
+
 ## v1.0.0 - 2026-03-23
 
 Initial public release of `Joxblox`.

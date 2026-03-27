@@ -37,8 +37,10 @@ func Run() {
 	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, newSingleAssetTab(window))
 	scanContent, scanFileActions, allScanFileActions, selectScanContext := newScanTab(window)
 	scanTab := container.NewTabItem(tabTitleScan, scanContent)
+	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, newRBXLHeatmapTab(window))
+	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, newOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, newImageUploaderTab(window))
-	tabs := container.NewAppTabs(singleAssetTab, scanTab, imageUploaderTab)
+	tabs := container.NewAppTabs(singleAssetTab, scanTab, rbxlHeatmapTab, optimizeTab, imageUploaderTab)
 	bindMainFileMenu(
 		window,
 		tabs,
@@ -122,7 +124,7 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 	rememberAuthCheck := widget.NewCheck("Save to keychain", nil)
 	isAuthSaved := false
 	authValidationFailed := false
-	updateAuthIndicator := func() {
+	applyAuthIndicator := func() {
 		if authValidationFailed {
 			statusLabel.SetText("Auth: Failed")
 			statusDot.FillColor = theme.Color(theme.ColorNameError)
@@ -167,9 +169,9 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 			logDebugf("Auth cookie cleared via Apply Auth")
 			ClearRoblosecurityCookie()
 			isAuthSaved = false
-			rememberAuthCheck.SetChecked(false)
 			_ = DeleteRoblosecurityCookieFromKeyring()
-			updateAuthIndicator()
+			rememberAuthCheck.SetChecked(false)
+			applyAuthIndicator()
 			return
 		}
 
@@ -179,7 +181,7 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 			ClearRoblosecurityCookie()
 			isAuthSaved = false
 			authValidationFailed = true
-			updateAuthIndicator()
+			applyAuthIndicator()
 			statusLabel.SetText(fmt.Sprintf("Auth: Failed (%s)", sanitizeAuthErrorMessage(validationErr)))
 			return
 		}
@@ -191,7 +193,7 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 		if rememberAuthCheck.Checked {
 			if err := SaveRoblosecurityCookieToKeyring(normalizedCookie); err != nil {
 				logDebugf("Auth keychain save failed: %s", err.Error())
-				updateAuthIndicator()
+				applyAuthIndicator()
 				statusLabel.SetText(fmt.Sprintf("Auth: Enabled (save failed: %s)", err.Error()))
 				return
 			}
@@ -201,20 +203,22 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 			_ = DeleteRoblosecurityCookieFromKeyring()
 		}
 
-		updateAuthIndicator()
+		applyAuthIndicator()
 	})
 	clearButton := widget.NewButton("Clear Auth", func() {
 		logDebugf("Auth cleared")
 		ClearRoblosecurityCookie()
-		cookieEntry.SetText("")
 		authValidationFailed = false
-		if err := DeleteRoblosecurityCookieFromKeyring(); err != nil {
-			updateAuthIndicator()
-			statusLabel.SetText(fmt.Sprintf("Auth: Disabled (clear failed: %s)", err.Error()))
+		deleteErr := DeleteRoblosecurityCookieFromKeyring()
+		if deleteErr == nil {
+			isAuthSaved = false
+		}
+		cookieEntry.SetText("")
+		applyAuthIndicator()
+		if deleteErr != nil {
+			statusLabel.SetText(fmt.Sprintf("Auth: Disabled (clear failed: %s)", deleteErr.Error()))
 			return
 		}
-		isAuthSaved = false
-		updateAuthIndicator()
 		rememberAuthCheck.SetChecked(false)
 	})
 
@@ -248,9 +252,32 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 		isAuthSaved = true
 		authValidationFailed = false
 	}
-	updateAuthIndicator()
+	applyAuthIndicator()
 	if loadErrorMessage != "" {
 		statusLabel.SetText(loadErrorMessage)
+	}
+
+	if storedCookie != "" {
+		statusLabel.SetText("Auth: Validating...")
+		go func() {
+			validationErr := validateRoblosecurityCookie(storedCookie)
+			fyne.Do(func() {
+				if validationErr != nil {
+					logDebugf("Startup auth validation failed: %s", sanitizeAuthErrorMessage(validationErr))
+					authValidationFailed = true
+					applyAuthIndicator()
+					statusLabel.SetText(fmt.Sprintf("Auth: Expired (%s)", sanitizeAuthErrorMessage(validationErr)))
+					dialog.ShowError(
+						fmt.Errorf("your saved auth cookie is expired or invalid — please update it in the Auth panel below"),
+						window,
+					)
+				} else {
+					logDebugf("Startup auth validation succeeded")
+					authValidationFailed = false
+					applyAuthIndicator()
+				}
+			})
+		}()
 	}
 
 	return container.NewVBox(

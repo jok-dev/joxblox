@@ -39,6 +39,10 @@ func bindMainFileMenu(
 				clearAllScanResults(window, allScanFileActions)
 			}),
 			fyne.NewMenuItemSeparator(),
+			fyne.NewMenuItem("Settings", func() {
+				showSettingsDialog(window)
+			}),
+			fyne.NewMenuItemSeparator(),
 		)
 		fileMenu.Items = append(fileMenu.Items, buildRecentFilesMenuItem(
 			window,
