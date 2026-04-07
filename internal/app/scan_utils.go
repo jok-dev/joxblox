@@ -28,15 +28,17 @@ var (
 )
 
 type scanHit struct {
-	AssetID          int64
-	AssetInput       string
-	FilePath         string
-	UseCount         int
-	InstanceType     string
-	InstanceName     string
-	InstancePath     string
-	PropertyName     string
-	AllInstancePaths []string
+	AssetID            int64
+	AssetInput         string
+	FilePath           string
+	UseCount           int
+	InstanceType       string
+	InstanceName       string
+	InstancePath       string
+	PropertyName       string
+	AllInstancePaths   []string
+	SceneSurfaceArea   float64
+	LargestSurfacePath string
 }
 
 type extractedScanReference struct {

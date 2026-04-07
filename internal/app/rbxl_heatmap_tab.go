@@ -171,37 +171,39 @@ type rbxlHeatmapCell struct {
 }
 
 type rbxlHeatmapTotals struct {
-	ReferenceCount      int64
-	UniqueAssetCount    int64
-	UniqueTextureCount  int64
-	UniqueMeshCount     int64
-	TextureBytes        int64
-	MeshBytes           int64
-	TotalBytes          int64
-	TriangleCount       int64
-	PixelCount          int64
+	ReferenceCount     int64
+	UniqueAssetCount   int64
+	UniqueTextureCount int64
+	UniqueMeshCount    int64
+	TextureBytes       int64
+	MeshBytes          int64
+	TotalBytes         int64
+	TriangleCount      int64
+	PixelCount         int64
 }
 
 type heatmapSquareAssetRow struct {
-	Side          string
-	AssetID       int64
-	UseCount      int
-	AssetTypeID   int
-	AssetTypeName string
-	AssetInput    string
-	FilePath      string
-	InstanceType  string
-	InstanceName  string
-	InstancePath  string
-	PropertyName  string
-	TotalBytes    int64
-	TextureBytes  int64
-	MeshBytes     int64
-	Triangles     int64
-	Pixels        int64
-	WorldX        float64
-	WorldY        float64
-	WorldZ        float64
+	Side               string
+	AssetID            int64
+	UseCount           int
+	AssetTypeID        int
+	AssetTypeName      string
+	AssetInput         string
+	FilePath           string
+	InstanceType       string
+	InstanceName       string
+	InstancePath       string
+	PropertyName       string
+	TotalBytes         int64
+	TextureBytes       int64
+	MeshBytes          int64
+	Triangles          int64
+	Pixels             int64
+	WorldX             float64
+	WorldY             float64
+	WorldZ             float64
+	SceneSurfaceArea   float64
+	LargestSurfacePath string
 }
 
 var heatmapAssetStatsCache = struct {
@@ -1387,6 +1389,7 @@ func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, bas
 	}
 	rows := make([]heatmapSquareAssetRow, 0)
 	rowIndexByKey := map[string]int{}
+	sceneSurfaceAreasByPath := buildSceneSurfaceAreaIndexFromHeatmapParts(scene.MapParts)
 	appendRows := func(points []rbxlHeatmapPoint, side string, filePath string) {
 		for _, point := range points {
 			if !heatmapPointCellMatches(scene, point, cell.Row, cell.Column) {
@@ -1395,29 +1398,39 @@ func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, bas
 			rowKey := fmt.Sprintf("%s:%d", side, point.AssetID)
 			if existingIndex, found := rowIndexByKey[rowKey]; found {
 				rows[existingIndex].UseCount++
+				nextArea, nextPath := estimateSceneSurfaceAreaAndPathForPaths(point.InstancePath, nil, sceneSurfaceAreasByPath)
+				if nextArea > rows[existingIndex].SceneSurfaceArea {
+					rows[existingIndex].SceneSurfaceArea = nextArea
+					rows[existingIndex].LargestSurfacePath = strings.TrimSpace(nextPath)
+				} else if rows[existingIndex].SceneSurfaceArea <= 0 && strings.TrimSpace(rows[existingIndex].LargestSurfacePath) == "" {
+					rows[existingIndex].LargestSurfacePath = strings.TrimSpace(nextPath)
+				}
 				continue
 			}
+			sceneSurfaceArea, largestSurfacePath := estimateSceneSurfaceAreaAndPathForPaths(point.InstancePath, nil, sceneSurfaceAreasByPath)
 			rowIndexByKey[rowKey] = len(rows)
 			rows = append(rows, heatmapSquareAssetRow{
-				Side:          side,
-				AssetID:       point.AssetID,
-				UseCount:      1,
-				AssetTypeID:   point.Stats.AssetTypeID,
-				AssetTypeName: point.Stats.AssetTypeName,
-				AssetInput:    point.AssetInput,
-				FilePath:      filePath,
-				InstanceType:  point.InstanceType,
-				InstanceName:  point.InstanceName,
-				InstancePath:  point.InstancePath,
-				PropertyName:  point.PropertyName,
-				TotalBytes:    int64(point.Stats.TotalBytes),
-				TextureBytes:  int64(point.Stats.TextureBytes),
-				MeshBytes:     int64(point.Stats.MeshBytes),
-				Triangles:     int64(point.Stats.TriangleCount),
-				Pixels:        point.Stats.PixelCount,
-				WorldX:        point.X,
-				WorldY:        point.Y,
-				WorldZ:        point.Z,
+				Side:               side,
+				AssetID:            point.AssetID,
+				UseCount:           1,
+				AssetTypeID:        point.Stats.AssetTypeID,
+				AssetTypeName:      point.Stats.AssetTypeName,
+				AssetInput:         point.AssetInput,
+				FilePath:           filePath,
+				InstanceType:       point.InstanceType,
+				InstanceName:       point.InstanceName,
+				InstancePath:       point.InstancePath,
+				PropertyName:       point.PropertyName,
+				TotalBytes:         int64(point.Stats.TotalBytes),
+				TextureBytes:       int64(point.Stats.TextureBytes),
+				MeshBytes:          int64(point.Stats.MeshBytes),
+				Triangles:          int64(point.Stats.TriangleCount),
+				Pixels:             point.Stats.PixelCount,
+				WorldX:             point.X,
+				WorldY:             point.Y,
+				WorldZ:             point.Z,
+				SceneSurfaceArea:   sceneSurfaceArea,
+				LargestSurfacePath: strings.TrimSpace(largestSurfacePath),
 			})
 		}
 	}
@@ -1450,30 +1463,32 @@ func heatmapSquareRowsToScanResults(rows []heatmapSquareAssetRow) []scanResult {
 		if assetTypeName == "" {
 			assetTypeName = "Unknown"
 		}
-		results = append(results, scanResult{
-			AssetID:        row.AssetID,
-			AssetInput:     row.AssetInput,
-			Side:           row.Side,
-			UseCount:       row.UseCount,
-			FilePath:       row.FilePath,
-			InstanceType:   row.InstanceType,
-			InstanceName:   row.InstanceName,
-			InstancePath:   row.InstancePath,
-			PropertyName:   row.PropertyName,
-			Source:         sourceNoThumbnail,
-			State:          "Heatmap",
-			BytesSize:      int(row.TotalBytes),
-			TotalBytesSize: int(row.TotalBytes),
-			MeshNumFaces:   meshTriangles,
-			AssetTypeID:    row.AssetTypeID,
-			AssetTypeName:  assetTypeName,
-			WorldX:         row.WorldX,
-			WorldY:         row.WorldY,
-			WorldZ:         row.WorldZ,
-			TextureBytes:   int(row.TextureBytes),
-			MeshBytes:      int(row.MeshBytes),
-			PixelCount:     row.Pixels,
-		})
+		results = append(results, refreshLargeTextureMetrics(scanResult{
+			AssetID:            row.AssetID,
+			AssetInput:         row.AssetInput,
+			Side:               row.Side,
+			UseCount:           row.UseCount,
+			FilePath:           row.FilePath,
+			InstanceType:       row.InstanceType,
+			InstanceName:       row.InstanceName,
+			InstancePath:       row.InstancePath,
+			PropertyName:       row.PropertyName,
+			Source:             sourceNoThumbnail,
+			State:              "Heatmap",
+			BytesSize:          int(row.TotalBytes),
+			TotalBytesSize:     int(row.TotalBytes),
+			MeshNumFaces:       meshTriangles,
+			AssetTypeID:        row.AssetTypeID,
+			AssetTypeName:      assetTypeName,
+			WorldX:             row.WorldX,
+			WorldY:             row.WorldY,
+			WorldZ:             row.WorldZ,
+			TextureBytes:       int(row.TextureBytes),
+			MeshBytes:          int(row.MeshBytes),
+			PixelCount:         row.Pixels,
+			SceneSurfaceArea:   row.SceneSurfaceArea,
+			LargestSurfacePath: row.LargestSurfacePath,
+		}))
 	}
 	return results
 }
@@ -1788,6 +1803,7 @@ func openHeatmapSquareAssetsWindow(parentWindow fyne.Window, scene *rbxlHeatmapS
 		SearchPlaceholder:  "Search asset ID, instance path, property, or type",
 		HeaderContent:      summaryLabel,
 		ShowDuplicateUI:    false,
+		ShowLargeTextureUI: true,
 	})
 	explorer.SetResults(heatmapSquareRowsToScanResults(rows))
 	explorer.SetSort(heatmapSquareMetricColumnName(heatMetric), true)

@@ -49,6 +49,7 @@ type assetView struct {
 	ReferenceInstanceTypeValue *widget.Label
 	ReferencePropertyNameValue *widget.Label
 	ReferenceInstancePathValue *widget.Label
+	InGameSizeValue            *widget.Label
 	SourceValue                *widget.Label
 	UseCountValue              *widget.Label
 	FailureReasonValue         *widget.Label
@@ -210,6 +211,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		ReferenceInstanceTypeValue: newMetadataValueLabel(),
 		ReferencePropertyNameValue: newMetadataValueLabel(),
 		ReferenceInstancePathValue: newMetadataValueLabel(),
+		InGameSizeValue:            newMetadataValueLabel(),
 		SourceValue:                newMetadataValueLabel(),
 		UseCountValue:              newMetadataValueLabel(),
 		FailureReasonValue:         newMetadataValueLabel(),
@@ -377,6 +379,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		newMetadataRow("Reference Instance Type:", view.ReferenceInstanceTypeValue),
 		newMetadataRow("Reference Property Name:", view.ReferencePropertyNameValue),
 		newMetadataRow("Reference Instance Path:", view.ReferenceInstancePathValue),
+		newMetadataRow("In-Game Size:", view.InGameSizeValue),
 		newMetadataRow("Image Source:", view.SourceValue),
 		newMetadataRow("Use Count:", view.UseCountValue),
 		newMetadataRow("Failure Reason:", view.FailureReasonValue),
@@ -422,6 +425,7 @@ func (view *assetView) Clear() {
 	view.ReferenceInstanceTypeValue.SetText("-")
 	view.ReferencePropertyNameValue.SetText("-")
 	view.ReferenceInstancePathValue.SetText("-")
+	view.InGameSizeValue.SetText("-")
 	view.SourceValue.SetText("-")
 	view.UseCountValue.SetText("-")
 	view.FailureReasonValue.SetText("-")
@@ -516,6 +520,9 @@ func (view *assetView) SetData(data assetViewData) {
 	filePath := data.FilePath
 	fileSHA256 := data.FileSHA256
 	useCount := data.UseCount
+	sceneSurfaceArea := data.SceneSurfaceArea
+	largestSurfacePath := data.LargestSurfacePath
+	largeTextureScore := data.LargeTextureScore
 	previewImageInfo := data.PreviewImageInfo
 	statsInfo := data.StatsInfo
 	totalBytesSize := data.TotalBytesSize
@@ -596,6 +603,19 @@ func (view *assetView) SetData(data assetViewData) {
 	setLabelTextOrDash(view.ReferenceInstanceTypeValue, referenceInstanceType)
 	setLabelTextOrDash(view.ReferencePropertyNameValue, referencePropertyName)
 	setLabelTextOrDash(view.ReferenceInstancePathValue, referenceInstancePath)
+	if largeTextureScore > 0 && sceneSurfaceArea > 0 {
+		inGameSizeText := fmt.Sprintf(
+			"%s (%s surface)",
+			formatLargeTextureScore(largeTextureScore),
+			formatSceneSurfaceArea(sceneSurfaceArea),
+		)
+		if strings.TrimSpace(largestSurfacePath) != "" {
+			inGameSizeText = fmt.Sprintf("%s at %s", inGameSizeText, strings.TrimSpace(largestSurfacePath))
+		}
+		view.InGameSizeValue.SetText(inGameSizeText)
+	} else {
+		view.InGameSizeValue.SetText("-")
+	}
 	if view.isJSONAccordionOpen() {
 		view.renderJSONDetails()
 	} else {
@@ -638,6 +658,7 @@ func (view *assetView) SetData(data assetViewData) {
 	if previewImageInfo != nil && previewImageInfo.Resource != nil {
 		previewResource = previewImageInfo.Resource
 	}
+	view.currentMeshPreviewData = meshPreviewData{}
 	view.MeshPreview.Clear()
 	view.MeshPreview.Hide()
 	if isMeshAssetType(assetTypeID) && len(downloadBytes) > 0 {

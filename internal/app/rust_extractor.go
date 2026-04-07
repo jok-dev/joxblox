@@ -266,32 +266,9 @@ func extractPositionedRefsWithRustyAssetTool(filePath string, pathPrefixes []str
 		}()
 	}
 
-	commandArgs := []string{}
-	commandName := ""
-	bundledBinaryPath, bundledErr := prepareBundledRustyAssetToolBinary()
-	if toolDirectoryPath, cargoManifestPath, found := findRustyAssetToolCargoManifestPath(); found {
-		commandName = "cargo"
-		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", "heatmap", filePath}
-		if prefixArg != "" {
-			commandArgs = append(commandArgs, prefixArg)
-		}
-		logDebugf("Using cargo run for Rusty Asset Tool heatmap extraction from %s", toolDirectoryPath)
-	} else if bundledErr == nil {
-		commandName = bundledBinaryPath
-		commandArgs = []string{"heatmap", filePath}
-		if prefixArg != "" {
-			commandArgs = append(commandArgs, prefixArg)
-		}
-	} else if !errors.Is(bundledErr, errBundledRustyAssetToolUnavailable) {
-		return nil, bundledErr
-	} else if binaryPath, found := findRustyAssetToolBinaryPath(); found {
-		commandName = binaryPath
-		commandArgs = []string{"heatmap", filePath}
-		if prefixArg != "" {
-			commandArgs = append(commandArgs, prefixArg)
-		}
-	} else {
-		return nil, fmt.Errorf("Rusty Asset Tool unavailable: bundled binary not found")
+	commandName, commandArgs, _, resolveErr := resolveRustyAssetToolSubcommandCommand("heatmap", filePath, prefixArg)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
@@ -347,32 +324,9 @@ func extractMapRenderPartsWithRustyAssetTool(filePath string, pathPrefixes []str
 		}()
 	}
 
-	commandArgs := []string{}
-	commandName := ""
-	bundledBinaryPath, bundledErr := prepareBundledRustyAssetToolBinary()
-	if toolDirectoryPath, cargoManifestPath, found := findRustyAssetToolCargoManifestPath(); found {
-		commandName = "cargo"
-		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", "map", filePath}
-		if prefixArg != "" {
-			commandArgs = append(commandArgs, prefixArg)
-		}
-		logDebugf("Using cargo run for Rusty Asset Tool map render extraction from %s", toolDirectoryPath)
-	} else if bundledErr == nil {
-		commandName = bundledBinaryPath
-		commandArgs = []string{"map", filePath}
-		if prefixArg != "" {
-			commandArgs = append(commandArgs, prefixArg)
-		}
-	} else if !errors.Is(bundledErr, errBundledRustyAssetToolUnavailable) {
-		return nil, bundledErr
-	} else if binaryPath, found := findRustyAssetToolBinaryPath(); found {
-		commandName = binaryPath
-		commandArgs = []string{"map", filePath}
-		if prefixArg != "" {
-			commandArgs = append(commandArgs, prefixArg)
-		}
-	} else {
-		return nil, fmt.Errorf("Rusty Asset Tool unavailable: bundled binary not found")
+	commandName, commandArgs, _, resolveErr := resolveRustyAssetToolSubcommandCommand("map", filePath, prefixArg)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
@@ -710,6 +664,73 @@ func findRustyAssetToolCargoManifestPath() (string, string, bool) {
 		}
 	}
 	return "", "", false
+}
+
+func resolveRustyAssetToolSubcommandCommand(subcommand string, filePath string, extraArgs ...string) (string, []string, bool, error) {
+	trimmedSubcommand := strings.TrimSpace(subcommand)
+	if trimmedSubcommand == "" {
+		return "", nil, false, fmt.Errorf("Rusty Asset Tool subcommand is required")
+	}
+
+	filteredExtraArgs := make([]string, 0, len(extraArgs))
+	for _, arg := range extraArgs {
+		if strings.TrimSpace(arg) == "" {
+			continue
+		}
+		filteredExtraArgs = append(filteredExtraArgs, arg)
+	}
+
+	if bundledBinaryPath, bundledErr := prepareBundledRustyAssetToolBinary(); bundledErr == nil {
+		return resolveRustyAssetToolSubcommandCommandWithPaths(trimmedSubcommand, filePath, bundledBinaryPath, "", "", filteredExtraArgs...)
+	} else if !errors.Is(bundledErr, errBundledRustyAssetToolUnavailable) {
+		return "", nil, false, bundledErr
+	}
+
+	if binaryPath, found := findRustyAssetToolBinaryPath(); found {
+		return resolveRustyAssetToolSubcommandCommandWithPaths(trimmedSubcommand, filePath, "", binaryPath, "", filteredExtraArgs...)
+	}
+
+	_, cargoManifestPath, found := findRustyAssetToolCargoManifestPath()
+	if !found {
+		return "", nil, false, fmt.Errorf("Rusty Asset Tool unavailable: bundled binary not found")
+	}
+	return resolveRustyAssetToolSubcommandCommandWithPaths(trimmedSubcommand, filePath, "", "", cargoManifestPath, filteredExtraArgs...)
+}
+
+func resolveRustyAssetToolSubcommandCommandWithPaths(subcommand string, filePath string, bundledBinaryPath string, binaryPath string, cargoManifestPath string, extraArgs ...string) (string, []string, bool, error) {
+	trimmedSubcommand := strings.TrimSpace(subcommand)
+	if trimmedSubcommand == "" {
+		return "", nil, false, fmt.Errorf("Rusty Asset Tool subcommand is required")
+	}
+
+	filteredExtraArgs := make([]string, 0, len(extraArgs))
+	for _, arg := range extraArgs {
+		if strings.TrimSpace(arg) == "" {
+			continue
+		}
+		filteredExtraArgs = append(filteredExtraArgs, arg)
+	}
+
+	if strings.TrimSpace(bundledBinaryPath) != "" {
+		commandArgs := append([]string{trimmedSubcommand, filePath}, filteredExtraArgs...)
+		logDebugf("Using bundled Rusty Asset Tool binary: %s", bundledBinaryPath)
+		return bundledBinaryPath, commandArgs, false, nil
+	}
+
+	if strings.TrimSpace(binaryPath) != "" {
+		commandArgs := append([]string{trimmedSubcommand, filePath}, filteredExtraArgs...)
+		logDebugf("Using Rusty Asset Tool binary: %s", binaryPath)
+		return binaryPath, commandArgs, false, nil
+	}
+
+	if strings.TrimSpace(cargoManifestPath) == "" {
+		return "", nil, false, fmt.Errorf("Rusty Asset Tool unavailable: bundled binary not found")
+	}
+	toolDirectoryPath := filepath.Dir(cargoManifestPath)
+	commandArgs := []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", trimmedSubcommand, filePath}
+	commandArgs = append(commandArgs, filteredExtraArgs...)
+	logDebugf("Using cargo run for Rusty Asset Tool %s extraction from %s", trimmedSubcommand, toolDirectoryPath)
+	return "cargo", commandArgs, true, nil
 }
 
 func replaceAssetIDsInRBXLWithRustyAssetTool(inputPath string, outputPath string, replacements map[int64]int64, stopChannel <-chan struct{}) (int, error) {

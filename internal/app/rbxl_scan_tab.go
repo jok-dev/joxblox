@@ -175,53 +175,12 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 		logDebugf("RBXL scan Rust extraction failed: %s", rustScanErr.Error())
 		return nil, rustScanErr
 	}
+	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(filePath, nil, stopChannel)
+	if errors.Is(surfaceErr, errScanStopped) {
+		return nil, errScanStopped
+	}
 
-	type hitBuilder struct {
-		hit     scanHit
-		pathSet map[string]bool
-	}
-	builders := map[string]*hitBuilder{}
-	order := []string{}
-	for _, extractedReference := range extractedReferences {
-		if extractedReference.ID <= 0 {
-			continue
-		}
-		assetInput := strings.TrimSpace(extractedReference.RawContent)
-		referenceKey := scanAssetReferenceKey(extractedReference.ID, assetInput)
-		builder, exists := builders[referenceKey]
-		if !exists {
-			builder = &hitBuilder{
-				hit: scanHit{
-					AssetID:      extractedReference.ID,
-					AssetInput:   assetInput,
-					FilePath:     filePath,
-					InstanceType: strings.TrimSpace(extractedReference.InstanceType),
-					InstanceName: strings.TrimSpace(extractedReference.InstanceName),
-					InstancePath: strings.TrimSpace(extractedReference.InstancePath),
-					PropertyName: strings.TrimSpace(extractedReference.PropertyName),
-				},
-				pathSet: map[string]bool{},
-			}
-			builders[referenceKey] = builder
-			order = append(order, referenceKey)
-		}
-		builder.hit.UseCount++
-		for _, instancePath := range extractedReference.AllInstancePaths {
-			trimmedPath := strings.TrimSpace(instancePath)
-			if trimmedPath == "" || builder.pathSet[trimmedPath] {
-				continue
-			}
-			builder.pathSet[trimmedPath] = true
-			builder.hit.AllInstancePaths = append(builder.hit.AllInstancePaths, trimmedPath)
-		}
-	}
-	hits := make([]scanHit, 0, len(order))
-	for _, referenceKey := range order {
-		hits = append(hits, builders[referenceKey].hit)
-		if limit > 0 && len(hits) >= limit {
-			break
-		}
-	}
+	hits := buildScanHitsFromRustReferences(extractedReferences, filePath, sceneSurfaceAreasByPath, limit)
 	logDebugf("RBXL scan completed with %d unique asset IDs", len(hits))
 	return hits, nil
 }
@@ -238,51 +197,12 @@ func scanRBXLFileForAssetIDsFiltered(filePath string, pathPrefixes []string, lim
 	if err != nil {
 		return nil, err
 	}
-
-	type hitBuilder struct {
-		hit     scanHit
-		pathSet map[string]bool
-	}
-	builders := map[string]*hitBuilder{}
-	var order []string
-	for _, ref := range refs {
-		if ref.ID <= 0 {
-			continue
-		}
-		assetInput := strings.TrimSpace(ref.RawContent)
-		referenceKey := scanAssetReferenceKey(ref.ID, assetInput)
-		b, exists := builders[referenceKey]
-		if !exists {
-			b = &hitBuilder{
-				hit: scanHit{
-					AssetID:      ref.ID,
-					AssetInput:   assetInput,
-					FilePath:     filePath,
-					InstanceType: strings.TrimSpace(ref.InstanceType),
-					InstanceName: strings.TrimSpace(ref.InstanceName),
-					InstancePath: strings.TrimSpace(ref.InstancePath),
-					PropertyName: strings.TrimSpace(ref.PropertyName),
-				},
-				pathSet: map[string]bool{},
-			}
-			builders[referenceKey] = b
-			order = append(order, referenceKey)
-		}
-		b.hit.UseCount++
-		trimmedPath := strings.TrimSpace(ref.InstancePath)
-		if trimmedPath != "" && !b.pathSet[trimmedPath] {
-			b.pathSet[trimmedPath] = true
-			b.hit.AllInstancePaths = append(b.hit.AllInstancePaths, trimmedPath)
-		}
+	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(filePath, pathPrefixes, stopChannel)
+	if errors.Is(surfaceErr, errScanStopped) {
+		return nil, errScanStopped
 	}
 
-	hits := make([]scanHit, 0, len(order))
-	for _, referenceKey := range order {
-		hits = append(hits, builders[referenceKey].hit)
-		if limit > 0 && len(hits) >= limit {
-			break
-		}
-	}
+	hits := buildScanHitsFromRustReferences(refs, filePath, sceneSurfaceAreasByPath, limit)
 	logDebugf("RBXL filtered scan completed with %d unique asset IDs from %d references", len(hits), len(refs))
 	return hits, nil
 }
@@ -333,55 +253,120 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	if targetErr != nil {
 		return nil, targetErr
 	}
-	type hitBuilder struct {
-		hit     scanHit
-		pathSet map[string]bool
+	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(targetFilePath, nil, stopChannel)
+	if errors.Is(surfaceErr, errScanStopped) {
+		return nil, errScanStopped
 	}
-	builders := map[string]*hitBuilder{}
-	order := []string{}
+	filteredReferences := make([]rustyAssetToolResult, 0, len(targetReferences))
 	for _, reference := range targetReferences {
 		if reference.ID <= 0 {
 			continue
 		}
-		assetInput := strings.TrimSpace(reference.RawContent)
-		referenceKey := scanAssetReferenceKey(reference.ID, assetInput)
-		if baselineReferenceKeys[referenceKey] {
+		if baselineReferenceKeys[scanAssetReferenceKey(reference.ID, reference.RawContent)] {
 			continue
 		}
+		filteredReferences = append(filteredReferences, reference)
+	}
+	results = buildScanHitsFromRustReferences(filteredReferences, targetFilePath, sceneSurfaceAreasByPath, limit)
+
+	logDebugf("RBXL file diff completed with %d new unique asset IDs", len(results))
+	return results, nil
+}
+
+func buildScanHitsFromRustReferences(references []rustyAssetToolResult, filePath string, sceneSurfaceAreasByPath map[string]float64, limit int) []scanHit {
+	type hitBuilder struct {
+		hit     scanHit
+		pathSet map[string]bool
+	}
+
+	builders := map[string]*hitBuilder{}
+	order := make([]string, 0, len(references))
+	for _, reference := range references {
+		if reference.ID <= 0 {
+			continue
+		}
+
+		assetInput := strings.TrimSpace(reference.RawContent)
+		referenceKey := scanAssetReferenceKey(reference.ID, assetInput)
 		builder, exists := builders[referenceKey]
 		if !exists {
 			builder = &hitBuilder{
 				hit: scanHit{
-					AssetID:      reference.ID,
-					AssetInput:   assetInput,
-					FilePath:     targetFilePath,
-					InstanceType: strings.TrimSpace(reference.InstanceType),
-					InstanceName: strings.TrimSpace(reference.InstanceName),
-					InstancePath: strings.TrimSpace(reference.InstancePath),
-					PropertyName: strings.TrimSpace(reference.PropertyName),
+					AssetID:          reference.ID,
+					AssetInput:       assetInput,
+					FilePath:         filePath,
+					InstanceType:     strings.TrimSpace(reference.InstanceType),
+					InstanceName:     strings.TrimSpace(reference.InstanceName),
+					InstancePath:     strings.TrimSpace(reference.InstancePath),
+					PropertyName:     strings.TrimSpace(reference.PropertyName),
+					SceneSurfaceArea: 0,
 				},
 				pathSet: map[string]bool{},
 			}
+			builder.hit.SceneSurfaceArea, builder.hit.LargestSurfacePath = estimateSceneSurfaceAreaAndPathForPaths(
+				reference.InstancePath,
+				nil,
+				sceneSurfaceAreasByPath,
+			)
 			builders[referenceKey] = builder
 			order = append(order, referenceKey)
 		}
-		builder.hit.UseCount++
-		for _, instancePath := range reference.AllInstancePaths {
-			trimmedPath := strings.TrimSpace(instancePath)
-			if trimmedPath == "" || builder.pathSet[trimmedPath] {
-				continue
-			}
-			builder.pathSet[trimmedPath] = true
-			builder.hit.AllInstancePaths = append(builder.hit.AllInstancePaths, trimmedPath)
-		}
+
+		builder.hit.UseCount += rustReferenceUseCount(reference)
+		addRustReferencePaths(&builder.hit, builder.pathSet, reference, sceneSurfaceAreasByPath)
 	}
+
+	hits := make([]scanHit, 0, len(order))
 	for _, referenceKey := range order {
-		results = append(results, builders[referenceKey].hit)
-		if limit > 0 && len(results) >= limit {
+		hits = append(hits, builders[referenceKey].hit)
+		if limit > 0 && len(hits) >= limit {
 			break
 		}
 	}
+	return hits
+}
 
-	logDebugf("RBXL file diff completed with %d new unique asset IDs", len(results))
-	return results, nil
+func rustReferenceUseCount(reference rustyAssetToolResult) int {
+	if reference.Used > 0 {
+		return reference.Used
+	}
+	return 1
+}
+
+func addRustReferencePaths(hit *scanHit, pathSet map[string]bool, reference rustyAssetToolResult, sceneSurfaceAreasByPath map[string]float64) {
+	if hit == nil {
+		return
+	}
+
+	allPaths := append([]string(nil), reference.AllInstancePaths...)
+	if len(allPaths) == 0 {
+		allPaths = append(allPaths, reference.InstancePath)
+	}
+	for _, instancePath := range allPaths {
+		trimmedPath := strings.TrimSpace(instancePath)
+		if trimmedPath == "" || pathSet[trimmedPath] {
+			continue
+		}
+		pathSet[trimmedPath] = true
+		hit.AllInstancePaths = append(hit.AllInstancePaths, trimmedPath)
+		nextArea, nextPath := estimateSceneSurfaceAreaAndPathForPaths(trimmedPath, nil, sceneSurfaceAreasByPath)
+		if nextArea > hit.SceneSurfaceArea {
+			hit.SceneSurfaceArea = nextArea
+			hit.LargestSurfacePath = strings.TrimSpace(nextPath)
+		} else if hit.SceneSurfaceArea <= 0 && strings.TrimSpace(hit.LargestSurfacePath) == "" {
+			hit.LargestSurfacePath = strings.TrimSpace(nextPath)
+		}
+	}
+}
+
+func loadRBXLSceneSurfaceAreas(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) (map[string]float64, error) {
+	mapParts, err := extractMapRenderPartsWithRustyAssetTool(filePath, pathPrefixes, stopChannel)
+	if errors.Is(err, errScanStopped) {
+		return nil, errScanStopped
+	}
+	if err != nil {
+		logDebugf("RBXL map render extraction failed for large textures: %s", err.Error())
+		return map[string]float64{}, nil
+	}
+	return buildSceneSurfaceAreaIndexFromMapRenderParts(mapParts), nil
 }

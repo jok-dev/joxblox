@@ -101,6 +101,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		InitialStatusText:  "Select a source and click Start Scan.",
 		SearchPlaceholder:  "Search ID, type, source, hash, or path...",
 		ShowDuplicateUI:    true,
+		ShowLargeTextureUI: true,
 	})
 
 	sourceLabel := widget.NewLabel(options.NoSourceSelectedText)

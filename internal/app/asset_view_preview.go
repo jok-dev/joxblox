@@ -207,7 +207,7 @@ func findOptionIndex(options []previewDownloadOption, label string) int {
 }
 
 func (view *assetView) showExpandedImageWindow() {
-	if len(view.currentMeshPreviewData.Positions) > 0 && len(view.currentMeshPreviewData.Indices) > 0 {
+	if view.MeshPreview.Visible() && len(view.currentMeshPreviewData.Positions) > 0 && len(view.currentMeshPreviewData.Indices) > 0 {
 		view.showExpandedMeshWindow()
 		return
 	}

@@ -74,6 +74,9 @@ type scanTableExportRow struct {
 	TotalBytesSize       int              `json:"totalBytesSize"`
 	MeshNumFaces         uint32           `json:"meshNumFaces,omitempty"`
 	MeshNumVerts         uint32           `json:"meshNumVerts,omitempty"`
+	SceneSurfaceArea     float64          `json:"sceneSurfaceArea,omitempty"`
+	LargestSurfacePath   string           `json:"largestSurfacePath,omitempty"`
+	LargeTextureScore    float64          `json:"largeTextureScore,omitempty"`
 	ImageResourceName    string           `json:"imageResourceName,omitempty"`
 	ImageBytesBase64     string           `json:"imageBytesBase64,omitempty"`
 }
@@ -362,6 +365,9 @@ func mapScanResultToExportRow(row scanResult) scanTableExportRow {
 		TotalBytesSize:       row.TotalBytesSize,
 		MeshNumFaces:         row.MeshNumFaces,
 		MeshNumVerts:         row.MeshNumVerts,
+		SceneSurfaceArea:     row.SceneSurfaceArea,
+		LargestSurfacePath:   row.LargestSurfacePath,
+		LargeTextureScore:    row.LargeTextureScore,
 		ImageResourceName:    imageResourceName,
 		ImageBytesBase64:     imageBytesBase64,
 	}
@@ -413,6 +419,9 @@ func mapExportRowToScanResult(row scanTableExportRow) (scanResult, error) {
 		TotalBytesSize:       row.TotalBytesSize,
 		MeshNumFaces:         row.MeshNumFaces,
 		MeshNumVerts:         row.MeshNumVerts,
+		SceneSurfaceArea:     row.SceneSurfaceArea,
+		LargestSurfacePath:   strings.TrimSpace(row.LargestSurfacePath),
+		LargeTextureScore:    row.LargeTextureScore,
 		Resource:             importedResource,
 	}, nil
 }

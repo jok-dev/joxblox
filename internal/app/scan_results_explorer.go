@@ -30,6 +30,7 @@ type scanResultsExplorerOptions struct {
 	SearchPlaceholder  string
 	HeaderContent      fyne.CanvasObject
 	ShowDuplicateUI    bool
+	ShowLargeTextureUI bool
 }
 
 type scanResultsExplorer struct {
@@ -42,11 +43,13 @@ type scanResultsExplorer struct {
 	columnHeaders                    []string
 	displayDistances                 []int
 	showOnlyDuplicates               bool
+	showOnlyLargeTextures            bool
 	searchQuery                      string
 	similarityActive                 bool
 	similarityMatchSet               map[int]int
 	sortField                        string
 	sortDescending                   bool
+	largeTextureThreshold            float64
 	typeFilterValue                  string
 	typeDisplayToValue               map[string]string
 	instanceTypeFilterValue          string
@@ -56,6 +59,8 @@ type scanResultsExplorer struct {
 	suppressTypeFilterChange         bool
 	suppressInstanceTypeFilterChange bool
 	suppressPropertyNameFilterChange bool
+	suppressLargeTextureFilterChange bool
+	controlsEnabled                  bool
 	selectedAssetID                  int64
 	selectedResultFilePath           string
 	selectedResultAssetInput         string
@@ -78,6 +83,8 @@ type scanResultsExplorer struct {
 	statsTrianglesLabel              *widget.Label
 	searchEntry                      *widget.Entry
 	showOnlyDuplicatesCheck          *widget.Check
+	showOnlyLargeTexturesCheck       *widget.Check
+	largeTextureThresholdEntry       *widget.Entry
 }
 
 func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptions) *scanResultsExplorer {
@@ -101,6 +108,8 @@ func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptio
 		propertyNameDisplayToValue: map[string]string{scanFilterAllOption: scanFilterAllOption},
 		selectedTableColumn:        0,
 		similarityMatchSet:         map[int]int{},
+		largeTextureThreshold:      defaultLargeTextureThreshold,
+		controlsEnabled:            true,
 	}
 	explorer.assetDetailsView = newAssetView(previewPlaceholder, options.IncludeFileRow)
 	explorer.searchEntry = widget.NewEntry()
@@ -124,6 +133,26 @@ func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptio
 		explorer.clearPreview()
 	})
 	explorer.showOnlyDuplicatesCheck.SetChecked(false)
+	explorer.showOnlyLargeTexturesCheck = widget.NewCheck("Show large textures", func(checked bool) {
+		if explorer.suppressLargeTextureFilterChange {
+			return
+		}
+		explorer.showOnlyLargeTextures = checked
+		explorer.applySortAndFilters()
+		explorer.clearPreview()
+	})
+	explorer.showOnlyLargeTexturesCheck.SetChecked(false)
+	explorer.largeTextureThresholdEntry = widget.NewEntry()
+	explorer.largeTextureThresholdEntry.SetPlaceHolder(formatLargeTextureThreshold(defaultLargeTextureThreshold))
+	explorer.largeTextureThresholdEntry.SetText(formatLargeTextureThreshold(defaultLargeTextureThreshold))
+	explorer.largeTextureThresholdEntry.OnChanged = func(nextValue string) {
+		if explorer.suppressLargeTextureFilterChange {
+			return
+		}
+		explorer.largeTextureThreshold = parseLargeTextureThreshold(nextValue)
+		explorer.applySortAndFilters()
+		explorer.clearPreview()
+	}
 	explorer.searchEntry.OnChanged = func(nextQuery string) {
 		explorer.searchQuery = strings.TrimSpace(nextQuery)
 		changeToken := explorer.searchChangeToken.Add(1)
@@ -266,6 +295,7 @@ func (explorer *scanResultsExplorer) SetControlsEnabled(enabled bool) {
 	if explorer == nil {
 		return
 	}
+	explorer.controlsEnabled = enabled
 	if enabled {
 		explorer.searchEntry.Enable()
 		explorer.typeFilterSelect.Enable()
@@ -274,6 +304,7 @@ func (explorer *scanResultsExplorer) SetControlsEnabled(enabled bool) {
 		if explorer.showOnlyDuplicatesCheck != nil {
 			explorer.showOnlyDuplicatesCheck.Enable()
 		}
+		explorer.updateLargeTextureFilterControls()
 		return
 	}
 	explorer.searchEntry.Disable()
@@ -282,6 +313,12 @@ func (explorer *scanResultsExplorer) SetControlsEnabled(enabled bool) {
 	explorer.propertyNameFilterSelect.Disable()
 	if explorer.showOnlyDuplicatesCheck != nil {
 		explorer.showOnlyDuplicatesCheck.Disable()
+	}
+	if explorer.showOnlyLargeTexturesCheck != nil {
+		explorer.showOnlyLargeTexturesCheck.Disable()
+	}
+	if explorer.largeTextureThresholdEntry != nil {
+		explorer.largeTextureThresholdEntry.Disable()
 	}
 }
 
@@ -296,6 +333,11 @@ func (explorer *scanResultsExplorer) buildContent(options scanResultsExplorerOpt
 	)
 	if options.ShowDuplicateUI {
 		filterRow.Add(explorer.showOnlyDuplicatesCheck)
+	}
+	if options.ShowLargeTextureUI {
+		filterRow.Add(explorer.showOnlyLargeTexturesCheck)
+		filterRow.Add(widget.NewLabel("Min B/stud^2:"))
+		filterRow.Add(container.NewGridWrap(fyne.NewSize(110, 36), explorer.largeTextureThresholdEntry))
 	}
 	statsRow := container.NewHBox(
 		explorer.statsRowsLabel,
@@ -341,6 +383,45 @@ func (explorer *scanResultsExplorer) buildContent(options scanResultsExplorerOpt
 		nil,
 		container.NewBorder(explorer.statusLabel, nil, nil, nil, split),
 	)
+	explorer.updateLargeTextureFilterControls()
+}
+
+func (explorer *scanResultsExplorer) hasLargeTextureMetrics() bool {
+	for _, row := range explorer.allResults {
+		if row.SceneSurfaceArea > 0 && scanResultTextureByteCost(row) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (explorer *scanResultsExplorer) updateLargeTextureFilterControls() {
+	if explorer == nil {
+		return
+	}
+	available := explorer.hasLargeTextureMetrics()
+	if !available && explorer.showOnlyLargeTextures {
+		explorer.showOnlyLargeTextures = false
+		if explorer.showOnlyLargeTexturesCheck != nil {
+			explorer.suppressLargeTextureFilterChange = true
+			explorer.showOnlyLargeTexturesCheck.SetChecked(false)
+			explorer.suppressLargeTextureFilterChange = false
+		}
+	}
+	if explorer.showOnlyLargeTexturesCheck != nil {
+		if explorer.controlsEnabled && available {
+			explorer.showOnlyLargeTexturesCheck.Enable()
+		} else {
+			explorer.showOnlyLargeTexturesCheck.Disable()
+		}
+	}
+	if explorer.largeTextureThresholdEntry != nil {
+		if explorer.controlsEnabled && available {
+			explorer.largeTextureThresholdEntry.Enable()
+		} else {
+			explorer.largeTextureThresholdEntry.Disable()
+		}
+	}
 }
 
 func (explorer *scanResultsExplorer) buildTable() {
@@ -508,6 +589,7 @@ func (explorer *scanResultsExplorer) applySortAndFilters() {
 	previousSelectedAssetID := explorer.selectedAssetID
 	previousSelectedFilePath := explorer.selectedResultFilePath
 	previousSelectedAssetInput := explorer.selectedResultAssetInput
+	explorer.updateLargeTextureFilterControls()
 	filteredResults := make([]scanResult, 0, len(explorer.allResults))
 	hashCounts := buildHashCounts(explorer.allResults)
 	explorer.duplicateRowsCount = explorer.countDuplicateRows(hashCounts)
@@ -576,6 +658,9 @@ func (explorer *scanResultsExplorer) applySortAndFilters() {
 
 func (explorer *scanResultsExplorer) matchesActiveFilters(result scanResult, hashCounts map[string]int, ignoreTypeFilter bool, ignoreInstanceTypeFilter bool, ignorePropertyNameFilter bool) bool {
 	if explorer.showOnlyDuplicates && !isDuplicateByHash(result, hashCounts) {
+		return false
+	}
+	if explorer.showOnlyLargeTextures && !isLargeTexture(result, explorer.largeTextureThreshold) {
 		return false
 	}
 	if !scanResultMatchesQuery(result, explorer.searchQuery) {

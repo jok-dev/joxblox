@@ -39,6 +39,9 @@ type scanResult struct {
 	TextureBytes         int
 	MeshBytes            int
 	PixelCount           int64
+	SceneSurfaceArea     float64
+	LargestSurfacePath   string
+	LargeTextureScore    float64
 	AssetDeliveryJSON    string
 	ThumbnailJSON        string
 	EconomyJSON          string

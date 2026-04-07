@@ -10,6 +10,9 @@ type assetReferenceContext struct {
 	FilePath              string
 	FileSHA256            string
 	UseCount              int
+	SceneSurfaceArea      float64
+	LargestSurfacePath    string
+	LargeTextureScore     float64
 	ReferenceInstanceType string
 	ReferencePropertyName string
 	ReferenceInstancePath string
@@ -20,6 +23,9 @@ type assetViewData struct {
 	FilePath              string
 	FileSHA256            string
 	UseCount              int
+	SceneSurfaceArea      float64
+	LargestSurfacePath    string
+	LargeTextureScore     float64
 	PreviewImageInfo      *imageInfo
 	StatsInfo             *imageInfo
 	TotalBytesSize        int
@@ -56,14 +62,16 @@ func previewSHA256(previewResult *assetPreviewResult) string {
 
 func buildBaseScanResultFromHit(hit scanHit) scanResult {
 	return scanResult{
-		AssetID:      hit.AssetID,
-		AssetInput:   strings.TrimSpace(hit.AssetInput),
-		UseCount:     hit.UseCount,
-		FilePath:     hit.FilePath,
-		InstanceType: strings.TrimSpace(hit.InstanceType),
-		InstanceName: strings.TrimSpace(hit.InstanceName),
-		InstancePath: strings.TrimSpace(hit.InstancePath),
-		PropertyName: strings.TrimSpace(hit.PropertyName),
+		AssetID:            hit.AssetID,
+		AssetInput:         strings.TrimSpace(hit.AssetInput),
+		UseCount:           hit.UseCount,
+		FilePath:           hit.FilePath,
+		InstanceType:       strings.TrimSpace(hit.InstanceType),
+		InstanceName:       strings.TrimSpace(hit.InstanceName),
+		InstancePath:       strings.TrimSpace(hit.InstancePath),
+		PropertyName:       strings.TrimSpace(hit.PropertyName),
+		SceneSurfaceArea:   hit.SceneSurfaceArea,
+		LargestSurfacePath: strings.TrimSpace(hit.LargestSurfacePath),
 	}
 }
 
@@ -130,11 +138,23 @@ func applyPreviewToScanResult(result scanResult, previewResult *assetPreviewResu
 	result.TotalBytesSize = previewResult.TotalBytesSize
 	result.MeshNumFaces = meshFaces
 	result.MeshNumVerts = meshVerts
+	result.MeshBytes = 0
+	if meshFaces > 0 && result.TotalBytesSize > 0 {
+		result.MeshBytes = result.TotalBytesSize
+	}
+	if statsInfo.Width > 0 && statsInfo.Height > 0 {
+		result.PixelCount = int64(statsInfo.Width * statsInfo.Height)
+		result.TextureBytes = statsInfo.BytesSize
+	}
+	if previewResult.Image != nil && previewResult.Image.Width > 0 && previewResult.Image.Height > 0 {
+		result.PixelCount = int64(previewResult.Image.Width * previewResult.Image.Height)
+		result.TextureBytes = previewResult.Image.BytesSize
+	}
 	result.Resource = resource
 	result.DownloadBytes = append([]byte(nil), previewResult.DownloadBytes...)
 	result.DownloadFileName = previewResult.DownloadFileName
 	result.DownloadIsOriginal = previewResult.DownloadIsOriginal
-	return result
+	return refreshLargeTextureMetrics(result)
 }
 
 func scanResultToPreviewResult(result scanResult) *assetPreviewResult {
@@ -182,6 +202,9 @@ func buildAssetViewDataFromPreview(assetID int64, previewResult *assetPreviewRes
 		FilePath:              strings.TrimSpace(context.FilePath),
 		FileSHA256:            fileSHA256,
 		UseCount:              context.UseCount,
+		SceneSurfaceArea:      context.SceneSurfaceArea,
+		LargestSurfacePath:    strings.TrimSpace(context.LargestSurfacePath),
+		LargeTextureScore:     context.LargeTextureScore,
 		PreviewImageInfo:      previewResult.Image,
 		StatsInfo:             previewResult.Stats,
 		TotalBytesSize:        previewResult.TotalBytesSize,
@@ -239,6 +262,9 @@ func buildRootScanReferenceContext(rows []scanResult, selectedAssetID int64, sel
 			continue
 		}
 		context.UseCount = row.UseCount
+		context.SceneSurfaceArea = row.SceneSurfaceArea
+		context.LargestSurfacePath = row.LargestSurfacePath
+		context.LargeTextureScore = row.LargeTextureScore
 		context.ReferenceInstanceType = row.InstanceType
 		context.ReferencePropertyName = row.PropertyName
 		context.ReferenceInstancePath = firstNonEmptyString(row.InstancePath, row.InstanceName)
