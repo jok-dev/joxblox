@@ -200,6 +200,7 @@ func showSettingsDialog(window fyne.Window) {
 		folderRow,
 		cacheWarningLabel,
 		cacheFolderSizeLabel,
+		widget.NewSeparator(),
 		statusLabel,
 	)
 
@@ -218,6 +219,7 @@ func showSettingsDialog(window fyne.Window) {
 			statusLabel.SetText(err.Error())
 			return
 		}
+
 		if settingsDialog != nil {
 			settingsDialog.Hide()
 		}

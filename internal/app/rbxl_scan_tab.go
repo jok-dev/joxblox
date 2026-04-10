@@ -31,6 +31,7 @@ func newRBXLScanTab(
 		SelectSource:             pickRBXLSource,
 		ExtractHits:              scanRBXLFileForAssetIDs,
 		PathFilteredExtractHits:  scanRBXLFileForAssetIDsFiltered,
+		BuildWarning:             buildRBXLScanWarning,
 	})
 	fileDiffScan, fileDiffActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:             "Baseline: no .rbxl/.rbxm file selected.",
@@ -49,6 +50,7 @@ func newRBXLScanTab(
 		SelectSecondarySource:            pickRBXLTargetSource,
 		ExtractHits:                      scanRBXLFileDiffForAssetIDs,
 		PathFilteredExtractHits:          scanRBXLFileForAssetIDsFiltered,
+		BuildWarning:                     buildRBXLScanDiffWarning,
 	})
 
 	modeLabel := widget.NewLabel("Mode:")
@@ -271,6 +273,33 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 
 	logDebugf("RBXL file diff completed with %d new unique asset IDs", len(results))
 	return results, nil
+}
+
+func buildRBXLScanWarning(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error) {
+	return buildRBXLMissingMaterialVariantWarning(sourcePath, pathPrefixes, stopChannel)
+}
+
+func buildRBXLScanDiffWarning(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error) {
+	sourceParts := strings.SplitN(sourcePath, "\n", 2)
+	if len(sourceParts) != 2 {
+		return materialVariantWarningData{}, fmt.Errorf("invalid file diff source format")
+	}
+	baselineFilePath := strings.TrimSpace(sourceParts[0])
+	targetFilePath := strings.TrimSpace(sourceParts[1])
+	if baselineFilePath == "" || targetFilePath == "" {
+		return materialVariantWarningData{}, fmt.Errorf("both baseline and target files are required")
+	}
+
+	baselineWarning, baselineErr := buildRBXLMissingMaterialVariantWarning(baselineFilePath, pathPrefixes, stopChannel)
+	if baselineErr != nil {
+		return materialVariantWarningData{}, baselineErr
+	}
+	targetWarning, targetErr := buildRBXLMissingMaterialVariantWarning(targetFilePath, pathPrefixes, stopChannel)
+	if targetErr != nil {
+		return materialVariantWarningData{}, targetErr
+	}
+
+	return combineMaterialVariantWarnings(baselineWarning, targetWarning), nil
 }
 
 func buildScanHitsFromRustReferences(references []rustyAssetToolResult, filePath string, sceneSurfaceAreasByPath map[string]float64, limit int) []scanHit {

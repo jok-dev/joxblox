@@ -50,6 +50,7 @@ type assetScanTabOptions struct {
 	SelectSecondarySource            func(window fyne.Window, onSelected func(string), onError func(error))
 	ExtractHits                      func(sourcePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error)
 	PathFilteredExtractHits          func(sourcePath string, pathPrefixes []string, limit int, stopChannel <-chan struct{}) ([]scanHit, error)
+	BuildWarning                     func(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error)
 }
 
 type secondaryTappableTable struct {
@@ -110,6 +111,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		secondarySourceText = "No secondary source selected."
 	}
 	secondarySourceLabel := widget.NewLabel(secondarySourceText)
+	warningBanner := newMaterialVariantWarningBanner(window)
 	limitEntry := widget.NewEntry()
 	limitEntry.SetText(strconv.Itoa(maxResultsDefault))
 	limitEntry.SetPlaceHolder(strconv.Itoa(maxResultsDefault))
@@ -151,11 +153,15 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}
 		explorer.SetStatus(options.ReadyStatusText)
 	}
+	setWarning := func(warningData materialVariantWarningData) {
+		warningBanner.SetWarning(warningData)
+	}
 
 	selectSourceButton := widget.NewButton(options.SelectButtonText, func() {
 		options.SelectSource(window, func(selectedPath string) {
 			selectedSourcePath = selectedPath
 			sourceLabel.SetText(selectedSourcePath)
+			setWarning(materialVariantWarningData{})
 			updateReadyStatus()
 		}, func(err error) {
 			if err != nil {
@@ -175,6 +181,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		options.SelectSecondarySource(window, func(selectedPath string) {
 			selectedSecondarySourcePath = selectedPath
 			secondarySourceLabel.SetText(selectedSecondarySourcePath)
+			setWarning(materialVariantWarningData{})
 			updateReadyStatus()
 		}, func(err error) {
 			if err != nil {
@@ -320,6 +327,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		saveRecentFilesToPreferences(options.RecentFilesPreferenceKey, recentLoadedFiles)
 	}
 	applyImportedResults := func(importedResults []scanResult, statusMessage string) {
+		setWarning(materialVariantWarningData{})
 		explorer.SetResults(importedResults)
 		if strings.TrimSpace(statusMessage) != "" {
 			explorer.SetStatus(statusMessage)
@@ -509,6 +517,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}
 		explorer.SetResults([]scanResult{})
 		clearSimilaritySearch()
+		setWarning(materialVariantWarningData{})
 		logDebugf("Scan started for source: %s (limit=%d)", combinedSourcePath(), limitValue)
 		explorer.SetStatus(options.ScanningStatusText)
 		localStopSignal := newStopSignal()
@@ -517,14 +526,26 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		go func() {
 			var hits []scanHit
 			var scanErr error
+			warningData := materialVariantWarningData{}
 			useFilteredExtraction := pathWhitelistEnabled &&
 				strings.TrimSpace(pathWhitelistText) != "" &&
 				options.PathFilteredExtractHits != nil
+			var activePrefixes []string
 			if useFilteredExtraction {
-				prefixes := whitelistPatternsToPathPrefixes(pathWhitelistText)
-				hits, scanErr = options.PathFilteredExtractHits(combinedSourcePath(), prefixes, limitValue, localStopSignal.channel)
+				activePrefixes = whitelistPatternsToPathPrefixes(pathWhitelistText)
+				hits, scanErr = options.PathFilteredExtractHits(combinedSourcePath(), activePrefixes, limitValue, localStopSignal.channel)
 			} else {
 				hits, scanErr = options.ExtractHits(combinedSourcePath(), limitValue, localStopSignal.channel)
+			}
+			if options.BuildWarning != nil {
+				nextWarning, warningErr := options.BuildWarning(combinedSourcePath(), activePrefixes, localStopSignal.channel)
+				if errors.Is(warningErr, errScanStopped) {
+					scanErr = errScanStopped
+				} else if warningErr != nil {
+					logDebugf("Scan warning build failed: %s", warningErr.Error())
+				} else {
+					warningData = nextWarning
+				}
 			}
 			if scanErr != nil {
 				fyne.Do(func() {
@@ -551,6 +572,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			if len(hits) == 0 {
 				fyne.Do(func() {
 					finishScan(localStopSignal)
+					setWarning(warningData)
 					explorer.SetStatus(options.NoResultsStatusText)
 				})
 				return
@@ -665,6 +687,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 			fyne.Do(func() {
 				finishScan(localStopSignal)
+				setWarning(warningData)
 				resultCount := len(explorer.GetResults())
 				if resultCount == 0 && firstLoadErr != nil {
 					explorer.SetStatus(fmt.Sprintf("Scan extracted %d IDs but could not load any assets. First error: %s", len(hits), firstLoadErr.Error()))
@@ -717,6 +740,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		container.NewHBox(controlButtons...),
 		pathWhitelistRow,
 		container.NewVBox(sourceLabels...),
+		warningBanner.root,
 	)
 	content := container.NewBorder(topControls, nil, nil, nil, explorer.Content())
 	fileActions := &scanTabFileActions{

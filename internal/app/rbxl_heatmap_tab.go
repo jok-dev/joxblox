@@ -77,6 +77,7 @@ type rbxlHeatmapMapPart struct {
 	InstanceType string
 	InstanceName string
 	InstancePath string
+	MaterialKey  string
 	CenterX      float64
 	CenterY      float64
 	CenterZ      float64
@@ -156,6 +157,9 @@ const (
 	heatMetricMeshTriangles      rbxlHeatMetric = "Mesh Triangles"
 	heatMetricUniqueTextureCount rbxlHeatMetric = "Unique Texture Count"
 	heatMetricUniqueMeshCount    rbxlHeatMetric = "Unique Mesh Count"
+	heatMetricUniqueAssetCount   rbxlHeatMetric = "Unique Assets"
+	heatMetricMeshPartCount      rbxlHeatMetric = "MeshParts"
+	heatMetricPartCount          rbxlHeatMetric = "Parts"
 )
 
 type rbxlHeatmapCell struct {
@@ -180,6 +184,9 @@ type rbxlHeatmapTotals struct {
 	TotalBytes         int64
 	TriangleCount      int64
 	PixelCount         int64
+	MeshPartCount      int64
+	PartCount          int64
+	DrawCallCount      int64
 }
 
 type heatmapSquareAssetRow struct {
@@ -236,12 +243,16 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	filePathLabel.Wrapping = fyne.TextTruncate
 	compareFilePathLabel := widget.NewLabel("No comparison .rbxl/.rbxm file selected.")
 	compareFilePathLabel.Wrapping = fyne.TextTruncate
+	warningBanner := newMaterialVariantWarningBanner(window)
 	statusLabel := widget.NewLabel("Select an .rbxl or .rbxm file and build a heatmap.")
 	statusLabel.Wrapping = fyne.TextWrapWord
 	summaryLabel := widget.NewLabel("No heatmap built.")
 	summaryLabel.Wrapping = fyne.TextWrapWord
 	legendLabel := widget.NewLabel(heatmapLegendText(false))
 	legendLabel.Wrapping = fyne.TextWrapWord
+	setWarning := func(warningData materialVariantWarningData) {
+		warningBanner.SetWarning(warningData)
+	}
 	mapImageLabel := widget.NewLabel("Using auto-generated map underlay.")
 	mapImageLabel.Wrapping = fyne.TextTruncate
 	opacityValueLabel := widget.NewLabel("72%")
@@ -255,6 +266,9 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		string(heatMetricMeshTriangles),
 		string(heatMetricUniqueTextureCount),
 		string(heatMetricUniqueMeshCount),
+		string(heatMetricUniqueAssetCount),
+		string(heatMetricMeshPartCount),
+		string(heatMetricPartCount),
 	}, nil)
 	metricSelect.SetSelected(string(heatMetric))
 	opacitySlider := widget.NewSlider(0.1, 1.0)
@@ -438,6 +452,7 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		pickRBXLSource(window, func(filePath string) {
 			selectedFilePath = strings.TrimSpace(filePath)
 			filePathLabel.SetText(selectedFilePath)
+			setWarning(materialVariantWarningData{})
 			statusLabel.SetText("Ready to build heatmap.")
 		}, func(err error) {
 			statusLabel.SetText(fmt.Sprintf("File selection failed: %s", err.Error()))
@@ -447,6 +462,7 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		pickRBXLSource(window, func(filePath string) {
 			selectedCompareFilePath = strings.TrimSpace(filePath)
 			compareFilePathLabel.SetText(selectedCompareFilePath)
+			setWarning(materialVariantWarningData{})
 			statusLabel.SetText("Ready to build diff heatmap.")
 		}, func(err error) {
 			statusLabel.SetText(fmt.Sprintf("Comparison file selection failed: %s", err.Error()))
@@ -567,6 +583,7 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	showHeatmapFailure = func(message string) {
 		setBusy(false)
 		statusLabel.SetText(message)
+		setWarning(materialVariantWarningData{})
 		currentOption = blankHeatmapPreviewOption()
 		currentScene = nil
 		heatmapReady = false
@@ -607,6 +624,7 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		placeholderLabel.Show()
 		legendLabel.SetText(heatmapLegendText(diffMode))
 		heatmapReady = false
+		setWarning(materialVariantWarningData{})
 		setBusy(true)
 
 		backgroundBytes := append([]byte(nil), mapImageBytes...)
@@ -625,9 +643,14 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 				})
 				return
 			}
+			baseWarningText, warningErr := buildRBXLMissingMaterialVariantWarning(filePath, prefixes, nil)
+			if warningErr != nil {
+				logDebugf("Heatmap material warning extraction failed for %s: %s", filePath, warningErr.Error())
+			}
 
 			compareRefs := []positionedRustyAssetToolResult(nil)
 			compareMapParts := []mapRenderPartRustyAssetToolResult(nil)
+			compareWarningText := materialVariantWarningData{}
 			if diffEnabled {
 				fyne.Do(func() {
 					statusLabel.SetText("Extracting comparison RBXL/RBXM...")
@@ -645,6 +668,10 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 						showHeatmapFailure(fmt.Sprintf("Comparison map extraction failed: %s", mapErr.Error()))
 					})
 					return
+				}
+				compareWarningText, warningErr = buildRBXLMissingMaterialVariantWarning(comparePath, prefixes, nil)
+				if warningErr != nil {
+					logDebugf("Heatmap material warning extraction failed for %s: %s", comparePath, warningErr.Error())
 				}
 			}
 
@@ -713,6 +740,7 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 				placeholderLabel.Hide()
 				saveButton.Enable()
 				hideTooltip()
+				setWarning(combineMaterialVariantWarnings(baseWarningText, compareWarningText))
 				summaryLabel.SetText(formatHeatmapBuildSummary(buildResult))
 				statusLabel.SetText(heatmapReadyStatus(buildResult.DiffMode))
 				setBusy(false)
@@ -786,6 +814,7 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 			metricSelect,
 		),
 		container.NewHBox(buildButton, saveButton, layout.NewSpacer(), progressBar),
+		warningBanner.root,
 		summaryLabel,
 		legendLabel,
 	)
@@ -1213,9 +1242,13 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 	columnCount := maxInt(1, int(math.Ceil(rangeX/cellSizeWorld)))
 	rowCount := maxInt(1, int(math.Ceil(rangeZ/cellSizeWorld)))
 	type heatmapCellAccumulator struct {
-		cell              *rbxlHeatmapCell
-		baseSeenAssets    map[int64]struct{}
-		compareSeenAssets map[int64]struct{}
+		cell                     *rbxlHeatmapCell
+		baseSeenAssets           map[int64]struct{}
+		compareSeenAssets        map[int64]struct{}
+		baseSeenInstances        map[string]struct{}
+		compareSeenInstances     map[string]struct{}
+		baseSeenMeshInstances    map[string]struct{}
+		compareSeenMeshInstances map[string]struct{}
 	}
 	cellByKey := map[string]*heatmapCellAccumulator{}
 	maxCellBytes := int64(0)
@@ -1235,16 +1268,31 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 						MinimumZ: scene.MinimumZ + float64(row)*cellSizeWorld,
 						MaximumZ: scene.MinimumZ + float64(row+1)*cellSizeWorld,
 					},
-					baseSeenAssets:    map[int64]struct{}{},
-					compareSeenAssets: map[int64]struct{}{},
+					baseSeenAssets:           map[int64]struct{}{},
+					compareSeenAssets:        map[int64]struct{}{},
+					baseSeenInstances:        map[string]struct{}{},
+					compareSeenInstances:     map[string]struct{}{},
+					baseSeenMeshInstances:    map[string]struct{}{},
+					compareSeenMeshInstances: map[string]struct{}{},
 				}
 				cellByKey[cellKey] = accumulator
 			}
 			apply(accumulator, point)
 		}
 	}
-	accumulateTotals := func(totals *rbxlHeatmapTotals, point rbxlHeatmapPoint, delta int64, firstAssetInSquare bool) {
+	accumulateTotals := func(totals *rbxlHeatmapTotals, point rbxlHeatmapPoint, delta int64, firstAssetInSquare bool, firstInstanceInSquare bool, firstMeshInstanceInSquare bool) {
 		totals.ReferenceCount += delta
+		if firstInstanceInSquare {
+			switch point.InstanceType {
+			case "MeshPart":
+				totals.MeshPartCount += delta
+			case "Part":
+				totals.PartCount += delta
+			}
+		}
+		if firstMeshInstanceInSquare {
+			totals.TriangleCount += int64(point.Stats.TriangleCount) * delta
+		}
 		if !firstAssetInSquare {
 			return
 		}
@@ -1258,29 +1306,52 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 		totals.TextureBytes += int64(point.Stats.TextureBytes) * delta
 		totals.MeshBytes += int64(point.Stats.MeshBytes) * delta
 		totals.TotalBytes += int64(point.Stats.TotalBytes) * delta
-		totals.TriangleCount += int64(point.Stats.TriangleCount) * delta
 		totals.PixelCount += point.Stats.PixelCount * delta
 	}
 	accumulatePoints(scene.Points, func(accumulator *heatmapCellAccumulator, point rbxlHeatmapPoint) {
-		_, seenInBase := accumulator.baseSeenAssets[point.AssetID]
-		if !seenInBase {
+		_, seenAssetInBase := accumulator.baseSeenAssets[point.AssetID]
+		if !seenAssetInBase {
 			accumulator.baseSeenAssets[point.AssetID] = struct{}{}
 		}
+		instancePath := point.InstancePath
+		_, seenInstanceInBase := accumulator.baseSeenInstances[instancePath]
+		if !seenInstanceInBase && instancePath != "" {
+			accumulator.baseSeenInstances[instancePath] = struct{}{}
+		}
+		meshInstanceKey := heatmapPointMeshTriangleInstanceKey(point)
+		_, seenMeshInstanceInBase := accumulator.baseSeenMeshInstances[meshInstanceKey]
+		if !seenMeshInstanceInBase && meshInstanceKey != "" {
+			accumulator.baseSeenMeshInstances[meshInstanceKey] = struct{}{}
+		}
+		firstInst := !seenInstanceInBase && instancePath != ""
+		firstMeshInst := !seenMeshInstanceInBase && meshInstanceKey != ""
 		if scene.DiffMode {
-			accumulateTotals(&accumulator.cell.BaseStats, point, 1, !seenInBase)
-			accumulateTotals(&accumulator.cell.DeltaStats, point, -1, !seenInBase)
+			accumulateTotals(&accumulator.cell.BaseStats, point, 1, !seenAssetInBase, firstInst, firstMeshInst)
+			accumulateTotals(&accumulator.cell.DeltaStats, point, -1, !seenAssetInBase, firstInst, firstMeshInst)
 			accumulator.cell.Stats = accumulator.cell.DeltaStats
 		} else {
-			accumulateTotals(&accumulator.cell.Stats, point, 1, !seenInBase)
+			accumulateTotals(&accumulator.cell.Stats, point, 1, !seenAssetInBase, firstInst, firstMeshInst)
 		}
 	})
 	accumulatePoints(scene.ComparePoints, func(accumulator *heatmapCellAccumulator, point rbxlHeatmapPoint) {
-		_, seenInCompare := accumulator.compareSeenAssets[point.AssetID]
-		if !seenInCompare {
+		_, seenAssetInCompare := accumulator.compareSeenAssets[point.AssetID]
+		if !seenAssetInCompare {
 			accumulator.compareSeenAssets[point.AssetID] = struct{}{}
 		}
-		accumulateTotals(&accumulator.cell.Stats, point, 1, !seenInCompare)
-		accumulateTotals(&accumulator.cell.DeltaStats, point, 1, !seenInCompare)
+		instancePath := point.InstancePath
+		_, seenInstanceInCompare := accumulator.compareSeenInstances[instancePath]
+		if !seenInstanceInCompare && instancePath != "" {
+			accumulator.compareSeenInstances[instancePath] = struct{}{}
+		}
+		meshInstanceKey := heatmapPointMeshTriangleInstanceKey(point)
+		_, seenMeshInstanceInCompare := accumulator.compareSeenMeshInstances[meshInstanceKey]
+		if !seenMeshInstanceInCompare && meshInstanceKey != "" {
+			accumulator.compareSeenMeshInstances[meshInstanceKey] = struct{}{}
+		}
+		firstInst := !seenInstanceInCompare && instancePath != ""
+		firstMeshInst := !seenMeshInstanceInCompare && meshInstanceKey != ""
+		accumulateTotals(&accumulator.cell.Stats, point, 1, !seenAssetInCompare, firstInst, firstMeshInst)
+		accumulateTotals(&accumulator.cell.DeltaStats, point, 1, !seenAssetInCompare, firstInst, firstMeshInst)
 	})
 
 	cells := make([]rbxlHeatmapCell, 0, len(cellByKey))
@@ -1313,6 +1384,17 @@ func heatmapPointHasTextureContent(point rbxlHeatmapPoint) bool {
 
 func heatmapPointHasMeshContent(point rbxlHeatmapPoint) bool {
 	return point.Stats.MeshBytes > 0 || point.Stats.TriangleCount > 0
+}
+
+func heatmapPointMeshTriangleInstanceKey(point rbxlHeatmapPoint) string {
+	if !isReportGenerationMeshContentProperty(strings.ToLower(strings.TrimSpace(point.PropertyName))) {
+		return ""
+	}
+	instancePath := strings.TrimSpace(point.InstancePath)
+	if strings.EqualFold(strings.TrimSpace(point.InstanceType), "SurfaceAppearance") {
+		return parentReportGenerationInstancePath(instancePath)
+	}
+	return instancePath
 }
 
 func heatmapCellPixelBounds(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, width int, height int) (int, int, int, int) {
@@ -1597,6 +1679,21 @@ func formatHeatmapMetricSummary(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric)
 			return fmt.Sprintf("Heat Delta: Unique Mesh Count = %s", formatSignedIntCommas(cell.Stats.UniqueMeshCount))
 		}
 		return fmt.Sprintf("Heat: Unique Mesh Count = %s", formatIntCommas(cell.Stats.UniqueMeshCount))
+	case heatMetricUniqueAssetCount:
+		if isDiff {
+			return fmt.Sprintf("Heat Delta: Unique Assets = %s", formatSignedIntCommas(cell.Stats.UniqueAssetCount))
+		}
+		return fmt.Sprintf("Heat: Unique Assets = %s", formatIntCommas(cell.Stats.UniqueAssetCount))
+	case heatMetricMeshPartCount:
+		if isDiff {
+			return fmt.Sprintf("Heat Delta: MeshParts = %s", formatSignedIntCommas(cell.Stats.MeshPartCount))
+		}
+		return fmt.Sprintf("Heat: MeshParts = %s", formatIntCommas(cell.Stats.MeshPartCount))
+	case heatMetricPartCount:
+		if isDiff {
+			return fmt.Sprintf("Heat Delta: Parts = %s", formatSignedIntCommas(cell.Stats.PartCount))
+		}
+		return fmt.Sprintf("Heat: Parts = %s", formatIntCommas(cell.Stats.PartCount))
 	default:
 		if isDiff {
 			return fmt.Sprintf("Heat Delta: Total Byte Size = %s", formatSignedSizeAuto(cell.Stats.TotalBytes))
@@ -1621,6 +1718,12 @@ func heatMetricValue(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric, maximums h
 		return float64(cell.Stats.UniqueTextureCount)
 	case heatMetricUniqueMeshCount:
 		return float64(cell.Stats.UniqueMeshCount)
+	case heatMetricUniqueAssetCount:
+		return float64(cell.Stats.UniqueAssetCount)
+	case heatMetricMeshPartCount:
+		return float64(cell.Stats.MeshPartCount)
+	case heatMetricPartCount:
+		return float64(cell.Stats.PartCount)
 	default:
 		return float64(cell.Stats.TotalBytes)
 	}
@@ -1688,6 +1791,12 @@ func formatHeatmapDeltaSummary(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) 
 		return formatSignedIntCommas(cell.Stats.UniqueTextureCount)
 	case heatMetricUniqueMeshCount:
 		return formatSignedIntCommas(cell.Stats.UniqueMeshCount)
+	case heatMetricUniqueAssetCount:
+		return formatSignedIntCommas(cell.Stats.UniqueAssetCount)
+	case heatMetricMeshPartCount:
+		return formatSignedIntCommas(cell.Stats.MeshPartCount)
+	case heatMetricPartCount:
+		return formatSignedIntCommas(cell.Stats.PartCount)
 	default:
 		return formatSignedSizeAuto(cell.Stats.TotalBytes)
 	}
@@ -1826,6 +1935,12 @@ func heatmapSquareMetricColumnName(heatMetric rbxlHeatMetric) string {
 		return "Texture Bytes"
 	case heatMetricUniqueMeshCount:
 		return "Mesh Bytes"
+	case heatMetricUniqueAssetCount:
+		return "Total Byte Size"
+	case heatMetricMeshPartCount:
+		return "Total Byte Size"
+	case heatMetricPartCount:
+		return "Total Byte Size"
 	default:
 		return "Total Byte Size"
 	}
@@ -2008,6 +2123,7 @@ func convertRustMapParts(parts []mapRenderPartRustyAssetToolResult) []rbxlHeatma
 			InstanceType: strings.TrimSpace(part.InstanceType),
 			InstanceName: strings.TrimSpace(part.InstanceName),
 			InstancePath: strings.TrimSpace(part.InstancePath),
+			MaterialKey:  strings.TrimSpace(part.MaterialKey),
 			CenterX:      *part.CenterX,
 			CenterY:      *part.CenterY,
 			CenterZ:      *part.CenterZ,

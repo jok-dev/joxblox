@@ -52,6 +52,7 @@ type mapRenderPartRustyAssetToolResult struct {
 	InstanceType string   `json:"instanceType"`
 	InstanceName string   `json:"instanceName"`
 	InstancePath string   `json:"instancePath"`
+	MaterialKey  string   `json:"materialKey,omitempty"`
 	CenterX      *float64 `json:"centerX,omitempty"`
 	CenterY      *float64 `json:"centerY,omitempty"`
 	CenterZ      *float64 `json:"centerZ,omitempty"`
@@ -302,6 +303,64 @@ func extractPositionedRefsWithRustyAssetTool(filePath string, pathPrefixes []str
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
 	logDebugf("Rusty Asset Tool heatmap extraction returned %d references", len(results))
+	return results, nil
+}
+
+func extractMissingMaterialVariantsWithRustyAssetTool(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) ([]missingMaterialVariantRustyAssetToolResult, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return nil, nil
+	}
+	prefixArg := strings.Join(pathPrefixes, ",")
+	logDebugf("Rusty Asset Tool material warning extraction: %s (prefixes=%s)", filePath, prefixArg)
+
+	commandContext, cancelCommand := context.WithCancel(context.Background())
+	defer cancelCommand()
+	if stopChannel != nil {
+		go func() {
+			select {
+			case <-stopChannel:
+				cancelCommand()
+			case <-commandContext.Done():
+			}
+		}()
+	}
+
+	commandName, commandArgs, _, resolveErr := resolveRustyAssetToolSubcommandCommand("material-warnings", filePath, prefixArg)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	command.Env = os.Environ()
+	if toolDirectoryPath, _, found := findRustyAssetToolCargoManifestPath(); found {
+		cargoHomePath := filepath.Join(os.TempDir(), "joxblox-cargo-home")
+		targetPath := filepath.Join(toolDirectoryPath, "target")
+		command.Env = append(command.Env,
+			fmt.Sprintf("CARGO_HOME=%s", cargoHomePath),
+			fmt.Sprintf("CARGO_TARGET_DIR=%s", targetPath),
+		)
+	}
+	var stdoutBuffer bytes.Buffer
+	var stderrBuffer bytes.Buffer
+	command.Stdout = &stdoutBuffer
+	command.Stderr = &stderrBuffer
+	runErr := command.Run()
+	if commandContext.Err() != nil {
+		return nil, errScanStopped
+	}
+	if runErr != nil {
+		stderrText := strings.TrimSpace(stderrBuffer.String())
+		if stderrText != "" {
+			return nil, fmt.Errorf("Rusty Asset Tool failed: %s", stderrText)
+		}
+		return nil, fmt.Errorf("Rusty Asset Tool failed: %s", runErr.Error())
+	}
+
+	var results []missingMaterialVariantRustyAssetToolResult
+	if err := json.Unmarshal(stdoutBuffer.Bytes(), &results); err != nil {
+		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
+	}
+	logDebugf("Rusty Asset Tool material warning extraction returned %d missing variants", len(results))
 	return results, nil
 }
 

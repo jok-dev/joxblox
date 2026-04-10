@@ -680,21 +680,36 @@ func (explorer *scanResultsExplorer) matchesActiveFilters(result scanResult, has
 
 func (explorer *scanResultsExplorer) countDuplicateRows(hashCounts map[string]int) int {
 	duplicateCount := 0
+	seenCounts := map[string]int{}
 	for _, row := range explorer.allResults {
-		if isDuplicateByHash(row, hashCounts) {
+		normalizedHash := normalizeHash(row.FileSHA256)
+		if normalizedHash == "" || hashCounts[normalizedHash] < 2 {
+			continue
+		}
+		if seenCounts[normalizedHash] >= 1 {
 			duplicateCount++
 		}
+		seenCounts[normalizedHash]++
 	}
 	return duplicateCount
 }
 
 func (explorer *scanResultsExplorer) countDuplicateBytes(hashCounts map[string]int) int {
 	duplicateBytes := 0
+	seenCounts := map[string]int{}
 	for _, row := range explorer.allResults {
-		if !isDuplicateByHash(row, hashCounts) || row.BytesSize <= 0 {
+		normalizedHash := normalizeHash(row.FileSHA256)
+		if normalizedHash == "" || hashCounts[normalizedHash] < 2 {
 			continue
 		}
-		duplicateBytes += row.BytesSize
+		if row.BytesSize <= 0 {
+			seenCounts[normalizedHash]++
+			continue
+		}
+		if seenCounts[normalizedHash] >= 1 {
+			duplicateBytes += row.BytesSize
+		}
+		seenCounts[normalizedHash]++
 	}
 	return duplicateBytes
 }

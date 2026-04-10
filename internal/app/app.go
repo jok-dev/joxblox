@@ -34,13 +34,16 @@ func Run() {
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1350, 900))
 
+	reportGenerationContent, loadReportFile := newReportGenerationTab(window)
+	reportGenerationTab := container.NewTabItem(tabTitleReportGeneration, reportGenerationContent)
 	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, newSingleAssetTab(window))
 	scanContent, scanFileActions, allScanFileActions, selectScanContext := newScanTab(window)
 	scanTab := container.NewTabItem(tabTitleScan, scanContent)
 	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, newRBXLHeatmapTab(window))
 	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, newOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, newImageUploaderTab(window))
-	tabs := container.NewAppTabs(singleAssetTab, scanTab, rbxlHeatmapTab, optimizeTab, imageUploaderTab)
+	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, optimizeTab, imageUploaderTab)
+	tabs.Select(reportGenerationTab)
 	bindMainFileMenu(
 		window,
 		tabs,
@@ -88,6 +91,22 @@ func Run() {
 						}
 					})
 				}(candidatePath, uris)
+				return
+			}
+			for _, uri := range uris {
+				if uri == nil {
+					continue
+				}
+				candidatePath := strings.TrimSpace(uri.Path())
+				if !isRobloxDOMFilePath(candidatePath) {
+					continue
+				}
+				fyne.Do(func() {
+					tabs.Select(reportGenerationTab)
+					if loadReportFile != nil {
+						loadReportFile(candidatePath)
+					}
+				})
 				return
 			}
 		})

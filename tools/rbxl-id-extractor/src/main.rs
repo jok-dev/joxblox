@@ -73,12 +73,20 @@ struct PositionedAssetReference {
     world_z: Option<f32>,
 }
 
+#[derive(Clone)]
+struct MaterialVariantBinding {
+    base_material_key: String,
+    references: Vec<ExtractedAssetReference>,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MapRenderPart {
     instance_type: String,
     instance_name: String,
     instance_path: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    material_key: String,
     center_x: Option<f32>,
     center_y: Option<f32>,
     center_z: Option<f32>,
@@ -90,6 +98,15 @@ struct MapRenderPart {
     color_g: Option<u8>,
     color_b: Option<u8>,
     transparency: Option<f32>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MissingMaterialVariantReference {
+    variant_name: String,
+    instance_type: String,
+    instance_name: String,
+    instance_path: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -146,6 +163,9 @@ fn run() -> Result<(), String> {
     if args.len() >= 2 && args[1] == "heatmap" {
         return run_heatmap(&args);
     }
+    if args.len() >= 2 && args[1] == "material-warnings" {
+        return run_material_warnings(&args);
+    }
     if args.len() >= 2 && args[1] == "replace" {
         return run_replace(&args);
     }
@@ -197,54 +217,28 @@ fn run() -> Result<(), String> {
             return Err(format!("parse failed: {}", parse_err));
         }
     };
+    let material_variant_bindings = collect_material_variant_bindings(&dom, &[], false);
     for instance in dom.descendants() {
         let instance_type = instance.class.as_ref();
         let instance_name = instance.name.as_ref();
         let instance_path = build_instance_path(&dom, instance);
-        let meshpart_has_surface_color_map = normalize_for_match(instance.class.as_ref())
-            == "meshpart"
-            && instance.children().iter().any(|child_ref| {
-                if let Some(child_instance) = dom.get_by_ref(*child_ref) {
-                    if normalize_for_match(child_instance.class.as_ref()) != "surfaceappearance" {
-                        return false;
-                    }
-                    for (child_property_name, child_property_value) in
-                        child_instance.properties.iter()
-                    {
-                        if !normalize_for_match(child_property_name.as_ref()).contains("colormap") {
-                            continue;
-                        }
-                        let rendered_color_map_value = format!("{:?}", child_property_value);
-                        if has_non_empty_content_value(&rendered_color_map_value) {
-                            return true;
-                        }
-                    }
-                }
-                false
-            });
-        for (property_name, property_value) in instance.properties.iter() {
-            let normalized_property_name = normalize_for_match(property_name.as_ref());
-            let rendered_property_value = format!("{:?}", property_value);
-            if normalized_property_name.contains(PHYSICS_DATA_PROPERTY_TOKEN) {
-                continue;
-            }
-            if meshpart_has_surface_color_map
-                && is_meshpart_texture_property_name(&normalized_property_name)
-            {
-                continue;
-            }
-            if !is_asset_reference_property_name(&normalized_property_name)
-                && !has_asset_reference(&rendered_property_value)
-            {
-                continue;
-            }
-            extract_ids_from_text(
-                &rendered_property_value,
+        let effective_references = collect_effective_asset_references(
+            &dom,
+            instance,
+            instance_type,
+            instance_name,
+            &instance_path,
+            &material_variant_bindings,
+        );
+        for reference in effective_references {
+            record_asset_reference(
                 &mut extracted_asset_references,
-                instance_type,
-                instance_name,
-                &instance_path,
-                property_name.as_ref(),
+                reference.id,
+                &reference.raw_content,
+                &reference.instance_type,
+                &reference.instance_name,
+                &reference.instance_path,
+                &reference.property_name,
             );
         }
     }
@@ -532,6 +526,8 @@ fn run_heatmap(args: &[String]) -> Result<(), String> {
     let file = File::open(file_path).map_err(|open_err| format!("open failed: {}", open_err))?;
     let dom = from_reader(BufReader::new(file)).map_err(|e| format!("parse failed: {}", e))?;
     let mut references: Vec<PositionedAssetReference> = Vec::new();
+    let material_variant_bindings =
+        collect_material_variant_bindings(&dom, &path_prefixes, use_path_filter);
 
     for instance in dom.descendants() {
         let instance_path = build_instance_path(&dom, instance);
@@ -542,57 +538,58 @@ fn run_heatmap(args: &[String]) -> Result<(), String> {
         let instance_type = instance.class.as_ref();
         let instance_name = instance.name.as_ref();
         let world_position = resolve_instance_world_position(&dom, instance.referent());
-        let meshpart_has_surface_color_map = normalize_for_match(instance.class.as_ref())
-            == "meshpart"
-            && instance.children().iter().any(|child_ref| {
-                if let Some(child_instance) = dom.get_by_ref(*child_ref) {
-                    if normalize_for_match(child_instance.class.as_ref()) != "surfaceappearance" {
-                        return false;
-                    }
-                    for (child_property_name, child_property_value) in
-                        child_instance.properties.iter()
-                    {
-                        if !normalize_for_match(child_property_name.as_ref()).contains("colormap") {
-                            continue;
-                        }
-                        let rendered_color_map_value = format!("{:?}", child_property_value);
-                        if has_non_empty_content_value(&rendered_color_map_value) {
-                            return true;
-                        }
-                    }
-                }
-                false
-            });
-
-        for (property_name, property_value) in instance.properties.iter() {
-            let normalized_property_name = normalize_for_match(property_name.as_ref());
-            let rendered_property_value = format!("{:?}", property_value);
-            if normalized_property_name.contains(PHYSICS_DATA_PROPERTY_TOKEN) {
-                continue;
-            }
-            if meshpart_has_surface_color_map
-                && is_meshpart_texture_property_name(&normalized_property_name)
-            {
-                continue;
-            }
-            if !is_asset_reference_property_name(&normalized_property_name)
-                && !has_asset_reference(&rendered_property_value)
-            {
-                continue;
-            }
-            extract_positioned_ids_to_vec(
-                &rendered_property_value,
+        if normalize_for_match(instance_type) != "materialvariant" {
+            append_positioned_instance_asset_references(
+                &dom,
+                instance,
                 &mut references,
                 instance_type,
                 instance_name,
                 &instance_path,
-                property_name.as_ref(),
+                world_position,
+            );
+        }
+        if let Some(material_variant_binding) =
+            resolve_material_variant_binding(instance, &material_variant_bindings)
+        {
+            append_positioned_material_variant_references(
+                material_variant_binding,
+                &mut references,
+                instance_type,
+                instance_name,
+                &instance_path,
                 world_position,
             );
         }
     }
 
     let output = serde_json::to_string(&references)
+        .map_err(|json_err| format!("json failed: {}", json_err))?;
+    println!("{}", output);
+    Ok(())
+}
+
+fn run_material_warnings(args: &[String]) -> Result<(), String> {
+    if args.len() < 3 {
+        return Err(
+            "usage: joxblox-rusty-asset-tool material-warnings <rbxl-file> [path-prefixes]"
+                .to_string(),
+        );
+    }
+
+    let file_path = &args[2];
+    let path_prefixes: Vec<String> = if args.len() >= 4 {
+        parse_path_prefixes(&args[3])
+    } else {
+        Vec::new()
+    };
+    let use_path_filter = !path_prefixes.is_empty();
+
+    let file = File::open(file_path).map_err(|open_err| format!("open failed: {}", open_err))?;
+    let dom = from_reader(BufReader::new(file)).map_err(|e| format!("parse failed: {}", e))?;
+    let warnings =
+        collect_missing_material_variant_references(&dom, &path_prefixes, use_path_filter);
+    let output = serde_json::to_string(&warnings)
         .map_err(|json_err| format!("json failed: {}", json_err))?;
     println!("{}", output);
     Ok(())
@@ -607,6 +604,7 @@ fn run_filtered_extraction(
     let dom = from_reader(BufReader::new(file)).map_err(|e| format!("parse failed: {}", e))?;
 
     let mut all_references: Vec<ExtractedAssetReference> = Vec::new();
+    let material_variant_bindings = collect_material_variant_bindings(&dom, path_prefixes, true);
 
     for instance in dom.descendants() {
         let instance_path = build_instance_path(&dom, instance);
@@ -616,53 +614,14 @@ fn run_filtered_extraction(
 
         let instance_type = instance.class.as_ref();
         let instance_name = instance.name.as_ref();
-        let meshpart_has_surface_color_map = normalize_for_match(instance.class.as_ref())
-            == "meshpart"
-            && instance.children().iter().any(|child_ref| {
-                if let Some(child_instance) = dom.get_by_ref(*child_ref) {
-                    if normalize_for_match(child_instance.class.as_ref()) != "surfaceappearance" {
-                        return false;
-                    }
-                    for (child_property_name, child_property_value) in
-                        child_instance.properties.iter()
-                    {
-                        if !normalize_for_match(child_property_name.as_ref()).contains("colormap") {
-                            continue;
-                        }
-                        let rendered_color_map_value = format!("{:?}", child_property_value);
-                        if has_non_empty_content_value(&rendered_color_map_value) {
-                            return true;
-                        }
-                    }
-                }
-                false
-            });
-
-        for (property_name, property_value) in instance.properties.iter() {
-            let normalized_property_name = normalize_for_match(property_name.as_ref());
-            let rendered_property_value = format!("{:?}", property_value);
-            if normalized_property_name.contains(PHYSICS_DATA_PROPERTY_TOKEN) {
-                continue;
-            }
-            if meshpart_has_surface_color_map
-                && is_meshpart_texture_property_name(&normalized_property_name)
-            {
-                continue;
-            }
-            if !is_asset_reference_property_name(&normalized_property_name)
-                && !has_asset_reference(&rendered_property_value)
-            {
-                continue;
-            }
-            extract_ids_to_vec(
-                &rendered_property_value,
-                &mut all_references,
-                instance_type,
-                instance_name,
-                &instance_path,
-                property_name.as_ref(),
-            );
-        }
+        all_references.extend(collect_effective_asset_references(
+            &dom,
+            instance,
+            instance_type,
+            instance_name,
+            &instance_path,
+            &material_variant_bindings,
+        ));
     }
 
     if let Some(max) = max_results {
@@ -1088,6 +1047,298 @@ fn push_positioned_asset_reference(
     });
 }
 
+fn collect_material_variant_bindings(
+    dom: &WeakDom,
+    path_prefixes: &[String],
+    use_path_filter: bool,
+) -> BTreeMap<String, Vec<MaterialVariantBinding>> {
+    let mut bindings = BTreeMap::<String, Vec<MaterialVariantBinding>>::new();
+    for instance in dom.descendants() {
+        if normalize_for_match(instance.class.as_ref()) != "materialvariant" {
+            continue;
+        }
+        let instance_path = build_instance_path(dom, instance);
+        if use_path_filter && !instance_matches_path_prefixes(&instance_path, path_prefixes) {
+            continue;
+        }
+        let variant_name_key = normalize_for_match(instance.name.as_ref());
+        if variant_name_key.is_empty() {
+            continue;
+        }
+        let references = collect_instance_asset_references(
+            dom,
+            instance,
+            instance.class.as_ref(),
+            instance.name.as_ref(),
+            &instance_path,
+        );
+        if references.is_empty() {
+            continue;
+        }
+        let base_material_key = find_property_value(instance, &["basematerial"])
+            .and_then(variant_to_material_key)
+            .unwrap_or_default();
+        bindings
+            .entry(variant_name_key)
+            .or_default()
+            .push(MaterialVariantBinding {
+                base_material_key,
+                references,
+            });
+    }
+    bindings
+}
+
+fn resolve_material_variant_binding<'a>(
+    instance: &Instance,
+    bindings: &'a BTreeMap<String, Vec<MaterialVariantBinding>>,
+) -> Option<&'a MaterialVariantBinding> {
+    let material_variant_name =
+        find_property_value(instance, &["materialvariant"]).and_then(variant_to_trimmed_string)?;
+    let material_key =
+        find_property_value(instance, &["material"]).and_then(variant_to_material_key);
+    select_material_variant_binding(&material_variant_name, material_key.as_deref(), bindings)
+}
+
+fn select_material_variant_binding<'a>(
+    material_variant_name: &str,
+    material_key: Option<&str>,
+    bindings: &'a BTreeMap<String, Vec<MaterialVariantBinding>>,
+) -> Option<&'a MaterialVariantBinding> {
+    let variant_name_key = normalize_for_match(material_variant_name);
+    if variant_name_key.is_empty() {
+        return None;
+    }
+    let candidates = bindings.get(&variant_name_key)?;
+    if let Some(material_key) = material_key {
+        if let Some(candidate) = candidates
+            .iter()
+            .find(|candidate| candidate.base_material_key == material_key)
+        {
+            return Some(candidate);
+        }
+    }
+    if candidates.len() == 1 {
+        return candidates.first();
+    }
+    None
+}
+
+fn collect_instance_asset_references(
+    dom: &WeakDom,
+    instance: &Instance,
+    instance_type: &str,
+    instance_name: &str,
+    instance_path: &str,
+) -> Vec<ExtractedAssetReference> {
+    let mut references = Vec::new();
+    let meshpart_has_surface_color_map = instance_has_surface_color_map(dom, instance);
+    for (property_name, property_value) in instance.properties.iter() {
+        let normalized_property_name = normalize_for_match(property_name.as_ref());
+        let rendered_property_value = format!("{:?}", property_value);
+        if normalized_property_name.contains(PHYSICS_DATA_PROPERTY_TOKEN) {
+            continue;
+        }
+        if meshpart_has_surface_color_map
+            && is_meshpart_texture_property_name(&normalized_property_name)
+        {
+            continue;
+        }
+        if !is_asset_reference_property_name(&normalized_property_name)
+            && !has_asset_reference(&rendered_property_value)
+        {
+            continue;
+        }
+        extract_ids_to_vec(
+            &rendered_property_value,
+            &mut references,
+            instance_type,
+            instance_name,
+            instance_path,
+            property_name.as_ref(),
+        );
+    }
+    references
+}
+
+fn collect_effective_asset_references(
+    dom: &WeakDom,
+    instance: &Instance,
+    instance_type: &str,
+    instance_name: &str,
+    instance_path: &str,
+    bindings: &BTreeMap<String, Vec<MaterialVariantBinding>>,
+) -> Vec<ExtractedAssetReference> {
+    let mut references = Vec::new();
+    if normalize_for_match(instance_type) != "materialvariant" {
+        references.extend(collect_instance_asset_references(
+            dom,
+            instance,
+            instance_type,
+            instance_name,
+            instance_path,
+        ));
+    }
+    if let Some(binding) = resolve_material_variant_binding(instance, bindings) {
+        append_material_variant_references(
+            binding,
+            &mut references,
+            instance_type,
+            instance_name,
+            instance_path,
+        );
+    }
+    references
+}
+
+fn collect_missing_material_variant_references(
+    dom: &WeakDom,
+    path_prefixes: &[String],
+    use_path_filter: bool,
+) -> Vec<MissingMaterialVariantReference> {
+    let bindings = collect_material_variant_bindings(dom, path_prefixes, use_path_filter);
+    let mut missing = Vec::<MissingMaterialVariantReference>::new();
+    let mut seen_keys = BTreeMap::<String, bool>::new();
+
+    for instance in dom.descendants() {
+        let instance_path = build_instance_path(dom, instance);
+        if use_path_filter && !instance_matches_path_prefixes(&instance_path, path_prefixes) {
+            continue;
+        }
+        if normalize_for_match(instance.class.as_ref()) == "materialvariant" {
+            continue;
+        }
+
+        let Some(material_variant_name) =
+            find_property_value(instance, &["materialvariant"]).and_then(variant_to_trimmed_string)
+        else {
+            continue;
+        };
+        let material_key =
+            find_property_value(instance, &["material"]).and_then(variant_to_material_key);
+        if select_material_variant_binding(
+            &material_variant_name,
+            material_key.as_deref(),
+            &bindings,
+        )
+        .is_some()
+        {
+            continue;
+        }
+        let variant_name_key = normalize_for_match(&material_variant_name);
+        if bindings.contains_key(&variant_name_key) {
+            continue;
+        }
+
+        let dedupe_key = format!(
+            "{}|{}",
+            variant_name_key,
+            normalize_for_match(&instance_path)
+        );
+        if seen_keys.insert(dedupe_key, true).is_some() {
+            continue;
+        }
+        missing.push(MissingMaterialVariantReference {
+            variant_name: material_variant_name.trim().to_string(),
+            instance_type: instance.class.trim().to_string(),
+            instance_name: instance.name.trim().to_string(),
+            instance_path: instance_path.trim().to_string(),
+        });
+    }
+
+    missing
+}
+
+fn append_material_variant_references(
+    binding: &MaterialVariantBinding,
+    references: &mut Vec<ExtractedAssetReference>,
+    instance_type: &str,
+    instance_name: &str,
+    instance_path: &str,
+) {
+    for reference in &binding.references {
+        let property_name = if reference.property_name.trim().is_empty() {
+            "MaterialVariant".to_string()
+        } else {
+            format!("MaterialVariant.{}", reference.property_name.trim())
+        };
+        push_asset_reference(
+            references,
+            reference.id,
+            &reference.raw_content,
+            instance_type,
+            instance_name,
+            instance_path,
+            &property_name,
+        );
+    }
+}
+
+fn append_positioned_instance_asset_references(
+    dom: &WeakDom,
+    instance: &Instance,
+    references: &mut Vec<PositionedAssetReference>,
+    instance_type: &str,
+    instance_name: &str,
+    instance_path: &str,
+    world_position: Option<WorldPosition>,
+) {
+    let meshpart_has_surface_color_map = instance_has_surface_color_map(dom, instance);
+    for (property_name, property_value) in instance.properties.iter() {
+        let normalized_property_name = normalize_for_match(property_name.as_ref());
+        let rendered_property_value = format!("{:?}", property_value);
+        if normalized_property_name.contains(PHYSICS_DATA_PROPERTY_TOKEN) {
+            continue;
+        }
+        if meshpart_has_surface_color_map
+            && is_meshpart_texture_property_name(&normalized_property_name)
+        {
+            continue;
+        }
+        if !is_asset_reference_property_name(&normalized_property_name)
+            && !has_asset_reference(&rendered_property_value)
+        {
+            continue;
+        }
+        extract_positioned_ids_to_vec(
+            &rendered_property_value,
+            references,
+            instance_type,
+            instance_name,
+            instance_path,
+            property_name.as_ref(),
+            world_position,
+        );
+    }
+}
+
+fn append_positioned_material_variant_references(
+    binding: &MaterialVariantBinding,
+    references: &mut Vec<PositionedAssetReference>,
+    instance_type: &str,
+    instance_name: &str,
+    instance_path: &str,
+    world_position: Option<WorldPosition>,
+) {
+    for reference in &binding.references {
+        let property_name = if reference.property_name.trim().is_empty() {
+            "MaterialVariant".to_string()
+        } else {
+            format!("MaterialVariant.{}", reference.property_name.trim())
+        };
+        push_positioned_asset_reference(
+            references,
+            reference.id,
+            &reference.raw_content,
+            instance_type,
+            instance_name,
+            instance_path,
+            &property_name,
+            world_position,
+        );
+    }
+}
+
 fn build_instance_path(dom: &WeakDom, instance: &Instance) -> String {
     let mut path_segments: Vec<String> = Vec::new();
     let mut current_ref = instance.referent();
@@ -1159,6 +1410,72 @@ fn find_property_value<'a>(instance: &'a Instance, property_names: &[&str]) -> O
     None
 }
 
+fn variant_to_trimmed_string(value: &Variant) -> Option<String> {
+    match value {
+        Variant::String(text) => non_empty_trimmed_string(text),
+        Variant::BinaryString(text) => non_empty_trimmed_utf8(text.as_ref()),
+        Variant::SharedString(text) => non_empty_trimmed_utf8(text.as_ref()),
+        Variant::ContentId(content_id) => non_empty_trimmed_string(content_id.as_ref()),
+        Variant::Content(content) => content.as_uri().and_then(non_empty_trimmed_string),
+        _ => {
+            let rendered_value = format!("{:?}", value);
+            let first_quote = rendered_value.find('"')?;
+            let remainder = &rendered_value[first_quote + 1..];
+            let closing_quote = remainder.find('"')?;
+            non_empty_trimmed_string(&remainder[..closing_quote])
+        }
+    }
+}
+
+fn variant_to_material_key(value: &Variant) -> Option<String> {
+    let normalized = normalize_material_key(&format!("{:?}", value));
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(normalized)
+}
+
+fn normalize_material_key(text: &str) -> String {
+    text.chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+fn non_empty_trimmed_string(text: &str) -> Option<String> {
+    let trimmed = text.trim().trim_matches(char::from(0)).trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn non_empty_trimmed_utf8(bytes: &[u8]) -> Option<String> {
+    non_empty_trimmed_string(String::from_utf8_lossy(bytes).as_ref())
+}
+
+fn instance_has_surface_color_map(dom: &WeakDom, instance: &Instance) -> bool {
+    normalize_for_match(instance.class.as_ref()) == "meshpart"
+        && instance.children().iter().any(|child_ref| {
+            if let Some(child_instance) = dom.get_by_ref(*child_ref) {
+                if normalize_for_match(child_instance.class.as_ref()) != "surfaceappearance" {
+                    return false;
+                }
+                for (child_property_name, child_property_value) in child_instance.properties.iter()
+                {
+                    if !normalize_for_match(child_property_name.as_ref()).contains("colormap") {
+                        continue;
+                    }
+                    let rendered_color_map_value = format!("{:?}", child_property_value);
+                    if has_non_empty_content_value(&rendered_color_map_value) {
+                        return true;
+                    }
+                }
+            }
+            false
+        })
+}
+
 fn variant_to_world_position(value: &Variant) -> Option<WorldPosition> {
     match value {
         Variant::Vector3(vector) => Some(WorldPosition {
@@ -1194,6 +1511,9 @@ fn extract_map_render_part(instance: &Instance, instance_path: &str) -> Option<M
     let (color_r, color_g, color_b) = find_property_value(instance, &["color"])
         .and_then(variant_to_color_rgb)
         .unwrap_or((163, 162, 165));
+    let material_key = find_property_value(instance, &["material"])
+        .and_then(variant_to_material_key)
+        .unwrap_or_default();
     let transparency = find_property_value(instance, &["transparency"])
         .and_then(variant_to_f32)
         .map(|value| value.clamp(0.0, 1.0))
@@ -1209,6 +1529,7 @@ fn extract_map_render_part(instance: &Instance, instance_path: &str) -> Option<M
         instance_type: instance.class.trim().to_string(),
         instance_name: instance.name.trim().to_string(),
         instance_path: instance_path.trim().to_string(),
+        material_key,
         center_x: Some(cframe.position.x),
         center_y: Some(cframe.position.y),
         center_z: Some(cframe.position.z),
@@ -1475,6 +1796,8 @@ mod tests {
     use super::*;
     use flate2::write::GzEncoder;
     use flate2::Compression;
+    use rbx_dom_weak::InstanceBuilder;
+    use rbx_types::BinaryString;
     use std::io::Write;
 
     #[test]
@@ -1561,5 +1884,99 @@ mod tests {
         let indices = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let limited = limit_triangle_indices(&indices, Some(2));
         assert_eq!(limited, vec![0, 1, 2, 6, 7, 8]);
+    }
+
+    #[test]
+    fn select_material_variant_binding_prefers_matching_base_material() {
+        let mut bindings = BTreeMap::<String, Vec<MaterialVariantBinding>>::new();
+        bindings.insert(
+            "mud".to_string(),
+            vec![
+                MaterialVariantBinding {
+                    base_material_key: "wood".to_string(),
+                    references: vec![],
+                },
+                MaterialVariantBinding {
+                    base_material_key: "ground".to_string(),
+                    references: vec![],
+                },
+            ],
+        );
+
+        let selected = select_material_variant_binding("Mud", Some("ground"), &bindings)
+            .expect("expected matching material variant");
+        assert_eq!(selected.base_material_key, "ground");
+    }
+
+    #[test]
+    fn select_material_variant_binding_falls_back_to_single_candidate() {
+        let mut bindings = BTreeMap::<String, Vec<MaterialVariantBinding>>::new();
+        bindings.insert(
+            "mud".to_string(),
+            vec![MaterialVariantBinding {
+                base_material_key: "ground".to_string(),
+                references: vec![],
+            }],
+        );
+
+        let selected = select_material_variant_binding("Mud", Some("wood"), &bindings)
+            .expect("expected single material variant fallback");
+        assert_eq!(selected.base_material_key, "ground");
+    }
+
+    #[test]
+    fn variant_to_trimmed_string_supports_binary_string_values() {
+        let value = Variant::BinaryString(BinaryString::from(b"AlcantaraHD\0".to_vec()));
+        assert_eq!(
+            variant_to_trimmed_string(&value).as_deref(),
+            Some("AlcantaraHD")
+        );
+    }
+
+    #[test]
+    fn collect_effective_asset_references_expands_material_variant_bindings() {
+        let meshpart = InstanceBuilder::new("MeshPart")
+            .with_property("MaterialVariant", Variant::String("Mud".to_string()))
+            .with_property("Material", Variant::String("Ground".to_string()));
+        let meshpart_ref = meshpart.referent();
+        let dom = WeakDom::new(InstanceBuilder::new("DataModel").with_child(meshpart));
+        let instance = dom
+            .get_by_ref(meshpart_ref)
+            .expect("expected test meshpart to exist");
+
+        let mut bindings = BTreeMap::<String, Vec<MaterialVariantBinding>>::new();
+        bindings.insert(
+            "mud".to_string(),
+            vec![MaterialVariantBinding {
+                base_material_key: "ground".to_string(),
+                references: vec![ExtractedAssetReference {
+                    id: 123,
+                    raw_content: "rbxassetid://123".to_string(),
+                    instance_type: "MaterialVariant".to_string(),
+                    instance_name: "Mud".to_string(),
+                    instance_path: "MaterialService.Mud".to_string(),
+                    property_name: "ColorMapContent".to_string(),
+                    used: 1,
+                    all_instance_paths: vec!["MaterialService.Mud".to_string()],
+                }],
+            }],
+        );
+
+        let references = collect_effective_asset_references(
+            &dom,
+            instance,
+            instance.class.as_ref(),
+            instance.name.as_ref(),
+            "MeshPart",
+            &bindings,
+        );
+
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].id, 123);
+        assert_eq!(references[0].instance_path, "MeshPart");
+        assert_eq!(
+            references[0].property_name,
+            "MaterialVariant.ColorMapContent"
+        );
     }
 }
