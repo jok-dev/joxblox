@@ -591,8 +591,6 @@ func buildReportSummaryAndPoints(refs []positionedRustyAssetToolResult, resolved
 	hashCounts := map[string]int{}
 	resolvedUniqueKeys := make([]string, 0, len(resolved))
 	seenResolvedKeys := map[string]struct{}{}
-	seenMeshTriangleInstances := map[string]struct{}{}
-
 	for _, ref := range refs {
 		if ref.ID <= 0 {
 			continue
@@ -613,11 +611,8 @@ func buildReportSummaryAndPoints(refs []positionedRustyAssetToolResult, resolved
 		if stats.TotalBytes <= 0 && stats.TextureBytes <= 0 && stats.MeshBytes <= 0 && stats.TriangleCount == 0 {
 			continue
 		}
-		if meshTriangleInstanceKey := reportGenerationMeshTriangleInstanceKey(ref); meshTriangleInstanceKey != "" && stats.TriangleCount > 0 {
-			if _, seen := seenMeshTriangleInstances[meshTriangleInstanceKey]; !seen {
-				seenMeshTriangleInstances[meshTriangleInstanceKey] = struct{}{}
-				summary.TriangleCount += int64(stats.TriangleCount)
-			}
+		if reportGenerationMeshTriangleInstanceKey(ref) != "" && stats.TriangleCount > 0 {
+			summary.TriangleCount += int64(stats.TriangleCount)
 		}
 		if _, seen := seenResolvedKeys[key]; seen {
 			continue

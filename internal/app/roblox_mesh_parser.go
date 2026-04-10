@@ -78,8 +78,19 @@ func parseMeshV3(data []byte, bodyStart int, version string) (meshHeaderInfo, er
 	if len(data) < offset+8 {
 		return meshHeaderInfo{}, fmt.Errorf("v3 mesh data too short for header")
 	}
+	sizeofHeader := int(binary.LittleEndian.Uint16(data[bodyStart:]))
+	sizeofVertex := int(data[bodyStart+2])
+	sizeofFace := int(data[bodyStart+3])
+	numLodOffsets := int(binary.LittleEndian.Uint16(data[bodyStart+6:]))
+
 	numVerts := binary.LittleEndian.Uint32(data[offset:])
 	numFaces := binary.LittleEndian.Uint32(data[offset+4:])
+
+	if numLodOffsets >= 2 && sizeofHeader > 0 && sizeofVertex > 0 && sizeofFace > 0 {
+		lodTableStart := bodyStart + sizeofHeader + int(numVerts)*sizeofVertex + int(numFaces)*sizeofFace
+		numFaces = readHighQualityFaceCount(data, lodTableStart, 1, numFaces)
+	}
+
 	return meshHeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
 }
 
@@ -95,7 +106,50 @@ func parseMeshV4Plus(data []byte, bodyStart int, version string) (meshHeaderInfo
 	}
 	numVerts := binary.LittleEndian.Uint32(data[offset:])
 	numFaces := binary.LittleEndian.Uint32(data[offset+4:])
+
+	// v4/v5 header: numLodOffsets(u16) at +12, numBones(u16) at +14.
+	// The header numFaces is the total across all LOD levels; extract LOD0 only.
+	if (version == "4.00" || version == "4.01" || version == "5.00") && len(data) >= bodyStart+16 {
+		sizeofHeader := int(binary.LittleEndian.Uint16(data[bodyStart:]))
+		numLodOffsets := int(binary.LittleEndian.Uint16(data[bodyStart+12:]))
+		numBones := int(binary.LittleEndian.Uint16(data[bodyStart+14:]))
+		if numLodOffsets >= 2 && sizeofHeader >= 24 {
+			const vertexStride = 40
+			const faceStride = 12
+			skinningSize := 0
+			if numBones > 0 {
+				const skinningStride = 8
+				skinningSize = int(numVerts) * skinningStride
+			}
+			lodTableStart := bodyStart + sizeofHeader + int(numVerts)*vertexStride + skinningSize + int(numFaces)*faceStride
+			numFaces = readHighQualityFaceCount(data, lodTableStart, 1, numFaces)
+		}
+	}
+
 	return meshHeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
+}
+
+// readHighQualityFaceCount reads the LOD offset table and returns the
+// face count that spans the first numHighQualityLODs levels.  For v4/v5
+// meshes Roblox combines all "high quality" LOD levels into the reported
+// triangle count; the boundary index into the offset table equals
+// numHighQualityLODs (minimum 1).  Falls back to totalFaces when the
+// table cannot be read or the values look invalid.
+func readHighQualityFaceCount(data []byte, lodTableStart int, numHighQualityLODs int, totalFaces uint32) uint32 {
+	lodIndex := numHighQualityLODs
+	if lodIndex < 1 {
+		lodIndex = 1
+	}
+	endOffset := lodTableStart + lodIndex*4
+	if lodTableStart <= 0 || endOffset <= 0 || len(data) < endOffset+4 {
+		return totalFaces
+	}
+	lod0Start := binary.LittleEndian.Uint32(data[lodTableStart:])
+	hqEnd := binary.LittleEndian.Uint32(data[endOffset:])
+	if lod0Start == 0 && hqEnd > 0 && hqEnd <= totalFaces {
+		return hqEnd
+	}
+	return totalFaces
 }
 
 func parseMeshV7CoreMesh(data []byte, bodyStart int, version string) (meshHeaderInfo, error) {

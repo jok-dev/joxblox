@@ -1242,13 +1242,11 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 	columnCount := maxInt(1, int(math.Ceil(rangeX/cellSizeWorld)))
 	rowCount := maxInt(1, int(math.Ceil(rangeZ/cellSizeWorld)))
 	type heatmapCellAccumulator struct {
-		cell                     *rbxlHeatmapCell
-		baseSeenAssets           map[int64]struct{}
-		compareSeenAssets        map[int64]struct{}
-		baseSeenInstances        map[string]struct{}
-		compareSeenInstances     map[string]struct{}
-		baseSeenMeshInstances    map[string]struct{}
-		compareSeenMeshInstances map[string]struct{}
+		cell                 *rbxlHeatmapCell
+		baseSeenAssets       map[int64]struct{}
+		compareSeenAssets    map[int64]struct{}
+		baseSeenInstances    map[string]struct{}
+		compareSeenInstances map[string]struct{}
 	}
 	cellByKey := map[string]*heatmapCellAccumulator{}
 	maxCellBytes := int64(0)
@@ -1268,19 +1266,17 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 						MinimumZ: scene.MinimumZ + float64(row)*cellSizeWorld,
 						MaximumZ: scene.MinimumZ + float64(row+1)*cellSizeWorld,
 					},
-					baseSeenAssets:           map[int64]struct{}{},
-					compareSeenAssets:        map[int64]struct{}{},
-					baseSeenInstances:        map[string]struct{}{},
-					compareSeenInstances:     map[string]struct{}{},
-					baseSeenMeshInstances:    map[string]struct{}{},
-					compareSeenMeshInstances: map[string]struct{}{},
+				baseSeenAssets:       map[int64]struct{}{},
+				compareSeenAssets:    map[int64]struct{}{},
+				baseSeenInstances:    map[string]struct{}{},
+				compareSeenInstances: map[string]struct{}{},
 				}
 				cellByKey[cellKey] = accumulator
 			}
 			apply(accumulator, point)
 		}
 	}
-	accumulateTotals := func(totals *rbxlHeatmapTotals, point rbxlHeatmapPoint, delta int64, firstAssetInSquare bool, firstInstanceInSquare bool, firstMeshInstanceInSquare bool) {
+	accumulateTotals := func(totals *rbxlHeatmapTotals, point rbxlHeatmapPoint, delta int64, firstAssetInSquare bool, firstInstanceInSquare bool) {
 		totals.ReferenceCount += delta
 		if firstInstanceInSquare {
 			switch point.InstanceType {
@@ -1290,9 +1286,7 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 				totals.PartCount += delta
 			}
 		}
-		if firstMeshInstanceInSquare {
-			totals.TriangleCount += int64(point.Stats.TriangleCount) * delta
-		}
+		totals.TriangleCount += int64(point.Stats.TriangleCount) * delta
 		if !firstAssetInSquare {
 			return
 		}
@@ -1318,19 +1312,13 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 		if !seenInstanceInBase && instancePath != "" {
 			accumulator.baseSeenInstances[instancePath] = struct{}{}
 		}
-		meshInstanceKey := heatmapPointMeshTriangleInstanceKey(point)
-		_, seenMeshInstanceInBase := accumulator.baseSeenMeshInstances[meshInstanceKey]
-		if !seenMeshInstanceInBase && meshInstanceKey != "" {
-			accumulator.baseSeenMeshInstances[meshInstanceKey] = struct{}{}
-		}
 		firstInst := !seenInstanceInBase && instancePath != ""
-		firstMeshInst := !seenMeshInstanceInBase && meshInstanceKey != ""
 		if scene.DiffMode {
-			accumulateTotals(&accumulator.cell.BaseStats, point, 1, !seenAssetInBase, firstInst, firstMeshInst)
-			accumulateTotals(&accumulator.cell.DeltaStats, point, -1, !seenAssetInBase, firstInst, firstMeshInst)
+			accumulateTotals(&accumulator.cell.BaseStats, point, 1, !seenAssetInBase, firstInst)
+			accumulateTotals(&accumulator.cell.DeltaStats, point, -1, !seenAssetInBase, firstInst)
 			accumulator.cell.Stats = accumulator.cell.DeltaStats
 		} else {
-			accumulateTotals(&accumulator.cell.Stats, point, 1, !seenAssetInBase, firstInst, firstMeshInst)
+			accumulateTotals(&accumulator.cell.Stats, point, 1, !seenAssetInBase, firstInst)
 		}
 	})
 	accumulatePoints(scene.ComparePoints, func(accumulator *heatmapCellAccumulator, point rbxlHeatmapPoint) {
@@ -1343,15 +1331,9 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 		if !seenInstanceInCompare && instancePath != "" {
 			accumulator.compareSeenInstances[instancePath] = struct{}{}
 		}
-		meshInstanceKey := heatmapPointMeshTriangleInstanceKey(point)
-		_, seenMeshInstanceInCompare := accumulator.compareSeenMeshInstances[meshInstanceKey]
-		if !seenMeshInstanceInCompare && meshInstanceKey != "" {
-			accumulator.compareSeenMeshInstances[meshInstanceKey] = struct{}{}
-		}
 		firstInst := !seenInstanceInCompare && instancePath != ""
-		firstMeshInst := !seenMeshInstanceInCompare && meshInstanceKey != ""
-		accumulateTotals(&accumulator.cell.Stats, point, 1, !seenAssetInCompare, firstInst, firstMeshInst)
-		accumulateTotals(&accumulator.cell.DeltaStats, point, 1, !seenAssetInCompare, firstInst, firstMeshInst)
+		accumulateTotals(&accumulator.cell.Stats, point, 1, !seenAssetInCompare, firstInst)
+		accumulateTotals(&accumulator.cell.DeltaStats, point, 1, !seenAssetInCompare, firstInst)
 	})
 
 	cells := make([]rbxlHeatmapCell, 0, len(cellByKey))
@@ -1384,17 +1366,6 @@ func heatmapPointHasTextureContent(point rbxlHeatmapPoint) bool {
 
 func heatmapPointHasMeshContent(point rbxlHeatmapPoint) bool {
 	return point.Stats.MeshBytes > 0 || point.Stats.TriangleCount > 0
-}
-
-func heatmapPointMeshTriangleInstanceKey(point rbxlHeatmapPoint) string {
-	if !isReportGenerationMeshContentProperty(strings.ToLower(strings.TrimSpace(point.PropertyName))) {
-		return ""
-	}
-	instancePath := strings.TrimSpace(point.InstancePath)
-	if strings.EqualFold(strings.TrimSpace(point.InstanceType), "SurfaceAppearance") {
-		return parentReportGenerationInstancePath(instancePath)
-	}
-	return instancePath
 }
 
 func heatmapCellPixelBounds(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, width int, height int) (int, int, int, int) {
