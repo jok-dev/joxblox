@@ -17,6 +17,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 )
 
 type reportGenerationSummary struct {
@@ -978,12 +979,16 @@ func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overa
 		gradeText.TextSize = 18
 		gradeText.TextStyle = fyne.TextStyle{Bold: true}
 
-		labelText := widget.NewLabel(g.Label)
+		labelText := ttwidget.NewLabel(g.Label)
 		labelText.TextStyle = fyne.TextStyle{Bold: true}
+		if g.MetricDescription != "" {
+			labelText.SetToolTip(g.MetricDescription)
+		}
 
-		valueText := widget.NewLabel(g.Value)
+		valueText := ttwidget.NewLabel(g.Value)
+		valueText.SetToolTip(g.Description)
 
-		totalText := widget.NewLabel("")
+		totalText := ttwidget.NewLabel("")
 		if g.TotalValue != "" {
 			totalText.SetText(g.TotalValue)
 		}

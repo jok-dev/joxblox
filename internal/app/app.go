@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	fynetooltip "github.com/dweymouth/fyne-tooltip"
 )
 
 const (
@@ -124,10 +125,10 @@ func Run() {
 	collapsedLayout := container.NewBorder(nil, debugConsolePanel, nil, nil, mainContent)
 	setLayoutMode = func(showConsole bool) {
 		if showConsole {
-			window.SetContent(resizableLayout)
+			window.SetContent(fynetooltip.AddWindowToolTipLayer(resizableLayout, window.Canvas()))
 			return
 		}
-		window.SetContent(collapsedLayout)
+		window.SetContent(fynetooltip.AddWindowToolTipLayer(collapsedLayout, window.Canvas()))
 	}
 	setLayoutMode(false)
 	logDebugf("Application started")

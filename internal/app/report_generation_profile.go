@@ -7,11 +7,12 @@ import (
 )
 
 type performanceGrade struct {
-	Grade       string
-	Label       string
-	Value       string
-	TotalValue  string
-	Description string
+	Grade            string
+	Label            string
+	Value            string
+	TotalValue       string
+	Description      string
+	MetricDescription string
 }
 
 const (
@@ -216,11 +217,12 @@ func computeMeshComplexityGradeWithThresholds(triangleCount int64, percentilePer
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Mesh Complexity",
-		Value:       formatIntCommas(triangleCount) + " tris",
-		TotalValue:  totalLabel,
-		Description: meshGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Mesh Complexity",
+		Value:            formatIntCommas(triangleCount) + " tris",
+		TotalValue:       totalLabel,
+		Description:      meshGradeDescription(grade),
+		MetricDescription: "Total triangle count across all MeshParts in the scene",
 	}
 }
 
@@ -235,10 +237,11 @@ func computeDuplicationWasteGradeWithThresholds(duplicateSizeBytes int64, totalB
 	}
 	grade := gradeFromThresholds(percentage, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Duplication Waste",
-		Value:       fmt.Sprintf("%.1f%%", percentage),
-		Description: duplicationGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Duplication Waste",
+		Value:            fmt.Sprintf("%.1f%%", percentage),
+		Description:      duplicationGradeDescription(grade),
+		MetricDescription: "Percentage of total size wasted by duplicate assets",
 	}
 }
 
@@ -255,11 +258,12 @@ func computeDownloadSizeGradeWithThresholds(totalBytes int64, percentilePerCell 
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Total Size",
-		Value:       formatSizeAuto64(totalBytes),
-		TotalValue:  totalLabel,
-		Description: downloadSizeGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Total Size",
+		Value:            formatSizeAuto64(totalBytes),
+		TotalValue:       totalLabel,
+		Description:      downloadSizeGradeDescription(grade),
+		MetricDescription: "Sum of all asset data (meshes + textures) that must be downloaded",
 	}
 }
 
@@ -276,11 +280,12 @@ func computeTextureSizeGradeWithThresholds(textureBytes int64, percentilePerCell
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Texture Size",
-		Value:       formatSizeAuto64(textureBytes),
-		TotalValue:  totalLabel,
-		Description: textureSizeGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Texture Size",
+		Value:            formatSizeAuto64(textureBytes),
+		TotalValue:       totalLabel,
+		Description:      textureSizeGradeDescription(grade),
+		MetricDescription: "Total size of all image/texture assets in the scene",
 	}
 }
 
@@ -297,11 +302,12 @@ func computeMeshSizeGradeWithThresholds(meshBytes int64, percentilePerCell float
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Mesh Size",
-		Value:       formatSizeAuto64(meshBytes),
-		TotalValue:  totalLabel,
-		Description: meshSizeGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Mesh Size",
+		Value:            formatSizeAuto64(meshBytes),
+		TotalValue:       totalLabel,
+		Description:      meshSizeGradeDescription(grade),
+		MetricDescription: "Total size of all mesh geometry data in the scene",
 	}
 }
 
@@ -312,10 +318,11 @@ func computeOversizedTextureCountGrade(oversizedTextureCount int) performanceGra
 func computeOversizedTextureCountGradeWithThresholds(oversizedTextureCount int, thresholds [6]float64) performanceGrade {
 	grade := gradeFromThresholds(float64(oversizedTextureCount), thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Oversized Textures",
-		Value:       fmt.Sprintf("%d textures", oversizedTextureCount),
-		Description: oversizedTextureCountGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Oversized Textures",
+		Value:            fmt.Sprintf("%d textures", oversizedTextureCount),
+		Description:      oversizedTextureCountGradeDescription(grade),
+		MetricDescription: "Textures larger than optimal for their on-screen surface area",
 	}
 }
 
@@ -326,10 +333,11 @@ func computeDuplicateCountGrade(duplicateCount int64) performanceGrade {
 func computeDuplicateCountGradeWithThresholds(duplicateCount int64, thresholds [6]float64) performanceGrade {
 	grade := gradeFromThresholds(float64(duplicateCount), thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Duplicates",
-		Value:       formatIntCommas(duplicateCount) + " duplicates",
-		Description: duplicateCountGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Duplicates",
+		Value:            formatIntCommas(duplicateCount) + " duplicates",
+		Description:      duplicateCountGradeDescription(grade),
+		MetricDescription: "Assets uploaded multiple times with identical content",
 	}
 }
 
@@ -346,11 +354,12 @@ func computeMeshPartCountGradeWithThresholds(meshPartCount int, percentilePerCel
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "MeshParts",
-		Value:       fmt.Sprintf("%d", meshPartCount),
-		TotalValue:  totalLabel,
-		Description: meshPartCountGradeDescription(grade),
+		Grade:            grade,
+		Label:            "MeshParts",
+		Value:            fmt.Sprintf("%d", meshPartCount),
+		TotalValue:       totalLabel,
+		Description:      meshPartCountGradeDescription(grade),
+		MetricDescription: "Count of MeshPart instances in the scene",
 	}
 }
 
@@ -367,11 +376,12 @@ func computeDrawCallGradeWithThresholds(drawCallCount int64, percentilePerCell f
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Draw Calls",
-		Value:       fmt.Sprintf("%d est.", drawCallCount),
-		TotalValue:  totalLabel,
-		Description: drawCallGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Draw Calls",
+		Value:            fmt.Sprintf("%d est.", drawCallCount),
+		TotalValue:       totalLabel,
+		Description:      drawCallGradeDescription(grade),
+		MetricDescription: "Estimated GPU draw calls based on unique mesh/texture/material combos",
 	}
 }
 
@@ -388,11 +398,12 @@ func computePartCountGradeWithThresholds(partCount int, percentilePerCell float6
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Parts",
-		Value:       fmt.Sprintf("%d", partCount),
-		TotalValue:  totalLabel,
-		Description: partCountGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Parts",
+		Value:            fmt.Sprintf("%d", partCount),
+		TotalValue:       totalLabel,
+		Description:      partCountGradeDescription(grade),
+		MetricDescription: "Count of Part instances (legacy bricks) in the scene",
 	}
 }
 
@@ -409,11 +420,12 @@ func computeAssetDiversityGradeWithThresholds(uniqueAssetCount int, percentilePe
 	}
 	grade := gradeFromThresholds(gradeValue, thresholds)
 	return performanceGrade{
-		Grade:       grade,
-		Label:       "Asset Diversity",
-		Value:       fmt.Sprintf("%d unique", uniqueAssetCount),
-		TotalValue:  totalLabel,
-		Description: assetDiversityGradeDescription(grade),
+		Grade:            grade,
+		Label:            "Asset Diversity",
+		Value:            fmt.Sprintf("%d unique", uniqueAssetCount),
+		TotalValue:       totalLabel,
+		Description:      assetDiversityGradeDescription(grade),
+		MetricDescription: "Number of unique assets that must be fetched from CDN",
 	}
 }
 
