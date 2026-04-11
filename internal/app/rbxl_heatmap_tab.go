@@ -220,7 +220,7 @@ var heatmapAssetStatsCache = struct {
 	statsByAsset: map[string]rbxlHeatmapAssetStats{},
 }
 
-func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
+func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 	selectedFilePath := ""
 	selectedCompareFilePath := ""
 	selectedMapImagePath := ""
@@ -819,13 +819,30 @@ func newRBXLHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		legendLabel,
 	)
 
+	loadRBXLFile := func(path string) {
+		trimmedPath := strings.TrimSpace(path)
+		if trimmedPath == "" {
+			return
+		}
+		if loading.Load() {
+			return
+		}
+		selectedFilePath = trimmedPath
+		filePathLabel.SetText(selectedFilePath)
+		setWarning(materialVariantWarningData{})
+		statusLabel.SetText("Ready to build heatmap.")
+		if buildButton.OnTapped != nil {
+			buildButton.OnTapped()
+		}
+	}
+
 	return container.NewBorder(
 		controls,
 		statusLabel,
 		nil,
 		nil,
 		viewerStack,
-	)
+	), loadRBXLFile
 }
 
 func buildRBXLHeatmapScene(

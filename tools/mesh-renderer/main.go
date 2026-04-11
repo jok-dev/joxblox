@@ -45,13 +45,14 @@ var (
 )
 
 type loadedMeshModel struct {
-	model     rl.Model
-	positions []float32
-	normals   []float32
-	indices   []uint16
-	colors    []uint8
-	baseColor [3]float32
-	bounds    rl.BoundingBox
+	model       rl.Model
+	positions   []float32
+	normals     []float32
+	indices     []uint16
+	colors      []uint8
+	baseColor   [3]float32
+	bounds      rl.BoundingBox
+	creaseEdges []uint16 // flat list of vertex index pairs (a0, b0, a1, b1, ...)
 }
 
 const mainVertSrc = `
@@ -383,12 +384,14 @@ func createModelFromRawData(positions []float32, indices32 []uint32, colors []ui
 		indices16[i] = uint16(idx)
 	}
 
+	storedPositions := append([]float32(nil), positions...)
 	modelData := loadedMeshModel{
-		positions: append([]float32(nil), positions...),
-		normals:   normals,
-		indices:   indices16,
-		colors:    append([]uint8(nil), colors...),
-		bounds:    computeBoundingBox(positions),
+		positions:   storedPositions,
+		normals:     normals,
+		indices:     indices16,
+		colors:      append([]uint8(nil), colors...),
+		bounds:      computeBoundingBox(positions),
+		creaseEdges: computeCreaseEdges(storedPositions, indices16),
 		baseColor: [3]float32{
 			float32(colors[0]) / 255.0,
 			float32(colors[1]) / 255.0,
@@ -719,42 +722,148 @@ func computeBoundingBox(positions []float32) rl.BoundingBox {
 	}
 }
 
+// Crease-edge threshold: two triangles sharing an edge form a crease when the
+// dihedral angle between their face normals exceeds ~25°, i.e. the dot product
+// of the unit normals drops below cos(25°).
+const creaseAngleDotThreshold = 0.9063
+
 func drawSelectedMeshHighlight(meshModel loadedMeshModel, bgR uint8, bgG uint8, bgB uint8) {
-	outlineColor, shadowColor := selectedMeshOutlineColors(bgR, bgG, bgB)
-	rl.DisableDepthTest()
-	rl.SetLineWidth(4.0)
-	rl.DrawModelWires(meshModel.model, rl.Vector3{}, 1.0, shadowColor)
-	rl.SetLineWidth(2.0)
-	rl.DrawModelWires(meshModel.model, rl.Vector3{}, 1.0, outlineColor)
-	rl.EnableDepthTest()
-	rl.SetLineWidth(1.0)
-	box := expandedBoundingBox(meshModel.bounds, 0.02)
-	rl.DrawBoundingBox(box, shadowColor)
-	rl.DrawBoundingBox(expandedBoundingBox(meshModel.bounds, 0.01), outlineColor)
+	if len(meshModel.creaseEdges) < 2 {
+		return
+	}
+	outlineColor := selectedMeshOutlineColor(bgR, bgG, bgB)
+	positions := meshModel.positions
+
+	// rl.SetLineWidth is a no-op on modern GL core profile, so draw each crease
+	// edge as a thin cylinder. Radius scales with the mesh bounding-box diagonal
+	// so small props and large structures both get a visible but proportional
+	// outline.
+	dx := meshModel.bounds.Max.X - meshModel.bounds.Min.X
+	dy := meshModel.bounds.Max.Y - meshModel.bounds.Min.Y
+	dz := meshModel.bounds.Max.Z - meshModel.bounds.Min.Z
+	diagonal := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
+	radius := diagonal * 0.0006
+	if radius < 0.0015 {
+		radius = 0.0015
+	}
+
+	for i := 0; i+1 < len(meshModel.creaseEdges); i += 2 {
+		aIdx := int(meshModel.creaseEdges[i]) * 3
+		bIdx := int(meshModel.creaseEdges[i+1]) * 3
+		if aIdx+2 >= len(positions) || bIdx+2 >= len(positions) {
+			continue
+		}
+		start := rl.Vector3{X: positions[aIdx], Y: positions[aIdx+1], Z: positions[aIdx+2]}
+		end := rl.Vector3{X: positions[bIdx], Y: positions[bIdx+1], Z: positions[bIdx+2]}
+		rl.DrawCylinderEx(start, end, radius, radius, 4, outlineColor)
+	}
 }
 
-func expandedBoundingBox(bounds rl.BoundingBox, padding float32) rl.BoundingBox {
-	min := bounds.Min
-	max := bounds.Max
-	sizeX := max.X - min.X
-	sizeY := max.Y - min.Y
-	sizeZ := max.Z - min.Z
-	extra := padding
-	if sizeX > 0 || sizeY > 0 || sizeZ > 0 {
-		extra = float32(math.Max(float64(padding), float64(maxFloat32(sizeX, maxFloat32(sizeY, sizeZ))*0.03)))
+// computeCreaseEdges returns the edges of a mesh whose two adjacent triangles
+// bend sharply (beyond creaseAngleDotThreshold), plus any boundary edges with
+// only one adjacent triangle. The result is a flat list of vertex index pairs.
+func computeCreaseEdges(positions []float32, indices []uint16) []uint16 {
+	triCount := len(indices) / 3
+	if triCount == 0 {
+		return nil
 	}
-	return rl.BoundingBox{
-		Min: rl.Vector3{X: min.X - extra, Y: min.Y - extra, Z: min.Z - extra},
-		Max: rl.Vector3{X: max.X + extra, Y: max.Y + extra, Z: max.Z + extra},
+	vertexCount := len(positions) / 3
+
+	faceNormal := func(triIdx int) (float64, float64, float64, bool) {
+		base := triIdx * 3
+		a := int(indices[base])
+		b := int(indices[base+1])
+		c := int(indices[base+2])
+		if a >= vertexCount || b >= vertexCount || c >= vertexCount {
+			return 0, 0, 0, false
+		}
+		ax := float64(positions[a*3])
+		ay := float64(positions[a*3+1])
+		az := float64(positions[a*3+2])
+		ux := float64(positions[b*3]) - ax
+		uy := float64(positions[b*3+1]) - ay
+		uz := float64(positions[b*3+2]) - az
+		vx := float64(positions[c*3]) - ax
+		vy := float64(positions[c*3+1]) - ay
+		vz := float64(positions[c*3+2]) - az
+		nx := uy*vz - uz*vy
+		ny := uz*vx - ux*vz
+		nz := ux*vy - uy*vx
+		length := math.Sqrt(nx*nx + ny*ny + nz*nz)
+		if length == 0 {
+			return 0, 0, 0, false
+		}
+		return nx / length, ny / length, nz / length, true
 	}
+
+	type edgeRecord struct {
+		triA   int32
+		triB   int32
+		count  int32
+		keyLow uint16
+		keyHi  uint16
+	}
+	edges := make(map[uint32]*edgeRecord, triCount*3)
+	addEdge := func(va, vb uint16, triIdx int) {
+		low, hi := va, vb
+		if low > hi {
+			low, hi = hi, low
+		}
+		key := (uint32(low) << 16) | uint32(hi)
+		rec, ok := edges[key]
+		if !ok {
+			rec = &edgeRecord{triA: -1, triB: -1, keyLow: low, keyHi: hi}
+			edges[key] = rec
+		}
+		switch rec.count {
+		case 0:
+			rec.triA = int32(triIdx)
+		case 1:
+			rec.triB = int32(triIdx)
+		}
+		rec.count++
+	}
+
+	for triIdx := 0; triIdx < triCount; triIdx++ {
+		base := triIdx * 3
+		a := indices[base]
+		b := indices[base+1]
+		c := indices[base+2]
+		addEdge(a, b, triIdx)
+		addEdge(b, c, triIdx)
+		addEdge(c, a, triIdx)
+	}
+
+	creases := make([]uint16, 0, len(edges)/4)
+	for _, rec := range edges {
+		isCrease := false
+		switch rec.count {
+		case 1:
+			isCrease = true // boundary edge
+		case 2:
+			n1x, n1y, n1z, ok1 := faceNormal(int(rec.triA))
+			n2x, n2y, n2z, ok2 := faceNormal(int(rec.triB))
+			if !ok1 || !ok2 {
+				continue
+			}
+			if n1x*n2x+n1y*n2y+n1z*n2z < creaseAngleDotThreshold {
+				isCrease = true
+			}
+		}
+		// Non-manifold edges (count > 2) are skipped.
+		if isCrease {
+			creases = append(creases, rec.keyLow, rec.keyHi)
+		}
+	}
+	return creases
 }
 
-func selectedMeshOutlineColors(bgR uint8, bgG uint8, bgB uint8) (rl.Color, rl.Color) {
+func selectedMeshOutlineColor(bgR uint8, bgG uint8, bgB uint8) rl.Color {
 	luma := 0.2126*float64(bgR) + 0.7152*float64(bgG) + 0.0722*float64(bgB)
 	if luma > 180 {
-		return rl.NewColor(168, 32, 255, 255), rl.NewColor(24, 12, 32, 255)
+		return rl.NewColor(168, 32, 255, 255)
 	}
-	return rl.NewColor(255, 64, 220, 255), rl.NewColor(8, 8, 8, 255)
+	return rl.NewColor(255, 64, 220, 255)
 }
 
 func clampColorFloat(value float32) float32 {
@@ -775,13 +884,6 @@ func clampFloat64(value float64, minimum float64, maximum float64) float64 {
 		return maximum
 	}
 	return value
-}
-
-func maxFloat32(left float32, right float32) float32 {
-	if left > right {
-		return left
-	}
-	return right
 }
 
 func clampInt(value int, minimum int, maximum int) int {

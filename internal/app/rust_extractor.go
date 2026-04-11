@@ -104,6 +104,14 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath string, assetT
 	if strings.TrimSpace(filePath) == "" {
 		return nil, map[int64]int{}, []rustyAssetToolResult{}, "", nil
 	}
+	cacheKey, cacheKeyOk := rustExtractorCacheKeyForLimit(filePath, assetTypeID, limit)
+	if cacheKeyOk {
+		if cached, found := assetIDsExtractorCache.Load(cacheKey); found {
+			entry := cached.(assetIDsExtractorCacheEntry)
+			logDebugf("Rusty Asset Tool scan extraction cache hit: %s (limit=%d)", filePath, limit)
+			return entry.AssetIDs, entry.UseCounts, entry.References, entry.CommandOutput, nil
+		}
+	}
 	logDebugf(
 		"Rusty Asset Tool requested for file: %s (limit=%d, assetType=%s (%d))",
 		filePath,
@@ -184,12 +192,27 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath string, assetT
 		len(commandOutput),
 		len(extractedReferences),
 	)
+	if cacheKeyOk {
+		assetIDsExtractorCache.Store(cacheKey, assetIDsExtractorCacheEntry{
+			AssetIDs:      assetIDsFromDOM,
+			UseCounts:     useCountsByAssetID,
+			References:    extractedReferences,
+			CommandOutput: commandOutputText,
+		})
+	}
 	return assetIDsFromDOM, useCountsByAssetID, extractedReferences, commandOutputText, nil
 }
 
 func extractFilteredRefsWithRustyAssetTool(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) ([]rustyAssetToolResult, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return nil, nil
+	}
+	cacheKey, cacheKeyOk := rustExtractorCacheKeyFor(filePath, pathPrefixes, "filtered")
+	if cacheKeyOk {
+		if cached, found := filteredRefsExtractorCache.Load(cacheKey); found {
+			logDebugf("Rusty Asset Tool filtered extraction cache hit: %s", filePath)
+			return cached.([]rustyAssetToolResult), nil
+		}
 	}
 	prefixArg := strings.Join(pathPrefixes, ",")
 	logDebugf("Rusty Asset Tool filtered extraction: %s (prefixes=%s)", filePath, prefixArg)
@@ -257,12 +280,22 @@ func extractFilteredRefsWithRustyAssetTool(filePath string, pathPrefixes []strin
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
 	logDebugf("Rusty Asset Tool filtered extraction returned %d references", len(results))
+	if cacheKeyOk {
+		filteredRefsExtractorCache.Store(cacheKey, results)
+	}
 	return results, nil
 }
 
 func extractPositionedRefsWithRustyAssetTool(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) ([]positionedRustyAssetToolResult, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return nil, nil
+	}
+	cacheKey, cacheKeyOk := rustExtractorCacheKeyFor(filePath, pathPrefixes, "heatmap")
+	if cacheKeyOk {
+		if cached, found := positionedRefsExtractorCache.Load(cacheKey); found {
+			logDebugf("Rusty Asset Tool heatmap extraction cache hit: %s", filePath)
+			return cached.([]positionedRustyAssetToolResult), nil
+		}
 	}
 	prefixArg := strings.Join(pathPrefixes, ",")
 	logDebugf("Rusty Asset Tool heatmap extraction: %s (prefixes=%s)", filePath, prefixArg)
@@ -315,6 +348,9 @@ func extractPositionedRefsWithRustyAssetTool(filePath string, pathPrefixes []str
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
 	logDebugf("Rusty Asset Tool heatmap extraction returned %d references", len(results))
+	if cacheKeyOk {
+		positionedRefsExtractorCache.Store(cacheKey, results)
+	}
 	return results, nil
 }
 
@@ -380,6 +416,13 @@ func extractMapRenderPartsWithRustyAssetTool(filePath string, pathPrefixes []str
 	if strings.TrimSpace(filePath) == "" {
 		return nil, nil
 	}
+	cacheKey, cacheKeyOk := rustExtractorCacheKeyFor(filePath, pathPrefixes, "map")
+	if cacheKeyOk {
+		if cached, found := mapRenderPartsExtractorCache.Load(cacheKey); found {
+			logDebugf("Rusty Asset Tool map render extraction cache hit: %s", filePath)
+			return cached.([]mapRenderPartRustyAssetToolResult), nil
+		}
+	}
 	prefixArg := strings.Join(pathPrefixes, ",")
 	logDebugf("Rusty Asset Tool map render extraction: %s (prefixes=%s)", filePath, prefixArg)
 
@@ -431,6 +474,9 @@ func extractMapRenderPartsWithRustyAssetTool(filePath string, pathPrefixes []str
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
 	logDebugf("Rusty Asset Tool map render extraction returned %d parts", len(results))
+	if cacheKeyOk {
+		mapRenderPartsExtractorCache.Store(cacheKey, results)
+	}
 	return results, nil
 }
 

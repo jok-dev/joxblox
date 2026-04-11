@@ -56,7 +56,7 @@ type reportGenerationInstanceRenderInfo struct {
 
 const reportGenerationCellSizeStuds = 1000.0
 
-func newReportGenerationTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
+func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string)) {
 	selectedFilePath := ""
 	currentSummary := reportGenerationSummary{}
 	currentCells := []rbxlHeatmapCell{}
@@ -116,6 +116,23 @@ func newReportGenerationTab(window fyne.Window) (fyne.CanvasObject, func(string)
 		overall := overallPerformanceGrade(grades, hasDuplicates)
 		overallScore := overallPerformanceScorePercent(grades, hasDuplicates)
 		profileContainer.Add(buildPerformanceProfileUI(assetType.Label, overall, overallScore, grades, percentiles))
+		if onViewInScan != nil || onViewInHeatmap != nil {
+			navButtons := container.NewHBox()
+			if onViewInScan != nil {
+				viewInScanButton := widget.NewButtonWithIcon("View in Scan", theme.SearchIcon(), func() {
+					onViewInScan(selectedFilePath)
+				})
+				navButtons.Add(viewInScanButton)
+			}
+			if onViewInHeatmap != nil {
+				viewInHeatmapButton := widget.NewButtonWithIcon("View in Heatmap", theme.ColorPaletteIcon(), func() {
+					onViewInHeatmap(selectedFilePath)
+				})
+				navButtons.Add(viewInHeatmapButton)
+			}
+			profileContainer.Add(widget.NewSeparator())
+			profileContainer.Add(container.NewCenter(navButtons))
+		}
 		profileContainer.Show()
 	}
 

@@ -6,6 +6,221 @@ import (
 	"testing"
 )
 
+func TestBuildModelHeatmapInstancesCollectsTextureRefs(t *testing.T) {
+	centerX := 0.0
+	centerY := 0.0
+	centerZ := 0.0
+	sizeX := 2.0
+	sizeY := 2.0
+	sizeZ := 2.0
+	mapParts := []mapRenderPartRustyAssetToolResult{
+		{
+			InstanceType: "MeshPart",
+			InstancePath: "Workspace.Crate",
+			CenterX:      &centerX,
+			CenterY:      &centerY,
+			CenterZ:      &centerZ,
+			SizeX:        &sizeX,
+			SizeY:        &sizeY,
+			SizeZ:        &sizeZ,
+		},
+	}
+	refs := []positionedRustyAssetToolResult{
+		{
+			ID:           111,
+			RawContent:   "rbxassetid://111",
+			InstanceType: "MeshPart",
+			InstancePath: "Workspace.Crate",
+			PropertyName: "MeshContent",
+		},
+		{
+			ID:           222,
+			RawContent:   "rbxassetid://222",
+			InstanceType: "MeshPart",
+			InstancePath: "Workspace.Crate",
+			PropertyName: "TextureID",
+		},
+	}
+
+	instances := buildModelHeatmapInstances(mapParts, refs)
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if instances[0].MeshRef.AssetID != 111 {
+		t.Fatalf("expected mesh asset 111, got %d", instances[0].MeshRef.AssetID)
+	}
+	if len(instances[0].TextureRefs) != 1 || instances[0].TextureRefs[0].AssetID != 222 {
+		t.Fatalf("expected texture ref 222, got %+v", instances[0].TextureRefs)
+	}
+}
+
+func TestBuildModelHeatmapInstancesCollectsSurfaceAppearanceTextures(t *testing.T) {
+	centerX := 0.0
+	centerY := 0.0
+	centerZ := 0.0
+	sizeX := 2.0
+	sizeY := 2.0
+	sizeZ := 2.0
+	mapParts := []mapRenderPartRustyAssetToolResult{
+		{
+			InstanceType: "MeshPart",
+			InstancePath: "Workspace.Floor",
+			CenterX:      &centerX,
+			CenterY:      &centerY,
+			CenterZ:      &centerZ,
+			SizeX:        &sizeX,
+			SizeY:        &sizeY,
+			SizeZ:        &sizeZ,
+		},
+	}
+	refs := []positionedRustyAssetToolResult{
+		{
+			ID:           111,
+			RawContent:   "rbxassetid://111",
+			InstanceType: "MeshPart",
+			InstancePath: "Workspace.Floor",
+			PropertyName: "MeshContent",
+		},
+		{
+			ID:           555,
+			RawContent:   "rbxassetid://555",
+			InstanceType: "SurfaceAppearance",
+			InstancePath: "Workspace.Floor.SurfaceAppearance",
+			PropertyName: "ColorMapContent",
+		},
+		{
+			ID:           556,
+			RawContent:   "rbxassetid://556",
+			InstanceType: "SurfaceAppearance",
+			InstancePath: "Workspace.Floor.SurfaceAppearance",
+			PropertyName: "NormalMapContent",
+		},
+	}
+
+	instances := buildModelHeatmapInstances(mapParts, refs)
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if len(instances[0].TextureRefs) != 2 {
+		t.Fatalf("expected 2 texture refs from SurfaceAppearance, got %d: %+v", len(instances[0].TextureRefs), instances[0].TextureRefs)
+	}
+	ids := map[int64]bool{}
+	for _, ref := range instances[0].TextureRefs {
+		ids[ref.AssetID] = true
+	}
+	if !ids[555] || !ids[556] {
+		t.Fatalf("expected texture refs 555 and 556, got %+v", instances[0].TextureRefs)
+	}
+}
+
+func TestBuildModelHeatmapPreviewDataTextureModeColorsByTextureBytes(t *testing.T) {
+	meshPreview, err := buildMeshPreviewData(
+		[]float32{
+			-1, -1, 0,
+			1, -1, 0,
+			0, 1, 0,
+		},
+		[]uint32{0, 1, 2},
+		24,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("buildMeshPreviewData returned error: %v", err)
+	}
+	instances := []modelHeatmapMeshInstance{
+		{
+			InstancePath: "Workspace.Small",
+			MeshRef:      heatmapAssetReference{AssetID: 1, AssetInput: "rbxassetid://1"},
+			TextureRefs:  []heatmapAssetReference{{AssetID: 10, AssetInput: "rbxassetid://10"}},
+			SizeX:        2,
+			SizeY:        2,
+			SizeZ:        2,
+		},
+		{
+			InstancePath: "Workspace.Big",
+			MeshRef:      heatmapAssetReference{AssetID: 2, AssetInput: "rbxassetid://2"},
+			TextureRefs:  []heatmapAssetReference{{AssetID: 20, AssetInput: "rbxassetid://20"}},
+			SizeX:        2,
+			SizeY:        2,
+			SizeZ:        2,
+		},
+	}
+	resolvedMeshes := map[string]modelHeatmapResolvedMesh{
+		"rbxassetid://1": {
+			Reference:     heatmapAssetReference{AssetID: 1, AssetInput: "rbxassetid://1"},
+			Preview:       meshPreview,
+			Bounds:        computeModelHeatmapMeshBounds(meshPreview.RawPositions),
+			TriangleCount: 24,
+		},
+		"rbxassetid://2": {
+			Reference:     heatmapAssetReference{AssetID: 2, AssetInput: "rbxassetid://2"},
+			Preview:       meshPreview,
+			Bounds:        computeModelHeatmapMeshBounds(meshPreview.RawPositions),
+			TriangleCount: 24,
+		},
+	}
+	resolvedTextures := map[string]modelHeatmapResolvedTexture{
+		"rbxassetid://10": {
+			Reference: heatmapAssetReference{AssetID: 10, AssetInput: "rbxassetid://10"},
+			Width:     16,
+			Height:    16,
+			BytesSize: 512,
+		},
+		"rbxassetid://20": {
+			Reference: heatmapAssetReference{AssetID: 20, AssetInput: "rbxassetid://20"},
+			Width:     512,
+			Height:    512,
+			BytesSize: 65536,
+		},
+	}
+
+	previewData, infos, summary, buildErr := buildModelHeatmapPreviewDataWithMode(instances, resolvedMeshes, resolvedTextures, 1.0, modelHeatmapModeTexture)
+	if buildErr != nil {
+		t.Fatalf("texture mode build failed: %v", buildErr)
+	}
+	if len(previewData.Batches) != 2 || len(infos) != 2 {
+		t.Fatalf("expected 2 batches, got %d infos %d", len(previewData.Batches), len(infos))
+	}
+	if summary.HeatMode != modelHeatmapModeTexture {
+		t.Fatalf("expected heat mode %q, got %q", modelHeatmapModeTexture, summary.HeatMode)
+	}
+	if summary.UniqueTextureCount != 2 {
+		t.Fatalf("expected 2 unique textures, got %d", summary.UniqueTextureCount)
+	}
+	if summary.TextureBytes != 512+65536 {
+		t.Fatalf("expected texture bytes %d, got %d", 512+65536, summary.TextureBytes)
+	}
+	if infos[0].TextureBytes != 512 || infos[1].TextureBytes != 65536 {
+		t.Fatalf("unexpected per-batch texture bytes: %d, %d", infos[0].TextureBytes, infos[1].TextureBytes)
+	}
+	firstColor := [3]uint8{previewData.Batches[0].RawColors[0], previewData.Batches[0].RawColors[1], previewData.Batches[0].RawColors[2]}
+	secondColor := [3]uint8{previewData.Batches[1].RawColors[0], previewData.Batches[1].RawColors[1], previewData.Batches[1].RawColors[2]}
+	if firstColor == secondColor {
+		t.Fatal("expected texture mode to color textures differently")
+	}
+}
+
+func TestModelHeatmapValueFromInfoHandlesTextureModes(t *testing.T) {
+	info := modelHeatmapBatchInfo{
+		TriangleCount:  50,
+		Density:        1.5,
+		TextureBytes:   2048,
+		TextureDensity: 7.5,
+	}
+	if got := modelHeatmapValueFromInfo(modelHeatmapModeTexture, info); got != 2048 {
+		t.Fatalf("expected texture bytes 2048, got %f", got)
+	}
+	if got := modelHeatmapValueFromInfo(modelHeatmapModeSizeScaledTexture, info); got != 7.5 {
+		t.Fatalf("expected texture density 7.5, got %f", got)
+	}
+	if got := modelHeatmapValueFromInfo(modelHeatmapModeTriangles, info); got != 50 {
+		t.Fatalf("expected triangles 50, got %f", got)
+	}
+	if got := modelHeatmapValueFromInfo(modelHeatmapModeSizeScaledTriangles, info); got != 1.5 {
+		t.Fatalf("expected density 1.5, got %f", got)
+	}
+}
+
 func TestBuildModelHeatmapInstancesMatchesMeshContentRefs(t *testing.T) {
 	centerX := 10.0
 	centerY := 5.0
@@ -275,11 +490,11 @@ func TestBuildModelHeatmapPreviewDataTriangleModeColorsEqualTriangleCounts(t *te
 		},
 	}
 
-	densityPreview, _, _, err := buildModelHeatmapPreviewDataWithMode(instances, resolved, 1.0, modelHeatmapModeSizeScaledTriangles)
+	densityPreview, _, _, err := buildModelHeatmapPreviewDataWithMode(instances, resolved, nil, 1.0, modelHeatmapModeSizeScaledTriangles)
 	if err != nil {
 		t.Fatalf("density mode build failed: %v", err)
 	}
-	trianglePreview, _, summary, err := buildModelHeatmapPreviewDataWithMode(instances, resolved, 1.0, modelHeatmapModeTriangles)
+	trianglePreview, _, summary, err := buildModelHeatmapPreviewDataWithMode(instances, resolved, nil, 1.0, modelHeatmapModeTriangles)
 	if err != nil {
 		t.Fatalf("triangle mode build failed: %v", err)
 	}

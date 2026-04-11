@@ -26,13 +26,16 @@ const (
 type modelHeatmapMode string
 
 const (
-	modelHeatmapModeSizeScaledTriangles modelHeatmapMode = "Size-Scaled Triangle Heat"
 	modelHeatmapModeTriangles           modelHeatmapMode = "Triangle Heat"
+	modelHeatmapModeTexture             modelHeatmapMode = "Texture Heat"
+	modelHeatmapModeSizeScaledTriangles modelHeatmapMode = "Size-Scaled Triangle Heat"
+	modelHeatmapModeSizeScaledTexture   modelHeatmapMode = "Size-Scaled Texture Heat"
 )
 
 type modelHeatmapMeshInstance struct {
 	InstancePath string
 	MeshRef      heatmapAssetReference
+	TextureRefs  []heatmapAssetReference
 	CenterX      float64
 	CenterY      float64
 	CenterZ      float64
@@ -62,15 +65,25 @@ type modelHeatmapResolvedMesh struct {
 	TriangleCount uint32
 }
 
+type modelHeatmapResolvedTexture struct {
+	Reference heatmapAssetReference
+	Width     int
+	Height    int
+	BytesSize int64
+}
+
 type modelHeatmapSceneSummary struct {
 	MeshPartCount         int
 	RenderedMeshPartCount int
 	UniqueMeshCount       int
+	UniqueTextureCount    int
 	MissingMeshRefCount   int
 	FailedMeshCount       int
 	TriangleCount         uint32
 	PreviewTriangleCount  uint32
+	TextureBytes          int64
 	MaxDensity            float64
+	MaxTextureDensity     float64
 	MaxHeatValue          float64
 	HeatMode              modelHeatmapMode
 }
@@ -90,6 +103,9 @@ type modelHeatmapBatchInfo struct {
 	BasisSizeZ     float64
 	TriangleCount  uint32
 	Density        float64
+	TextureCount   int
+	TextureBytes   int64
+	TextureDensity float64
 }
 
 type modelHeatmapRenderState struct {
@@ -120,9 +136,8 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	legendLabel.Wrapping = fyne.TextWrapWord
 	partInfoLabel := widget.NewLabel("Click a part to view its info.")
 	partInfoLabel.Wrapping = fyne.TextWrapWord
-	placeholderLabel := widget.NewLabel("Select an .rbxl or .rbxm file to preview MeshPart heat in 3D.")
-	placeholderLabel.Wrapping = fyne.TextWrapWord
-	placeholderLabel.Alignment = fyne.TextAlignCenter
+	placeholderLabel := widget.NewLabelWithStyle("Select an .rbxl or .rbxm file to preview MeshPart heat in 3D.", fyne.TextAlignCenter, fyne.TextStyle{})
+	placeholderLabel.Wrapping = fyne.TextWrapOff
 	progressBar := widget.NewProgressBarInfinite()
 	progressBar.Hide()
 	opacityValueLabel := widget.NewLabel("100%")
@@ -134,8 +149,10 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	spreadSlider.Step = rbxlHeatmapSpreadStep
 	spreadSlider.SetValue(currentHeatSpread)
 	heatModeSelect := widget.NewSelect([]string{
-		string(modelHeatmapModeSizeScaledTriangles),
 		string(modelHeatmapModeTriangles),
+		string(modelHeatmapModeTexture),
+		string(modelHeatmapModeSizeScaledTriangles),
+		string(modelHeatmapModeSizeScaledTexture),
 	}, nil)
 	heatModeSelect.SetSelected(string(currentHeatMode))
 	backgroundSelect := widget.NewSelect([]string{expandedBackgroundBlack, expandedBackgroundWhite}, nil)
@@ -224,11 +241,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		}
 	}
 	heatModeSelect.OnChanged = func(value string) {
-		selectedMode := modelHeatmapMode(strings.TrimSpace(value))
-		if selectedMode != modelHeatmapModeTriangles {
-			selectedMode = modelHeatmapModeSizeScaledTriangles
-		}
-		currentHeatMode = selectedMode
+		currentHeatMode = normalizedModelHeatmapMode(modelHeatmapMode(strings.TrimSpace(value)))
 		legendLabel.SetText(modelHeatmapLegendText(currentHeatMode))
 		if !loading.Load() {
 			rerenderPreview("Updating heat mode...")
@@ -340,7 +353,30 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 				return
 			}
 
-			renderState, buildErr := buildModelHeatmapRenderState(instances, resolvedMeshes)
+			uniqueTextureRefs := uniqueModelHeatmapTextureReferences(instances)
+			logDebugf("model heatmap: %d unique texture refs across %d mesh instances", len(uniqueTextureRefs), len(instances))
+			resolvedTextures := resolveModelHeatmapTextures(uniqueTextureRefs, func(done int, total int) {
+				fyne.Do(func() {
+					if isCanceled() {
+						return
+					}
+					statusLabel.SetText(fmt.Sprintf("Resolving texture assets... %d/%d", done, total))
+				})
+			}, isCanceled)
+			if isCanceled() {
+				return
+			}
+			resolvedTextureBytes := int64(0)
+			resolvedTextureHits := 0
+			for _, textureData := range resolvedTextures {
+				if textureData.BytesSize > 0 {
+					resolvedTextureHits++
+					resolvedTextureBytes += textureData.BytesSize
+				}
+			}
+			logDebugf("model heatmap: resolved %d/%d textures (%d bytes)", resolvedTextureHits, len(uniqueTextureRefs), resolvedTextureBytes)
+
+			renderState, buildErr := buildModelHeatmapRenderState(instances, resolvedMeshes, resolvedTextures)
 			if buildErr != nil {
 				fyne.Do(func() {
 					if isCanceled() {
@@ -404,7 +440,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 				widget.NewLabel("Background:"),
 				container.NewGridWrap(fyne.NewSize(120, 36), backgroundSelect),
 				widget.NewLabel("Heat Mode:"),
-				container.NewGridWrap(fyne.NewSize(220, 36), heatModeSelect),
+				container.NewGridWrap(fyne.NewSize(280, 36), heatModeSelect),
 				widget.NewLabel("Opacity:"),
 				container.NewGridWrap(fyne.NewSize(220, 36), opacitySlider),
 				opacityValueLabel,
@@ -448,15 +484,43 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 
 func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, refs []positionedRustyAssetToolResult) []modelHeatmapMeshInstance {
 	meshRefsByPath := map[string][]heatmapAssetReference{}
+	textureRefsByPath := map[string][]heatmapAssetReference{}
+	textureSeenKeysByPath := map[string]map[string]struct{}{}
 	for _, ref := range refs {
-		instancePath := reportGenerationMeshTriangleInstanceKey(ref)
+		propertyName := strings.ToLower(strings.TrimSpace(ref.PropertyName))
+		originalInstanceType := ref.InstanceType
+		instancePath, instanceType := reportGenerationRefTarget(ref)
+		instancePath = strings.TrimSpace(instancePath)
 		if instancePath == "" {
 			continue
 		}
-		meshRefsByPath[instancePath] = append(meshRefsByPath[instancePath], heatmapAssetReference{
+		if normalizeReportGenerationInstanceType(instanceType) != "meshpart" {
+			continue
+		}
+		reference := heatmapAssetReference{
 			AssetID:    ref.ID,
 			AssetInput: strings.TrimSpace(ref.RawContent),
-		})
+		}
+		switch {
+		case isReportGenerationMeshContentProperty(propertyName):
+			meshRefsByPath[instancePath] = append(meshRefsByPath[instancePath], reference)
+		case isReportGenerationTextureContentProperty(propertyName),
+			isReportGenerationSurfaceAppearanceProperty(propertyName, originalInstanceType):
+			refKey := scanAssetReferenceKey(reference.AssetID, reference.AssetInput)
+			if refKey == "" || refKey == "0" {
+				continue
+			}
+			seen, ok := textureSeenKeysByPath[instancePath]
+			if !ok {
+				seen = map[string]struct{}{}
+				textureSeenKeysByPath[instancePath] = seen
+			}
+			if _, alreadySeen := seen[refKey]; alreadySeen {
+				continue
+			}
+			seen[refKey] = struct{}{}
+			textureRefsByPath[instancePath] = append(textureRefsByPath[instancePath], reference)
+		}
 	}
 
 	meshPartOccurrence := map[string]int{}
@@ -482,6 +546,10 @@ func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, re
 		if occurrenceIndex < len(refsForPath) {
 			meshReference = refsForPath[occurrenceIndex]
 		}
+		textureRefsForPart := []heatmapAssetReference(nil)
+		if textureRefs := textureRefsByPath[instancePath]; len(textureRefs) > 0 {
+			textureRefsForPart = append([]heatmapAssetReference(nil), textureRefs...)
+		}
 		sizeX := math.Abs(*part.SizeX)
 		sizeY := math.Abs(*part.SizeY)
 		sizeZ := math.Abs(*part.SizeZ)
@@ -491,6 +559,7 @@ func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, re
 		instances = append(instances, modelHeatmapMeshInstance{
 			InstancePath: instancePath,
 			MeshRef:      meshReference,
+			TextureRefs:  textureRefsForPart,
 			CenterX:      *part.CenterX,
 			CenterY:      *part.CenterY,
 			CenterZ:      *part.CenterZ,
@@ -512,6 +581,24 @@ func uniqueModelHeatmapReferences(instances []modelHeatmapMeshInstance) []heatma
 	for _, instance := range instances {
 		key := scanAssetReferenceKey(instance.MeshRef.AssetID, instance.MeshRef.AssetInput)
 		unique[key] = instance.MeshRef
+	}
+	references := make([]heatmapAssetReference, 0, len(unique))
+	for _, reference := range unique {
+		references = append(references, reference)
+	}
+	return references
+}
+
+func uniqueModelHeatmapTextureReferences(instances []modelHeatmapMeshInstance) []heatmapAssetReference {
+	unique := map[string]heatmapAssetReference{}
+	for _, instance := range instances {
+		for _, textureRef := range instance.TextureRefs {
+			if textureRef.AssetID == 0 && strings.TrimSpace(textureRef.AssetInput) == "" {
+				continue
+			}
+			key := scanAssetReferenceKey(textureRef.AssetID, textureRef.AssetInput)
+			unique[key] = textureRef
+		}
 	}
 	references := make([]heatmapAssetReference, 0, len(unique))
 	for _, reference := range unique {
@@ -579,23 +666,81 @@ func resolveModelHeatmapMeshes(references []heatmapAssetReference, onProgress fu
 	return resolved
 }
 
+func resolveModelHeatmapTextures(references []heatmapAssetReference, onProgress func(done int, total int), shouldCancel func() bool) map[string]modelHeatmapResolvedTexture {
+	if len(references) == 0 {
+		return map[string]modelHeatmapResolvedTexture{}
+	}
+
+	jobs := make(chan heatmapAssetReference, len(references))
+	for _, reference := range references {
+		jobs <- reference
+	}
+	close(jobs)
+
+	resolved := make(map[string]modelHeatmapResolvedTexture, len(references))
+	var resolvedMutex sync.Mutex
+	var completed atomic.Int64
+	workerCount := min(runtime.NumCPU(), len(references))
+	if workerCount <= 0 {
+		workerCount = 1
+	}
+
+	var waitGroup sync.WaitGroup
+	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			for reference := range jobs {
+				if shouldCancel != nil && shouldCancel() {
+					return
+				}
+
+				key := scanAssetReferenceKey(reference.AssetID, reference.AssetInput)
+				resolvedTexture := modelHeatmapResolvedTexture{Reference: reference}
+				previewResult, previewErr := loadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
+				if previewErr == nil && previewResult != nil {
+					imageSource := previewResult.Image
+					if imageSource == nil || imageSource.Width <= 0 || imageSource.Height <= 0 || imageSource.BytesSize <= 0 {
+						imageSource = previewResult.Stats
+					}
+					if imageSource != nil && imageSource.Width > 0 && imageSource.Height > 0 {
+						resolvedTexture.Width = imageSource.Width
+						resolvedTexture.Height = imageSource.Height
+						resolvedTexture.BytesSize = int64(imageSource.BytesSize)
+					}
+				}
+
+				resolvedMutex.Lock()
+				resolved[key] = resolvedTexture
+				resolvedMutex.Unlock()
+
+				if onProgress != nil && (shouldCancel == nil || !shouldCancel()) {
+					onProgress(int(completed.Add(1)), len(references))
+				}
+			}
+		}()
+	}
+	waitGroup.Wait()
+	return resolved
+}
+
 func buildModelHeatmapPreviewData(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
-	return buildModelHeatmapPreviewDataWithMode(instances, resolved, rbxlHeatmapDefaultSpread, modelHeatmapModeSizeScaledTriangles)
+	return buildModelHeatmapPreviewDataWithMode(instances, resolved, nil, rbxlHeatmapDefaultSpread, modelHeatmapModeSizeScaledTriangles)
 }
 
 func buildModelHeatmapPreviewDataWithSpread(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, heatSpread float64) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
-	return buildModelHeatmapPreviewDataWithMode(instances, resolved, heatSpread, modelHeatmapModeSizeScaledTriangles)
+	return buildModelHeatmapPreviewDataWithMode(instances, resolved, nil, heatSpread, modelHeatmapModeSizeScaledTriangles)
 }
 
-func buildModelHeatmapPreviewDataWithMode(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, heatSpread float64, heatMode modelHeatmapMode) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
-	renderState, err := buildModelHeatmapRenderState(instances, resolved)
+func buildModelHeatmapPreviewDataWithMode(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, textures map[string]modelHeatmapResolvedTexture, heatSpread float64, heatMode modelHeatmapMode) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
+	renderState, err := buildModelHeatmapRenderState(instances, resolved, textures)
 	if err != nil {
 		return meshPreviewData{}, nil, modelHeatmapSceneSummary{}, err
 	}
 	return buildModelHeatmapPreviewDataFromState(renderState, heatSpread, heatMode)
 }
 
-func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh) (*modelHeatmapRenderState, error) {
+func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, textures map[string]modelHeatmapResolvedTexture) (*modelHeatmapRenderState, error) {
 	summary := modelHeatmapSceneSummary{
 		MeshPartCount: len(instances),
 	}
@@ -604,13 +749,17 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 	}
 
 	type preparedInstance struct {
-		Instance modelHeatmapMeshInstance
-		Mesh     modelHeatmapResolvedMesh
-		Density  float64
+		Instance       modelHeatmapMeshInstance
+		Mesh           modelHeatmapResolvedMesh
+		Density        float64
+		TextureCount   int
+		TextureBytes   int64
+		TextureDensity float64
 	}
 
 	prepared := make([]preparedInstance, 0, len(instances))
 	uniqueRenderedMeshes := map[string]struct{}{}
+	uniqueRenderedTextures := map[string]struct{}{}
 	for _, instance := range instances {
 		key := scanAssetReferenceKey(instance.MeshRef.AssetID, instance.MeshRef.AssetInput)
 		mesh, found := resolved[key]
@@ -624,17 +773,41 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 		}
 		density := modelHeatmapTriangleDensity(instance.SizeX, instance.SizeY, instance.SizeZ, mesh.TriangleCount)
 		summary.MaxDensity = maxModelHeatmapFloat(summary.MaxDensity, density)
+
+		textureCount := 0
+		var textureBytes int64
+		for _, textureRef := range instance.TextureRefs {
+			if textureRef.AssetID == 0 && strings.TrimSpace(textureRef.AssetInput) == "" {
+				continue
+			}
+			textureKey := scanAssetReferenceKey(textureRef.AssetID, textureRef.AssetInput)
+			textureData, textureFound := textures[textureKey]
+			if !textureFound || textureData.BytesSize <= 0 {
+				continue
+			}
+			textureCount++
+			textureBytes += textureData.BytesSize
+			uniqueRenderedTextures[textureKey] = struct{}{}
+		}
+		textureDensity := modelHeatmapTextureDensity(instance.SizeX, instance.SizeY, instance.SizeZ, textureBytes)
+		summary.MaxTextureDensity = maxModelHeatmapFloat(summary.MaxTextureDensity, textureDensity)
+
 		prepared = append(prepared, preparedInstance{
-			Instance: instance,
-			Mesh:     mesh,
-			Density:  density,
+			Instance:       instance,
+			Mesh:           mesh,
+			Density:        density,
+			TextureCount:   textureCount,
+			TextureBytes:   textureBytes,
+			TextureDensity: textureDensity,
 		})
 		summary.RenderedMeshPartCount++
 		summary.TriangleCount += mesh.TriangleCount
 		summary.PreviewTriangleCount += uint32(len(mesh.Preview.RawIndices) / 3)
+		summary.TextureBytes += textureBytes
 		uniqueRenderedMeshes[key] = struct{}{}
 	}
 	summary.UniqueMeshCount = len(uniqueRenderedMeshes)
+	summary.UniqueTextureCount = len(uniqueRenderedTextures)
 	summary.MissingMeshRefCount = summary.MeshPartCount - summary.RenderedMeshPartCount - summary.FailedMeshCount
 	if len(prepared) == 0 {
 		return nil, fmt.Errorf("no MeshParts could be rendered")
@@ -669,6 +842,9 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 			BasisSizeZ:     preparedInstance.Instance.BasisSizeZ,
 			TriangleCount:  preparedInstance.Mesh.TriangleCount,
 			Density:        preparedInstance.Density,
+			TextureCount:   preparedInstance.TextureCount,
+			TextureBytes:   preparedInstance.TextureBytes,
+			TextureDensity: preparedInstance.TextureDensity,
 		})
 	}
 	if len(batches) == 0 {
@@ -704,7 +880,7 @@ func buildModelHeatmapPreviewDataFromState(renderState *modelHeatmapRenderState,
 	summary.MaxHeatValue = 0
 	heatValues := make([]float64, len(renderState.BatchInfos))
 	for i, info := range renderState.BatchInfos {
-		heatValues[i] = modelHeatmapValue(summary.HeatMode, info.Density, info.TriangleCount)
+		heatValues[i] = modelHeatmapValueFromInfo(summary.HeatMode, info)
 		summary.MaxHeatValue = maxModelHeatmapFloat(summary.MaxHeatValue, heatValues[i])
 	}
 
@@ -932,21 +1108,51 @@ func normalizeMeshPreviewSceneBatches(batches []meshPreviewBatchData) {
 }
 
 func modelHeatmapTriangleDensity(sizeX float64, sizeY float64, sizeZ float64, triangleCount uint32) float64 {
-	sizeX = math.Abs(sizeX)
-	sizeY = math.Abs(sizeY)
-	sizeZ = math.Abs(sizeZ)
-	surfaceArea := 2 * ((sizeX * sizeY) + (sizeY * sizeZ) + (sizeX * sizeZ))
+	surfaceArea := modelHeatmapSurfaceArea(sizeX, sizeY, sizeZ)
 	if surfaceArea <= 0 {
 		return 0
 	}
 	return float64(triangleCount) / surfaceArea
 }
 
+func modelHeatmapTextureDensity(sizeX float64, sizeY float64, sizeZ float64, textureBytes int64) float64 {
+	if textureBytes <= 0 {
+		return 0
+	}
+	surfaceArea := modelHeatmapSurfaceArea(sizeX, sizeY, sizeZ)
+	if surfaceArea <= 0 {
+		return 0
+	}
+	return float64(textureBytes) / surfaceArea
+}
+
+func modelHeatmapSurfaceArea(sizeX float64, sizeY float64, sizeZ float64) float64 {
+	sizeX = math.Abs(sizeX)
+	sizeY = math.Abs(sizeY)
+	sizeZ = math.Abs(sizeZ)
+	return 2 * ((sizeX * sizeY) + (sizeY * sizeZ) + (sizeX * sizeZ))
+}
+
 func normalizedModelHeatmapMode(mode modelHeatmapMode) modelHeatmapMode {
-	if mode == modelHeatmapModeTriangles {
-		return modelHeatmapModeTriangles
+	switch mode {
+	case modelHeatmapModeTriangles,
+		modelHeatmapModeTexture,
+		modelHeatmapModeSizeScaledTexture:
+		return mode
 	}
 	return modelHeatmapModeSizeScaledTriangles
+}
+
+func modelHeatmapValueFromInfo(mode modelHeatmapMode, info modelHeatmapBatchInfo) float64 {
+	switch normalizedModelHeatmapMode(mode) {
+	case modelHeatmapModeTriangles:
+		return float64(info.TriangleCount)
+	case modelHeatmapModeTexture:
+		return float64(info.TextureBytes)
+	case modelHeatmapModeSizeScaledTexture:
+		return info.TextureDensity
+	}
+	return info.Density
 }
 
 func modelHeatmapValue(mode modelHeatmapMode, density float64, triangleCount uint32) float64 {
@@ -1017,10 +1223,21 @@ func formatModelHeatmapSummary(summary modelHeatmapSceneSummary) string {
 	if summary.PreviewTriangleCount > 0 && summary.PreviewTriangleCount != summary.TriangleCount {
 		summaryParts = append(summaryParts, fmt.Sprintf("%s preview triangles", formatIntCommas(int64(summary.PreviewTriangleCount))))
 	}
+	if summary.UniqueTextureCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%s unique textures", formatIntCommas(int64(summary.UniqueTextureCount))))
+	}
+	if summary.TextureBytes > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%s texture bytes", formatSizeAuto(int(summary.TextureBytes))))
+	}
 	if summary.MaxHeatValue > 0 {
-		if normalizedModelHeatmapMode(summary.HeatMode) == modelHeatmapModeTriangles {
+		switch normalizedModelHeatmapMode(summary.HeatMode) {
+		case modelHeatmapModeTriangles:
 			summaryParts = append(summaryParts, fmt.Sprintf("max mesh %s tris", formatIntCommas(int64(math.Round(summary.MaxHeatValue)))))
-		} else {
+		case modelHeatmapModeTexture:
+			summaryParts = append(summaryParts, fmt.Sprintf("max mesh texture %s", formatSizeAuto(int(math.Round(summary.MaxHeatValue)))))
+		case modelHeatmapModeSizeScaledTexture:
+			summaryParts = append(summaryParts, fmt.Sprintf("max texture density %s/stud^2", formatSizeAuto(int(math.Round(summary.MaxTextureDensity)))))
+		default:
 			summaryParts = append(summaryParts, fmt.Sprintf("max density %.2f tri/stud^2", summary.MaxDensity))
 		}
 	}
@@ -1031,24 +1248,51 @@ func formatModelHeatmapSummary(summary modelHeatmapSceneSummary) string {
 }
 
 func modelHeatmapLegendText(mode modelHeatmapMode) string {
-	if normalizedModelHeatmapMode(mode) == modelHeatmapModeTriangles {
+	switch normalizedModelHeatmapMode(mode) {
+	case modelHeatmapModeTriangles:
 		return "Blue = low triangle count, red = high triangle count. Heat ignores MeshPart size and uses each mesh's triangle total."
+	case modelHeatmapModeTexture:
+		return "Blue = low texture bytes, red = high texture bytes. Heat uses the total decoded image byte size of each MeshPart's textures."
+	case modelHeatmapModeSizeScaledTexture:
+		return "Blue = low texture density, red = high texture density. Density uses texture bytes per stud² of each MeshPart's bounds."
 	}
-	return "Blue = low triangle density, red = high triangle density. Density uses triangles per stud^2 of each MeshPart's bounds."
+	return "Blue = low triangle density, red = high triangle density. Density uses triangles per stud² of each MeshPart's bounds."
 }
 
 func formatModelHeatmapPartInfo(info modelHeatmapBatchInfo, mode modelHeatmapMode) string {
-	if normalizedModelHeatmapMode(mode) == modelHeatmapModeTriangles {
-		return fmt.Sprintf(
-			"Triangles: %s\nDensity: %.2f tri/stud²",
-			formatIntCommas(int64(info.TriangleCount)),
-			info.Density,
-		)
+	triangleLine := fmt.Sprintf("Triangles: %s", formatIntCommas(int64(info.TriangleCount)))
+	densityLine := fmt.Sprintf("Density: %.2f tri/stud²", info.Density)
+	textureLine := formatModelHeatmapTexturePartInfoLine(info)
+	lines := []string{}
+	switch normalizedModelHeatmapMode(mode) {
+	case modelHeatmapModeTriangles:
+		lines = append(lines, triangleLine, densityLine)
+	case modelHeatmapModeTexture, modelHeatmapModeSizeScaledTexture:
+		if textureLine != "" {
+			lines = append(lines, textureLine)
+		} else {
+			lines = append(lines, "No textures on this MeshPart.")
+		}
+		lines = append(lines, triangleLine, densityLine)
+		return strings.Join(lines, "\n")
+	default:
+		lines = append(lines, densityLine, triangleLine)
+	}
+	if textureLine != "" {
+		lines = append(lines, textureLine)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatModelHeatmapTexturePartInfoLine(info modelHeatmapBatchInfo) string {
+	if info.TextureCount <= 0 {
+		return ""
 	}
 	return fmt.Sprintf(
-		"Density: %.2f tri/stud²\nTriangles: %s",
-		info.Density,
-		formatIntCommas(int64(info.TriangleCount)),
+		"Textures: %d · bytes %s · density %s/stud²",
+		info.TextureCount,
+		formatSizeAuto(int(info.TextureBytes)),
+		formatSizeAuto(int(math.Round(info.TextureDensity))),
 	)
 }
 

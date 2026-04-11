@@ -743,11 +743,28 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		warningBanner.root,
 	)
 	content := container.NewBorder(topControls, nil, nil, nil, explorer.Content())
+	loadSourceAndScan := func(path string) {
+		trimmedPath := strings.TrimSpace(path)
+		if trimmedPath == "" {
+			return
+		}
+		if scanInProgress {
+			requestStopScan()
+		}
+		selectedSourcePath = trimmedPath
+		sourceLabel.SetText(selectedSourcePath)
+		setWarning(materialVariantWarningData{})
+		updateReadyStatus()
+		if scanButton.OnTapped != nil {
+			scanButton.OnTapped()
+		}
+	}
 	fileActions := &scanTabFileActions{
 		ContextKey: options.ScanContextKey,
 		SaveJSON:   saveResultsToJSON,
 		LoadJSON:   loadResultsFromPicker,
 		HandleDrop: handleDroppedURIs,
+		LoadSource: loadSourceAndScan,
 		RecentFiles: func() []string {
 			paths := make([]string, len(recentLoadedFiles))
 			copy(paths, recentLoadedFiles)

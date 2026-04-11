@@ -24,7 +24,7 @@ type scanTabVariant struct {
 
 func newScanTab(
 	window fyne.Window,
-) (fyne.CanvasObject, scanTabFileActionsProvider, []scanTabFileActionsProvider, func(string)) {
+) (fyne.CanvasObject, scanTabFileActionsProvider, []scanTabFileActionsProvider, func(string), func(string)) {
 	folderSingleScan, folderSingleActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:     "No folder selected.",
 		SelectButtonText:         "Select Folder",
@@ -186,7 +186,16 @@ func newScanTab(
 		contentStack,
 	)
 
+	loadRBXLFile := func(path string) {
+		sourceSwitch.SetSelected(scanSourceRBXL)
+		modeSwitch.SetSelected(scanModeSingle)
+		updateVisibleContent()
+		if rbxlSingleActions != nil && rbxlSingleActions.LoadSource != nil {
+			rbxlSingleActions.LoadSource(path)
+		}
+	}
+
 	return content, func() *scanTabFileActions {
 		return currentActions
-	}, providers, selectContext
+	}, providers, selectContext, loadRBXLFile
 }

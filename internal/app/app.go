@@ -35,17 +35,44 @@ func Run() {
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1350, 900))
 
-	reportGenerationContent, loadReportFile := newReportGenerationTab(window)
+	var viewInScanCallback func(string)
+	var viewInHeatmapCallback func(string)
+	reportGenerationContent, loadReportFile := newReportGenerationTab(
+		window,
+		func(path string) {
+			if viewInScanCallback != nil {
+				viewInScanCallback(path)
+			}
+		},
+		func(path string) {
+			if viewInHeatmapCallback != nil {
+				viewInHeatmapCallback(path)
+			}
+		},
+	)
 	reportGenerationTab := container.NewTabItem(tabTitleReportGeneration, reportGenerationContent)
 	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, newSingleAssetTab(window))
-	scanContent, scanFileActions, allScanFileActions, selectScanContext := newScanTab(window)
+	scanContent, scanFileActions, allScanFileActions, selectScanContext, loadScanRBXLFile := newScanTab(window)
 	scanTab := container.NewTabItem(tabTitleScan, scanContent)
-	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, newRBXLHeatmapTab(window))
+	rbxlHeatmapContent, loadHeatmapRBXLFile := newRBXLHeatmapTab(window)
+	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, rbxlHeatmapContent)
 	modelHeatmapTab := container.NewTabItem(tabTitleModelHeatmap, newModelHeatmapTab(window))
 	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, newOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, newImageUploaderTab(window))
 	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, optimizeTab, imageUploaderTab)
 	tabs.Select(reportGenerationTab)
+	viewInScanCallback = func(path string) {
+		tabs.Select(scanTab)
+		if loadScanRBXLFile != nil {
+			loadScanRBXLFile(path)
+		}
+	}
+	viewInHeatmapCallback = func(path string) {
+		tabs.Select(rbxlHeatmapTab)
+		if loadHeatmapRBXLFile != nil {
+			loadHeatmapRBXLFile(path)
+		}
+	}
 	bindMainFileMenu(
 		window,
 		tabs,
@@ -280,25 +307,30 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 
 	if storedCookie != "" {
 		statusLabel.SetText("Auth: Validating...")
-		go func() {
-			validationErr := validateRoblosecurityCookie(storedCookie)
-			fyne.Do(func() {
-				if validationErr != nil {
-					logDebugf("Startup auth validation failed: %s", sanitizeAuthErrorMessage(validationErr))
-					authValidationFailed = true
-					applyAuthIndicator()
-					statusLabel.SetText(fmt.Sprintf("Auth: Expired (%s)", sanitizeAuthErrorMessage(validationErr)))
-					dialog.ShowError(
-						fmt.Errorf("your saved auth cookie is expired or invalid — please update it in the Auth panel below"),
-						window,
-					)
-				} else {
-					logDebugf("Startup auth validation succeeded")
-					authValidationFailed = false
-					applyAuthIndicator()
-				}
-			})
-		}()
+		// Defer until the Fyne driver loop is running, otherwise fyne.Do may
+		// execute inline on the background goroutine and trip the 2.6 thread
+		// check when touching widgets.
+		fyne.CurrentApp().Lifecycle().SetOnStarted(func() {
+			go func() {
+				validationErr := validateRoblosecurityCookie(storedCookie)
+				fyne.Do(func() {
+					if validationErr != nil {
+						logDebugf("Startup auth validation failed: %s", sanitizeAuthErrorMessage(validationErr))
+						authValidationFailed = true
+						applyAuthIndicator()
+						statusLabel.SetText(fmt.Sprintf("Auth: Expired (%s)", sanitizeAuthErrorMessage(validationErr)))
+						dialog.ShowError(
+							fmt.Errorf("your saved auth cookie is expired or invalid — please update it in the Auth panel below"),
+							window,
+						)
+					} else {
+						logDebugf("Startup auth validation succeeded")
+						authValidationFailed = false
+						applyAuthIndicator()
+					}
+				})
+			}()
+		})
 	}
 
 	return container.NewVBox(
