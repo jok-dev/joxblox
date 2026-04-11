@@ -757,7 +757,7 @@ func (view *assetView) showMeshPreview(downloadBytes []byte) {
 			logDebugf("Mesh preview unavailable for asset %d: %s", selectedAssetID, previewErr.Error())
 			view.PreviewImage.Hide()
 			view.MeshPreview.Hide()
-			view.PreviewPlaceholder.SetText("Mesh preview unavailable")
+			view.PreviewPlaceholder.SetText(friendlyMeshPreviewError(previewErr))
 			view.PreviewPlaceholder.Show()
 			view.PreviewContainer.Refresh()
 		})
@@ -791,6 +791,21 @@ func (view *assetView) showImagePreviewFallback(previewResource fyne.Resource) {
 		view.rebuildPreviewVariants()
 	}
 	view.PreviewContainer.Refresh()
+}
+
+func friendlyMeshPreviewError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "unsupported mesh preview format: version") {
+		version := strings.TrimPrefix(msg[strings.Index(msg, "version"):], "version ")
+		return fmt.Sprintf("Mesh preview not supported for v%s meshes (only v7 is supported)", version)
+	}
+	if strings.Contains(msg, "mesh data is empty") {
+		return "Mesh preview failed: file is empty"
+	}
+	if strings.Contains(msg, "binary not found") || strings.Contains(msg, "not found in") {
+		return "Mesh preview failed: asset tool not found"
+	}
+	return fmt.Sprintf("Mesh preview failed: %s", msg)
 }
 
 func formatSizeAuto(bytesSize int) string {

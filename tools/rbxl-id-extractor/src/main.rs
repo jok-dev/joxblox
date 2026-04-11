@@ -93,7 +93,19 @@ struct MapRenderPart {
     size_x: Option<f32>,
     size_y: Option<f32>,
     size_z: Option<f32>,
+    basis_size_x: Option<f32>,
+    basis_size_y: Option<f32>,
+    basis_size_z: Option<f32>,
     yaw_degrees: Option<f32>,
+    rotation_xx: Option<f32>,
+    rotation_xy: Option<f32>,
+    rotation_xz: Option<f32>,
+    rotation_yx: Option<f32>,
+    rotation_yy: Option<f32>,
+    rotation_yz: Option<f32>,
+    rotation_zx: Option<f32>,
+    rotation_zy: Option<f32>,
+    rotation_zz: Option<f32>,
     color_r: Option<u8>,
     color_g: Option<u8>,
     color_b: Option<u8>,
@@ -294,18 +306,112 @@ fn run_mesh_preview(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_mesh_stats(data: &[u8]) -> Result<MeshStatsResult, String> {
+fn parse_mesh_version_and_body(data: &[u8]) -> Result<(String, &[u8]), String> {
     if data.len() < 13 {
         return Err("mesh data too short".to_string());
     }
-
     let version_header =
         std::str::from_utf8(&data[..13]).map_err(|e| format!("invalid mesh header: {}", e))?;
     if !version_header.starts_with("version ") {
         return Err("not a Roblox mesh file".to_string());
     }
     let version = version_header["version ".len()..].trim().to_string();
-    let body = &data[13..];
+    Ok((version, &data[13..]))
+}
+
+struct V4MeshData {
+    num_verts: u32,
+    num_faces: u32,
+    positions: Vec<f32>,
+    indices: Vec<u32>,
+}
+
+fn parse_v4_mesh_body(body: &[u8], version: &str) -> Result<V4MeshData, String> {
+    if body.len() < 16 {
+        return Err(format!("v{} mesh body too short for header", version));
+    }
+    let sizeof_header = u16::from_le_bytes([body[0], body[1]]) as usize;
+    let num_verts = u32::from_le_bytes([body[4], body[5], body[6], body[7]]);
+    let num_faces = u32::from_le_bytes([body[8], body[9], body[10], body[11]]);
+    let num_lod_offsets = u16::from_le_bytes([body[12], body[13]]) as usize;
+    let num_bones = u16::from_le_bytes([body[14], body[15]]) as usize;
+
+    const VERTEX_STRIDE: usize = 40;
+    const FACE_STRIDE: usize = 12;
+    let skinning_stride: usize = if num_bones > 0 { 8 } else { 0 };
+    let skinning_size = (num_verts as usize) * skinning_stride;
+
+    let vertex_start = sizeof_header;
+    let vertex_end = vertex_start + (num_verts as usize) * VERTEX_STRIDE;
+    let face_start = vertex_end + skinning_size;
+    let face_end = face_start + (num_faces as usize) * FACE_STRIDE;
+
+    if body.len() < face_end {
+        return Err(format!(
+            "v{} mesh data truncated: need {} bytes, have {}",
+            version,
+            face_end,
+            body.len()
+        ));
+    }
+
+    let lod0_faces = if num_lod_offsets >= 2 && sizeof_header >= 24 {
+        let lod_table_start = face_end;
+        if body.len() >= lod_table_start + 8 {
+            let lod0_start = u32::from_le_bytes(
+                body[lod_table_start..lod_table_start + 4]
+                    .try_into()
+                    .unwrap(),
+            );
+            let lod0_end = u32::from_le_bytes(
+                body[lod_table_start + 4..lod_table_start + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            if lod0_start == 0 && lod0_end > 0 && lod0_end <= num_faces {
+                lod0_end
+            } else {
+                num_faces
+            }
+        } else {
+            num_faces
+        }
+    } else {
+        num_faces
+    };
+
+    let mut positions = Vec::with_capacity(num_verts as usize * 3);
+    for i in 0..num_verts as usize {
+        let off = vertex_start + i * VERTEX_STRIDE;
+        let x = f32::from_le_bytes(body[off..off + 4].try_into().unwrap());
+        let y = f32::from_le_bytes(body[off + 4..off + 8].try_into().unwrap());
+        let z = f32::from_le_bytes(body[off + 8..off + 12].try_into().unwrap());
+        positions.push(x);
+        positions.push(y);
+        positions.push(z);
+    }
+
+    let mut indices = Vec::with_capacity(lod0_faces as usize * 3);
+    for i in 0..lod0_faces as usize {
+        let off = face_start + i * FACE_STRIDE;
+        let a = u32::from_le_bytes(body[off..off + 4].try_into().unwrap());
+        let b = u32::from_le_bytes(body[off + 4..off + 8].try_into().unwrap());
+        let c = u32::from_le_bytes(body[off + 8..off + 12].try_into().unwrap());
+        indices.push(a);
+        indices.push(b);
+        indices.push(c);
+    }
+
+    Ok(V4MeshData {
+        num_verts,
+        num_faces: lod0_faces,
+        positions,
+        indices,
+    })
+}
+
+fn parse_mesh_stats(data: &[u8]) -> Result<MeshStatsResult, String> {
+    let (version, body) = parse_mesh_version_and_body(data)?;
 
     if version == "7.00" && body.starts_with(b"COREMESH") {
         let draco_start =
@@ -323,6 +429,16 @@ fn parse_mesh_stats(data: &[u8]) -> Result<MeshStatsResult, String> {
         });
     }
 
+    if matches!(version.as_str(), "4.00" | "4.01" | "5.00") {
+        let mesh = parse_v4_mesh_body(body, &version)?;
+        return Ok(MeshStatsResult {
+            format_version: version,
+            decoder_source: "binary".to_string(),
+            vertex_count: mesh.num_verts,
+            triangle_count: mesh.num_faces,
+        });
+    }
+
     Err(format!(
         "unsupported mesh stats format: version {}",
         version
@@ -333,17 +449,7 @@ fn parse_mesh_preview(
     data: &[u8],
     max_triangles: Option<usize>,
 ) -> Result<MeshPreviewResult, String> {
-    if data.len() < 13 {
-        return Err("mesh data too short".to_string());
-    }
-
-    let version_header =
-        std::str::from_utf8(&data[..13]).map_err(|e| format!("invalid mesh header: {}", e))?;
-    if !version_header.starts_with("version ") {
-        return Err("not a Roblox mesh file".to_string());
-    }
-    let version = version_header["version ".len()..].trim().to_string();
-    let body = &data[13..];
+    let (version, body) = parse_mesh_version_and_body(data)?;
 
     if version == "7.00" && body.starts_with(b"COREMESH") {
         let draco_start =
@@ -361,6 +467,20 @@ fn parse_mesh_preview(
             triangle_count: (all_indices.len() / 3) as u32,
             preview_triangle_count: (preview_indices.len() / 3) as u32,
             positions,
+            indices: preview_indices,
+        });
+    }
+
+    if matches!(version.as_str(), "4.00" | "4.01" | "5.00") {
+        let mesh = parse_v4_mesh_body(body, &version)?;
+        let preview_indices = limit_triangle_indices(&mesh.indices, max_triangles);
+        return Ok(MeshPreviewResult {
+            format_version: version,
+            decoder_source: "binary".to_string(),
+            vertex_count: mesh.num_verts,
+            triangle_count: mesh.num_faces,
+            preview_triangle_count: (preview_indices.len() / 3) as u32,
+            positions: mesh.positions,
             indices: preview_indices,
         });
     }
@@ -1507,6 +1627,9 @@ fn extract_map_render_part(instance: &Instance, instance_path: &str) -> Option<M
     if size.x <= 0.0 || size.z <= 0.0 {
         return None;
     }
+    let basis_size = find_property_value(instance, &["initialsize", "meshsize"])
+        .and_then(variant_to_vector3)
+        .unwrap_or(size);
 
     let (color_r, color_g, color_b) = find_property_value(instance, &["color"])
         .and_then(variant_to_color_rgb)
@@ -1536,7 +1659,19 @@ fn extract_map_render_part(instance: &Instance, instance_path: &str) -> Option<M
         size_x: Some(size.x),
         size_y: Some(size.y),
         size_z: Some(size.z),
+        basis_size_x: Some(basis_size.x),
+        basis_size_y: Some(basis_size.y),
+        basis_size_z: Some(basis_size.z),
         yaw_degrees: Some(yaw_degrees),
+        rotation_xx: Some(cframe.orientation.x.x),
+        rotation_xy: Some(cframe.orientation.x.y),
+        rotation_xz: Some(cframe.orientation.x.z),
+        rotation_yx: Some(cframe.orientation.y.x),
+        rotation_yy: Some(cframe.orientation.y.y),
+        rotation_yz: Some(cframe.orientation.y.z),
+        rotation_zx: Some(cframe.orientation.z.x),
+        rotation_zy: Some(cframe.orientation.z.y),
+        rotation_zz: Some(cframe.orientation.z.z),
         color_r: Some(color_r),
         color_g: Some(color_g),
         color_b: Some(color_b),
@@ -1562,6 +1697,11 @@ fn is_supported_map_part_class(instance_class: &str) -> bool {
 fn variant_to_vector3(value: &Variant) -> Option<rbx_types::Vector3> {
     match value {
         Variant::Vector3(vector) => Some(*vector),
+        Variant::Vector3int16(vector) => Some(rbx_types::Vector3 {
+            x: vector.x as f32,
+            y: vector.y as f32,
+            z: vector.z as f32,
+        }),
         _ => None,
     }
 }
@@ -1978,5 +2118,93 @@ mod tests {
             references[0].property_name,
             "MaterialVariant.ColorMapContent"
         );
+    }
+
+    fn build_v4_mesh(
+        num_verts: u32,
+        num_faces: u32,
+        num_bones: u16,
+        lod_offsets: &[u32],
+    ) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"version 4.01\n");
+        let num_lod_offsets = lod_offsets.len() as u16;
+        let sizeof_header: u16 = 24;
+        data.extend_from_slice(&sizeof_header.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes()); // lodType
+        data.extend_from_slice(&num_verts.to_le_bytes());
+        data.extend_from_slice(&num_faces.to_le_bytes());
+        data.extend_from_slice(&num_lod_offsets.to_le_bytes());
+        data.extend_from_slice(&num_bones.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes()); // padding to sizeof_header=24
+        data.extend_from_slice(&0u32.to_le_bytes());
+        // vertex data: 40 bytes each (pos xyz = 12 bytes + 28 bytes padding)
+        for i in 0..num_verts {
+            let x = (i as f32) * 0.5;
+            let y = (i as f32) * 1.0;
+            let z = (i as f32) * -0.5;
+            data.extend_from_slice(&x.to_le_bytes());
+            data.extend_from_slice(&y.to_le_bytes());
+            data.extend_from_slice(&z.to_le_bytes());
+            data.extend_from_slice(&[0u8; 28]); // normal+uv+tangent+color
+        }
+        // skinning data
+        if num_bones > 0 {
+            for _ in 0..num_verts {
+                data.extend_from_slice(&[0u8; 8]);
+            }
+        }
+        // face data: 12 bytes each (3 x u32)
+        for i in 0..num_faces {
+            let base = i * 3;
+            data.extend_from_slice(&base.to_le_bytes());
+            data.extend_from_slice(&(base + 1).to_le_bytes());
+            data.extend_from_slice(&(base + 2).to_le_bytes());
+        }
+        // LOD offsets
+        for offset in lod_offsets {
+            data.extend_from_slice(&offset.to_le_bytes());
+        }
+        data
+    }
+
+    #[test]
+    fn parse_v4_mesh_preview_extracts_positions_and_indices() {
+        let data = build_v4_mesh(3, 1, 0, &[]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.format_version, "4.01");
+        assert_eq!(result.decoder_source, "binary");
+        assert_eq!(result.vertex_count, 3);
+        assert_eq!(result.triangle_count, 1);
+        assert_eq!(result.positions.len(), 9);
+        assert_eq!(result.indices, vec![0, 1, 2]);
+        assert!((result.positions[0] - 0.0).abs() < 1e-6);
+        assert!((result.positions[3] - 0.5).abs() < 1e-6);
+        assert!((result.positions[6] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_v4_mesh_preview_respects_lod0() {
+        let data = build_v4_mesh(9, 3, 0, &[0, 2, 3]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.triangle_count, 2);
+        assert_eq!(result.indices.len(), 6);
+    }
+
+    #[test]
+    fn parse_v4_mesh_stats_returns_counts() {
+        let data = build_v4_mesh(6, 2, 0, &[]);
+        let result = parse_mesh_stats(&data).expect("parse_mesh_stats failed");
+        assert_eq!(result.vertex_count, 6);
+        assert_eq!(result.triangle_count, 2);
+    }
+
+    #[test]
+    fn parse_v4_mesh_with_bones() {
+        let data = build_v4_mesh(3, 1, 2, &[]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.vertex_count, 3);
+        assert_eq!(result.triangle_count, 1);
+        assert_eq!(result.indices, vec![0, 1, 2]);
     }
 }

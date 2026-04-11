@@ -17,8 +17,8 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 
 	view := newAssetView("No image loaded", false)
 	view.currentMeshPreviewData = meshPreviewData{
-		Positions: []meshPreviewVector{{X: 0, Y: 0, Z: 0}},
-		Indices:   []uint32{0, 0, 0},
+		RawPositions: []float32{0, 0, 0},
+		RawIndices:   []uint32{0, 0, 0},
 	}
 
 	textureBytes := mustEncodePNG(t)
@@ -46,7 +46,7 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 		DownloadIsOriginal: true,
 	})
 
-	if len(view.currentMeshPreviewData.Positions) != 0 || len(view.currentMeshPreviewData.Indices) != 0 {
+	if len(view.currentMeshPreviewData.RawPositions) != 0 || len(view.currentMeshPreviewData.RawIndices) != 0 {
 		t.Fatalf("expected stale mesh preview state to be cleared for texture assets")
 	}
 	if view.MeshPreview.Visible() {

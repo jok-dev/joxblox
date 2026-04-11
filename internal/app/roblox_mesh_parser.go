@@ -187,7 +187,11 @@ func isMeshAssetType(assetTypeID int) bool {
 }
 
 func formatMeshInfo(info meshHeaderInfo) string {
-	return fmt.Sprintf("%s triangles · %s vertices", formatIntCommas(int64(info.NumFaces)), formatIntCommas(int64(info.NumVerts)))
+	version := info.Version
+	if version == "" {
+		version = "?"
+	}
+	return fmt.Sprintf("v%s · %s triangles · %s vertices", version, formatIntCommas(int64(info.NumFaces)), formatIntCommas(int64(info.NumVerts)))
 }
 
 func formatIntCommas(n int64) string {

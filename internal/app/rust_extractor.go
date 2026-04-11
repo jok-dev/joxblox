@@ -59,7 +59,19 @@ type mapRenderPartRustyAssetToolResult struct {
 	SizeX        *float64 `json:"sizeX,omitempty"`
 	SizeY        *float64 `json:"sizeY,omitempty"`
 	SizeZ        *float64 `json:"sizeZ,omitempty"`
+	BasisSizeX   *float64 `json:"basisSizeX,omitempty"`
+	BasisSizeY   *float64 `json:"basisSizeY,omitempty"`
+	BasisSizeZ   *float64 `json:"basisSizeZ,omitempty"`
 	YawDegrees   *float64 `json:"yawDegrees,omitempty"`
+	RotationXX   *float64 `json:"rotationXx,omitempty"`
+	RotationXY   *float64 `json:"rotationXy,omitempty"`
+	RotationXZ   *float64 `json:"rotationXz,omitempty"`
+	RotationYX   *float64 `json:"rotationYx,omitempty"`
+	RotationYY   *float64 `json:"rotationYy,omitempty"`
+	RotationYZ   *float64 `json:"rotationYz,omitempty"`
+	RotationZX   *float64 `json:"rotationZx,omitempty"`
+	RotationZY   *float64 `json:"rotationZy,omitempty"`
+	RotationZZ   *float64 `json:"rotationZz,omitempty"`
 	ColorR       *int     `json:"colorR,omitempty"`
 	ColorG       *int     `json:"colorG,omitempty"`
 	ColorB       *int     `json:"colorB,omitempty"`
@@ -512,6 +524,10 @@ func extractMeshStatsWithRustyAssetToolFromFile(filePath string) (meshHeaderInfo
 }
 
 func extractMeshPreviewWithRustyAssetToolFromBytes(fileBytes []byte) (meshPreviewData, error) {
+	return extractMeshPreviewWithRustyAssetToolFromBytesWithLimit(fileBytes, maxMeshPreviewTriangles)
+}
+
+func extractMeshPreviewWithRustyAssetToolFromBytesWithLimit(fileBytes []byte, maxTriangles int) (meshPreviewData, error) {
 	if len(fileBytes) == 0 {
 		return meshPreviewData{}, fmt.Errorf("mesh data is empty")
 	}
@@ -534,31 +550,38 @@ func extractMeshPreviewWithRustyAssetToolFromBytes(fileBytes []byte) (meshPrevie
 		return meshPreviewData{}, closeErr
 	}
 
-	return extractMeshPreviewWithRustyAssetToolFromFile(tempFilePath)
+	return extractMeshPreviewWithRustyAssetToolFromFileWithLimit(tempFilePath, maxTriangles)
 }
 
 func extractMeshPreviewWithRustyAssetToolFromFile(filePath string) (meshPreviewData, error) {
+	return extractMeshPreviewWithRustyAssetToolFromFileWithLimit(filePath, maxMeshPreviewTriangles)
+}
+
+func extractMeshPreviewWithRustyAssetToolFromFileWithLimit(filePath string, maxTriangles int) (meshPreviewData, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return meshPreviewData{}, fmt.Errorf("mesh file path is empty")
+	}
+	if maxTriangles <= 0 {
+		maxTriangles = maxMeshPreviewTriangles
 	}
 
 	commandName := ""
 	commandArgs := []string{}
 	if bundledBinaryPath, bundledErr := prepareBundledRustyAssetToolBinary(); bundledErr == nil {
 		commandName = bundledBinaryPath
-		commandArgs = []string{"mesh-preview", filePath, strconv.Itoa(maxMeshPreviewTriangles)}
+		commandArgs = []string{"mesh-preview", filePath, strconv.Itoa(maxTriangles)}
 	} else if !errors.Is(bundledErr, errBundledRustyAssetToolUnavailable) {
 		return meshPreviewData{}, bundledErr
 	} else if binaryPath, found := findRustyAssetToolBinaryPath(); found {
 		commandName = binaryPath
-		commandArgs = []string{"mesh-preview", filePath, strconv.Itoa(maxMeshPreviewTriangles)}
+		commandArgs = []string{"mesh-preview", filePath, strconv.Itoa(maxTriangles)}
 	} else {
 		toolDirectoryPath, cargoManifestPath, found := findRustyAssetToolCargoManifestPath()
 		if !found {
 			return meshPreviewData{}, fmt.Errorf("Rusty Asset Tool unavailable: bundled binary not found")
 		}
 		commandName = "cargo"
-		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", "mesh-preview", filePath, strconv.Itoa(maxMeshPreviewTriangles)}
+		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", "mesh-preview", filePath, strconv.Itoa(maxTriangles)}
 		logDebugf("Using cargo run for Rusty Asset Tool mesh preview extraction from %s", toolDirectoryPath)
 	}
 

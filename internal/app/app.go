@@ -41,9 +41,10 @@ func Run() {
 	scanContent, scanFileActions, allScanFileActions, selectScanContext := newScanTab(window)
 	scanTab := container.NewTabItem(tabTitleScan, scanContent)
 	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, newRBXLHeatmapTab(window))
+	modelHeatmapTab := container.NewTabItem(tabTitleModelHeatmap, newModelHeatmapTab(window))
 	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, newOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, newImageUploaderTab(window))
-	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, optimizeTab, imageUploaderTab)
+	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, optimizeTab, imageUploaderTab)
 	tabs.Select(reportGenerationTab)
 	bindMainFileMenu(
 		window,

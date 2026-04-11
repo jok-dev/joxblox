@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	preferenceKeyAssetDownloadCacheEnabled = "settings.asset_download_cache.enabled"
-	preferenceKeyAssetDownloadCacheFolder  = "settings.asset_download_cache.folder"
+	preferenceKeyAssetDownloadCacheEnabled  = "settings.asset_download_cache.enabled"
+	preferenceKeyAssetDownloadCacheFolder   = "settings.asset_download_cache.folder"
+	preferenceKeyMeshPreviewLookSensitivity = "settings.mesh_preview.look_sensitivity"
 )
 
 type assetDownloadCacheSettings struct {
@@ -83,6 +84,29 @@ func validateAssetDownloadCacheSettings(settings assetDownloadCacheSettings) (as
 	return normalizedSettings, nil
 }
 
+func loadMeshPreviewMouseLookSensitivity() float64 {
+	currentApp := fyne.CurrentApp()
+	if currentApp == nil {
+		return meshPreviewDefaultMouseLookSensitivity
+	}
+	stored := currentApp.Preferences().Float(preferenceKeyMeshPreviewLookSensitivity)
+	if stored <= 0 {
+		return meshPreviewDefaultMouseLookSensitivity
+	}
+	return clampFloat64(stored, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
+}
+
+func saveMeshPreviewMouseLookSensitivity(value float64) error {
+	currentApp := fyne.CurrentApp()
+	if currentApp == nil {
+		return fmt.Errorf("application preferences are unavailable")
+	}
+	normalized := clampFloat64(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
+	currentApp.Preferences().SetFloat(preferenceKeyMeshPreviewLookSensitivity, normalized)
+	logDebugf("Settings saved (mesh_preview_look_sensitivity=%f)", normalized)
+	return nil
+}
+
 func calculateDirectorySize(folderPath string) (int64, error) {
 	trimmedPath := strings.TrimSpace(folderPath)
 	if trimmedPath == "" {
@@ -119,6 +143,7 @@ func calculateDirectorySize(folderPath string) (int64, error) {
 
 func showSettingsDialog(window fyne.Window) {
 	currentSettings := loadAssetDownloadCacheSettings()
+	currentLookSensitivity := loadMeshPreviewMouseLookSensitivity()
 
 	cacheEnabledCheck := widget.NewCheck("Enable asset download cache", nil)
 	cacheEnabledCheck.SetChecked(currentSettings.Enabled)
@@ -134,6 +159,14 @@ func showSettingsDialog(window fyne.Window) {
 
 	cacheFolderSizeLabel := widget.NewLabel("Current folder size: -")
 	cacheFolderSizeLabel.Wrapping = fyne.TextWrapWord
+
+	lookSensitivityValueLabel := widget.NewLabel(fmt.Sprintf("%.4f", currentLookSensitivity))
+	lookSensitivitySlider := widget.NewSlider(meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
+	lookSensitivitySlider.Step = meshPreviewMouseLookSensitivityStep
+	lookSensitivitySlider.SetValue(currentLookSensitivity)
+	lookSensitivitySlider.OnChanged = func(value float64) {
+		lookSensitivityValueLabel.SetText(fmt.Sprintf("%.4f", clampFloat64(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)))
+	}
 
 	statusLabel := widget.NewLabel("")
 	statusLabel.Wrapping = fyne.TextWrapWord
@@ -196,6 +229,15 @@ func showSettingsDialog(window fyne.Window) {
 	formContent := container.NewVBox(
 		cacheEnabledCheck,
 		widget.NewSeparator(),
+		widget.NewLabel("3D Preview Mouse Look Sensitivity"),
+		container.NewBorder(
+			nil,
+			nil,
+			nil,
+			lookSensitivityValueLabel,
+			lookSensitivitySlider,
+		),
+		widget.NewSeparator(),
 		widget.NewLabel("Cache Folder"),
 		folderRow,
 		cacheWarningLabel,
@@ -216,6 +258,10 @@ func showSettingsDialog(window fyne.Window) {
 			Folder:  cacheFolderEntry.Text,
 		}
 		if err := saveAssetDownloadCacheSettings(nextSettings); err != nil {
+			statusLabel.SetText(err.Error())
+			return
+		}
+		if err := saveMeshPreviewMouseLookSensitivity(lookSensitivitySlider.Value); err != nil {
 			statusLabel.SetText(err.Error())
 			return
 		}

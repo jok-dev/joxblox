@@ -207,7 +207,7 @@ func findOptionIndex(options []previewDownloadOption, label string) int {
 }
 
 func (view *assetView) showExpandedImageWindow() {
-	if view.MeshPreview.Visible() && len(view.currentMeshPreviewData.Positions) > 0 && len(view.currentMeshPreviewData.Indices) > 0 {
+	if view.MeshPreview.Visible() && len(view.currentMeshPreviewData.RawPositions) > 0 && len(view.currentMeshPreviewData.RawIndices) > 0 {
 		view.showExpandedMeshWindow()
 		return
 	}
@@ -326,6 +326,7 @@ func (view *assetView) showExpandedMeshWindow() {
 
 	meshWindow := guiApp.NewWindow(fmt.Sprintf("Asset %d Model", view.currentAssetID))
 	meshViewer := newMeshPreviewWidget()
+	meshViewer.SetFocusCanvas(meshWindow.Canvas())
 	meshViewer.SetData(view.currentMeshPreviewData)
 	backgroundSelect := widget.NewSelect([]string{expandedBackgroundBlack, expandedBackgroundWhite}, nil)
 	backgroundSelect.SetSelected(expandedBackgroundBlack)
@@ -347,15 +348,16 @@ func (view *assetView) showExpandedMeshWindow() {
 	}
 	topBar := container.NewHBox(
 		widget.NewLabel(meshInfoText),
-		layout.NewSpacer(),
-		widget.NewLabel("Drag to rotate, scroll to zoom"),
-	)
-	bottomBar := container.NewHBox(
 		widget.NewLabel("View Background:"),
 		container.NewGridWrap(fyne.NewSize(120, 36), backgroundSelect),
+		layout.NewSpacer(),
+		widget.NewLabel(meshPreviewControlsText()),
 	)
-	meshWindow.SetContent(container.NewBorder(topBar, bottomBar, nil, nil, container.NewPadded(meshViewer)))
+	meshWindow.SetContent(container.NewBorder(topBar, nil, nil, nil, meshViewer))
 	meshWindow.Resize(fyne.NewSize(980, 760))
+	meshWindow.SetOnClosed(func() {
+		meshViewer.Clear()
+	})
 	meshWindow.Show()
 	go func() {
 		for attempt := 0; attempt < 12; attempt++ {
