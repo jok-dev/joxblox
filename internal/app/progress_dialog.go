@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	"joxblox/internal/format"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -45,7 +47,7 @@ func (progress *progressDialog) Update(value float64, message string) {
 	if nextMessage == "" {
 		nextMessage = progress.lastText
 	}
-	nextValue := clampProgressValue(value)
+	nextValue := format.Clamp(value, 0.0, 1.0)
 	nextStep := int(nextValue * 1000)
 	if nextMessage == progress.lastText && nextStep == progress.lastStep {
 		return
@@ -67,23 +69,12 @@ func (progress *progressDialog) Hide() {
 	})
 }
 
-func clampProgressValue(value float64) float64 {
-	switch {
-	case value < 0:
-		return 0
-	case value > 1:
-		return 1
-	default:
-		return value
-	}
-}
-
 func progressRangeReporter(progress *progressDialog, start float64, end float64, message string) func(float64) {
 	return func(value float64) {
 		if progress == nil {
 			return
 		}
-		clampedValue := clampProgressValue(value)
+		clampedValue := format.Clamp(value, 0.0, 1.0)
 		progress.Update(start+((end-start)*clampedValue), message)
 	}
 }

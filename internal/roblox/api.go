@@ -1,4 +1,4 @@
-package app
+package roblox
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"joxblox/internal/debug"
 )
 
 const (
@@ -19,13 +21,13 @@ const (
 	robloxAuthenticatedUserURL  = "https://users.roblox.com/v1/users/authenticated"
 )
 
-type httpRateLimitPolicy struct {
+type HttpRateLimitPolicy struct {
 	InitialBackoff time.Duration
 	MaxBackoff     time.Duration
 	MaxRetries     int
 }
 
-var defaultHTTPRateLimitPolicy = httpRateLimitPolicy{
+var defaultHTTPRateLimitPolicy = HttpRateLimitPolicy{
 	InitialBackoff: 2 * time.Second,
 	MaxBackoff:     30 * time.Second,
 	MaxRetries:     0,
@@ -38,19 +40,19 @@ var sharedHTTPRateLimitState = struct {
 	blockedUntilByScope: map[string]time.Time{},
 }
 
-func doRobloxAuthenticatedGet(urlString string, timeout time.Duration) (*http.Response, error) {
-	return doRobloxRequest(http.MethodGet, urlString, nil, GetRoblosecurityCookieHeader(), timeout, nil)
+func DoAuthenticatedGet(urlString string, timeout time.Duration) (*http.Response, error) {
+	return DoRequest(http.MethodGet, urlString, nil, GetRoblosecurityCookieHeader(), timeout, nil)
 }
 
-func doRobloxGetWithCookie(urlString string, cookieHeader string, timeout time.Duration) (*http.Response, error) {
-	return doRobloxRequest(http.MethodGet, urlString, nil, cookieHeader, timeout, nil)
+func DoGetWithCookie(urlString string, cookieHeader string, timeout time.Duration) (*http.Response, error) {
+	return DoRequest(http.MethodGet, urlString, nil, cookieHeader, timeout, nil)
 }
 
-func doRobloxRequest(method string, urlString string, body io.Reader, cookieHeader string, timeout time.Duration, headers map[string]string) (*http.Response, error) {
-	return doRobloxRequestWithRateLimitPolicy(method, urlString, body, cookieHeader, timeout, headers, defaultHTTPRateLimitPolicy)
+func DoRequest(method string, urlString string, body io.Reader, cookieHeader string, timeout time.Duration, headers map[string]string) (*http.Response, error) {
+	return DoRequestWithRateLimitPolicy(method, urlString, body, cookieHeader, timeout, headers, defaultHTTPRateLimitPolicy)
 }
 
-func doRobloxRequestWithRateLimitPolicy(method string, urlString string, body io.Reader, cookieHeader string, timeout time.Duration, headers map[string]string, policy httpRateLimitPolicy) (*http.Response, error) {
+func DoRequestWithRateLimitPolicy(method string, urlString string, body io.Reader, cookieHeader string, timeout time.Duration, headers map[string]string, policy HttpRateLimitPolicy) (*http.Response, error) {
 	var bodyBytes []byte
 	if body != nil {
 		var readErr error
@@ -106,7 +108,7 @@ func doRobloxRequestWithRateLimitPolicy(method string, urlString string, body io
 		response.Body.Close()
 		blockSharedHTTPRateLimitScope(rateLimitScopeKey, backoffDuration)
 		if unlimitedRetries {
-			logDebugf(
+			debug.Logf(
 				"HTTP 429 on %s %s, blocking scope %s for %v (attempt %d)",
 				method,
 				urlString,
@@ -115,7 +117,7 @@ func doRobloxRequestWithRateLimitPolicy(method string, urlString string, body io
 				attempt+1,
 			)
 		} else {
-			logDebugf(
+			debug.Logf(
 				"HTTP 429 on %s %s, blocking scope %s for %v (attempt %d/%d)",
 				method,
 				urlString,
@@ -217,12 +219,12 @@ func resolveHTTPRateLimitBackoff(response *http.Response, fallback time.Duration
 	return defaultHTTPRateLimitPolicy.InitialBackoff
 }
 
-func doRobloxThumbnailGet(assetID int64, timeout time.Duration) (*http.Response, error) {
-	return doRobloxAuthenticatedGet(fmt.Sprintf(robloxThumbnailURLTemplate, assetID), timeout)
+func DoThumbnailGet(assetID int64, timeout time.Duration) (*http.Response, error) {
+	return DoAuthenticatedGet(fmt.Sprintf(robloxThumbnailURLTemplate, assetID), timeout)
 }
 
-func doRobloxThumbnailBatchPost(body io.Reader, timeout time.Duration) (*http.Response, error) {
-	return doRobloxRequest(
+func DoThumbnailBatchPost(body io.Reader, timeout time.Duration) (*http.Response, error) {
+	return DoRequest(
 		http.MethodPost,
 		robloxThumbnailBatchURL,
 		body,
@@ -234,14 +236,14 @@ func doRobloxThumbnailBatchPost(body io.Reader, timeout time.Duration) (*http.Re
 	)
 }
 
-func doRobloxAssetDeliveryGet(assetID int64, timeout time.Duration) (*http.Response, error) {
-	return doRobloxAuthenticatedGet(fmt.Sprintf(robloxAssetDeliveryURLBase, assetID), timeout)
+func DoAssetDeliveryGet(assetID int64, timeout time.Duration) (*http.Response, error) {
+	return DoAuthenticatedGet(fmt.Sprintf(robloxAssetDeliveryURLBase, assetID), timeout)
 }
 
-func doRobloxEconomyDetailsGet(assetID int64, timeout time.Duration) (*http.Response, error) {
-	return doRobloxAuthenticatedGet(fmt.Sprintf(robloxEconomyDetailsURLBase, assetID), timeout)
+func DoEconomyDetailsGet(assetID int64, timeout time.Duration) (*http.Response, error) {
+	return DoAuthenticatedGet(fmt.Sprintf(robloxEconomyDetailsURLBase, assetID), timeout)
 }
 
-func doRobloxAuthenticatedUserGet(cookieHeader string, timeout time.Duration) (*http.Response, error) {
-	return doRobloxGetWithCookie(robloxAuthenticatedUserURL, cookieHeader, timeout)
+func DoAuthenticatedUserGet(cookieHeader string, timeout time.Duration) (*http.Response, error) {
+	return DoGetWithCookie(robloxAuthenticatedUserURL, cookieHeader, timeout)
 }

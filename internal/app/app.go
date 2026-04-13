@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"joxblox/internal/debug"
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -20,13 +23,13 @@ import (
 const (
 	previewWidth  = 440
 	previewHeight = 300
-	megabyte      = 1024 * 1024
 )
 
 //go:embed app_icon.svg
 var appIconSVG []byte
 
 func Run() {
+	debug.Logf = logDebugf
 	initializeDebugLogFile()
 	guiApp := app.New()
 	appIcon := fyne.NewStaticResource("app_icon.svg", appIconSVG)
@@ -159,7 +162,7 @@ func Run() {
 		window.SetContent(fynetooltip.AddWindowToolTipLayer(collapsedLayout, window.Canvas()))
 	}
 	setLayoutMode(false)
-	logDebugf("Application started")
+	debug.Logf("Application started")
 	window.ShowAndRun()
 }
 
@@ -179,7 +182,7 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 			statusDot.Refresh()
 			return
 		}
-		if IsAuthenticationEnabled() {
+		if roblox.IsAuthenticationEnabled() {
 			if isAuthSaved {
 				statusLabel.SetText("Auth: Saved")
 			} else {
@@ -212,52 +215,52 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 
 	applyButton := widget.NewButton("Apply Auth", func() {
 		authValidationFailed = false
-		normalizedCookie := normalizeRoblosecurityCookie(cookieEntry.Text)
-		if normalizedCookie == "" {
-			logDebugf("Auth cookie cleared via Apply Auth")
-			ClearRoblosecurityCookie()
+		rawCookie := strings.TrimSpace(cookieEntry.Text)
+		if rawCookie == "" {
+			debug.Logf("Auth cookie cleared via Apply Auth")
+			roblox.ClearRoblosecurityCookie()
 			isAuthSaved = false
-			_ = DeleteRoblosecurityCookieFromKeyring()
+			_ = roblox.DeleteRoblosecurityCookieFromKeyring()
 			rememberAuthCheck.SetChecked(false)
 			applyAuthIndicator()
 			return
 		}
 
-		validationErr := validateRoblosecurityCookie(normalizedCookie)
+		validationErr := roblox.ValidateRoblosecurityCookie(rawCookie)
 		if validationErr != nil {
-			logDebugf("Auth validation failed: %s", sanitizeAuthErrorMessage(validationErr))
-			ClearRoblosecurityCookie()
+			debug.Logf("Auth validation failed: %s", roblox.SanitizeAuthErrorMessage(validationErr))
+			roblox.ClearRoblosecurityCookie()
 			isAuthSaved = false
 			authValidationFailed = true
 			applyAuthIndicator()
-			statusLabel.SetText(fmt.Sprintf("Auth: Failed (%s)", sanitizeAuthErrorMessage(validationErr)))
+			statusLabel.SetText(fmt.Sprintf("Auth: Failed (%s)", roblox.SanitizeAuthErrorMessage(validationErr)))
 			return
 		}
 
-		SetRoblosecurityCookie(normalizedCookie)
-		logDebugf("Auth cookie applied successfully")
+		roblox.SetRoblosecurityCookie(rawCookie)
+		debug.Logf("Auth cookie applied successfully")
 		isAuthSaved = false
 
 		if rememberAuthCheck.Checked {
-			if err := SaveRoblosecurityCookieToKeyring(normalizedCookie); err != nil {
-				logDebugf("Auth keychain save failed: %s", err.Error())
+			if err := roblox.SaveRoblosecurityCookieToKeyring(rawCookie); err != nil {
+				debug.Logf("Auth keychain save failed: %s", err.Error())
 				applyAuthIndicator()
 				statusLabel.SetText(fmt.Sprintf("Auth: Enabled (save failed: %s)", err.Error()))
 				return
 			}
 			isAuthSaved = true
-			logDebugf("Auth cookie saved to secure keychain")
+			debug.Logf("Auth cookie saved to secure keychain")
 		} else {
-			_ = DeleteRoblosecurityCookieFromKeyring()
+			_ = roblox.DeleteRoblosecurityCookieFromKeyring()
 		}
 
 		applyAuthIndicator()
 	})
 	clearButton := widget.NewButton("Clear Auth", func() {
-		logDebugf("Auth cleared")
-		ClearRoblosecurityCookie()
+		debug.Logf("Auth cleared")
+		roblox.ClearRoblosecurityCookie()
 		authValidationFailed = false
-		deleteErr := DeleteRoblosecurityCookieFromKeyring()
+		deleteErr := roblox.DeleteRoblosecurityCookieFromKeyring()
 		if deleteErr == nil {
 			isAuthSaved = false
 		}
@@ -288,13 +291,13 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 	footerRow := container.NewBorder(nil, nil, nil, rightStatus, leftControls)
 
 	loadErrorMessage := ""
-	storedCookie, loadErr := LoadRoblosecurityCookieFromKeyring()
+	storedCookie, loadErr := roblox.LoadRoblosecurityCookieFromKeyring()
 	if loadErr != nil {
-		logDebugf("Failed to load auth cookie from keychain: %s", loadErr.Error())
+		debug.Logf("Failed to load auth cookie from keychain: %s", loadErr.Error())
 		loadErrorMessage = fmt.Sprintf("Auth: Disabled (load failed: %s)", loadErr.Error())
 	} else if storedCookie != "" {
-		logDebugf("Loaded auth cookie from keychain")
-		SetRoblosecurityCookie(storedCookie)
+		debug.Logf("Loaded auth cookie from keychain")
+		roblox.SetRoblosecurityCookie(storedCookie)
 		cookieEntry.SetText(storedCookie)
 		rememberAuthCheck.SetChecked(true)
 		isAuthSaved = true
@@ -312,19 +315,19 @@ func newAuthPanel(window fyne.Window) fyne.CanvasObject {
 		// check when touching widgets.
 		fyne.CurrentApp().Lifecycle().SetOnStarted(func() {
 			go func() {
-				validationErr := validateRoblosecurityCookie(storedCookie)
+				validationErr := roblox.ValidateRoblosecurityCookie(storedCookie)
 				fyne.Do(func() {
 					if validationErr != nil {
-						logDebugf("Startup auth validation failed: %s", sanitizeAuthErrorMessage(validationErr))
+						debug.Logf("Startup auth validation failed: %s", roblox.SanitizeAuthErrorMessage(validationErr))
 						authValidationFailed = true
 						applyAuthIndicator()
-						statusLabel.SetText(fmt.Sprintf("Auth: Expired (%s)", sanitizeAuthErrorMessage(validationErr)))
+						statusLabel.SetText(fmt.Sprintf("Auth: Expired (%s)", roblox.SanitizeAuthErrorMessage(validationErr)))
 						dialog.ShowError(
 							fmt.Errorf("your saved auth cookie is expired or invalid — please update it in the Auth panel below"),
 							window,
 						)
 					} else {
-						logDebugf("Startup auth validation succeeded")
+						debug.Logf("Startup auth validation succeeded")
 						authValidationFailed = false
 						applyAuthIndicator()
 					}

@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"joxblox/internal/debug"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
@@ -162,19 +164,19 @@ func pickRBXLFilePath(title string) (string, error) {
 }
 
 func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
-	logDebugf("RBXL scan started: %s (limit=%d)", filePath, limit)
+	debug.Logf("RBXL scan started: %s (limit=%d)", filePath, limit)
 	if _, readErr := os.Stat(filePath); readErr != nil {
-		logDebugf("RBXL scan read failed: %s", readErr.Error())
+		debug.Logf("RBXL scan read failed: %s", readErr.Error())
 		return nil, readErr
 	}
 
 	_, _, extractedReferences, _, rustScanErr := extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath, 0, limit, stopChannel)
 	if errors.Is(rustScanErr, errScanStopped) {
-		logDebugf("RBXL scan stopped during Rust extraction")
+		debug.Logf("RBXL scan stopped during Rust extraction")
 		return nil, errScanStopped
 	}
 	if rustScanErr != nil {
-		logDebugf("RBXL scan Rust extraction failed: %s", rustScanErr.Error())
+		debug.Logf("RBXL scan Rust extraction failed: %s", rustScanErr.Error())
 		return nil, rustScanErr
 	}
 	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(filePath, nil, stopChannel)
@@ -183,12 +185,12 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 	}
 
 	hits := buildScanHitsFromRustReferences(extractedReferences, filePath, sceneSurfaceAreasByPath, limit)
-	logDebugf("RBXL scan completed with %d unique asset IDs", len(hits))
+	debug.Logf("RBXL scan completed with %d unique asset IDs", len(hits))
 	return hits, nil
 }
 
 func scanRBXLFileForAssetIDsFiltered(filePath string, pathPrefixes []string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
-	logDebugf("RBXL filtered scan started: %s (prefixes=%v, limit=%d)", filePath, pathPrefixes, limit)
+	debug.Logf("RBXL filtered scan started: %s (prefixes=%v, limit=%d)", filePath, pathPrefixes, limit)
 	if _, readErr := os.Stat(filePath); readErr != nil {
 		return nil, readErr
 	}
@@ -205,7 +207,7 @@ func scanRBXLFileForAssetIDsFiltered(filePath string, pathPrefixes []string, lim
 	}
 
 	hits := buildScanHitsFromRustReferences(refs, filePath, sceneSurfaceAreasByPath, limit)
-	logDebugf("RBXL filtered scan completed with %d unique asset IDs from %d references", len(hits), len(refs))
+	debug.Logf("RBXL filtered scan completed with %d unique asset IDs from %d references", len(hits), len(refs))
 	return hits, nil
 }
 
@@ -225,7 +227,7 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	if _, readErr := os.Stat(targetFilePath); readErr != nil {
 		return nil, readErr
 	}
-	logDebugf(
+	debug.Logf(
 		"RBXL file diff started: baseline=%s target=%s (limit=%d)",
 		baselineFilePath,
 		targetFilePath,
@@ -271,7 +273,7 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	}
 	results = buildScanHitsFromRustReferences(filteredReferences, targetFilePath, sceneSurfaceAreasByPath, limit)
 
-	logDebugf("RBXL file diff completed with %d new unique asset IDs", len(results))
+	debug.Logf("RBXL file diff completed with %d new unique asset IDs", len(results))
 	return results, nil
 }
 
@@ -394,7 +396,7 @@ func loadRBXLSceneSurfaceAreas(filePath string, pathPrefixes []string, stopChann
 		return nil, errScanStopped
 	}
 	if err != nil {
-		logDebugf("RBXL map render extraction failed for large textures: %s", err.Error())
+		debug.Logf("RBXL map render extraction failed for large textures: %s", err.Error())
 		return map[string]float64{}, nil
 	}
 	return buildSceneSurfaceAreaIndexFromMapRenderParts(mapParts), nil

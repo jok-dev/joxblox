@@ -4,6 +4,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"joxblox/internal/format"
 )
 
 const defaultLargeTextureThreshold = 4096.0
@@ -64,8 +66,8 @@ func formatLargeTextureScore(score float64) string {
 	if score <= 0 {
 		return "-"
 	}
-	if score >= megabyte {
-		return strconv.FormatFloat(score/megabyte, 'f', 2, 64) + " MB/stud^2"
+	if score >= format.Megabyte {
+		return strconv.FormatFloat(score/format.Megabyte, 'f', 2, 64) + " MB/stud^2"
 	}
 	if score >= 1024 {
 		return strconv.FormatFloat(score/1024.0, 'f', 2, 64) + " KB/stud^2"

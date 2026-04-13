@@ -1,4 +1,4 @@
-package app
+package roblox
 
 import (
 	"fmt"
@@ -6,30 +6,30 @@ import (
 )
 
 const (
-	sourceAssetDeliveryInGame = "AssetDelivery (In-Game)"
-	sourceThumbnailsDirect    = "Thumbnails API (Direct)"
-	sourceThumbnailsFallback  = "Thumbnails API (Fallback)"
-	sourceNoThumbnail         = "No Thumbnail (Unavailable)"
-	stateCompleted            = "Completed"
-	stateUnavailable          = "Unavailable"
+	SourceAssetDeliveryInGame = "AssetDelivery (In-Game)"
+	SourceThumbnailsDirect    = "Thumbnails API (Direct)"
+	SourceThumbnailsFallback  = "Thumbnails API (Fallback)"
+	SourceNoThumbnail         = "No Thumbnail (Unavailable)"
+	StateCompleted            = "Completed"
+	StateUnavailable          = "Unavailable"
 
-	assetTypeImage = 1
-	assetTypeAudio = 3
-	assetTypeMesh  = 4
+	AssetTypeImage = 1
+	AssetTypeAudio = 3
+	AssetTypeMesh  = 4
 )
 
-type assetTypeInfo struct {
+type AssetTypeInfo struct {
 	Name               string
 	Emoji              string
 	SkipRustExtraction bool
 	DownloadExtension  string
 }
 
-var assetTypeInfoByID = map[int]assetTypeInfo{
-	assetTypeImage: {Name: "Image", Emoji: "🖼️", SkipRustExtraction: true, DownloadExtension: "png"},
+var AssetTypeInfoByID = map[int]AssetTypeInfo{
+	AssetTypeImage: {Name: "Image", Emoji: "🖼️", SkipRustExtraction: true, DownloadExtension: "png"},
 	2:              {Name: "TShirt", Emoji: "👕", DownloadExtension: "rbxl"},
 	3:              {Name: "Audio", Emoji: "🎵", SkipRustExtraction: true, DownloadExtension: "audio"},
-	assetTypeMesh:  {Name: "Mesh", Emoji: "🕸️", SkipRustExtraction: true, DownloadExtension: "rbxm"},
+	AssetTypeMesh:  {Name: "Mesh", Emoji: "🕸️", SkipRustExtraction: true, DownloadExtension: "rbxm"},
 	5:              {Name: "Lua", Emoji: "📜", DownloadExtension: "lua"},
 	8:              {Name: "Hat", Emoji: "🎩", DownloadExtension: "rbxl"},
 	9:              {Name: "Place", Emoji: "🗺️", DownloadExtension: "rbxl"},
@@ -90,39 +90,39 @@ var assetTypeInfoByID = map[int]assetTypeInfo{
 	90:             {Name: "EyeMakeup", Emoji: "👁️", DownloadExtension: "rbxl"},
 }
 
-func isThumbnailFallback(source string) bool {
-	return strings.EqualFold(source, sourceThumbnailsFallback)
+func IsThumbnailFallback(source string) bool {
+	return strings.EqualFold(source, SourceThumbnailsFallback)
 }
 
-func isCompletedState(state string) bool {
-	return strings.EqualFold(state, stateCompleted)
+func IsCompletedState(state string) bool {
+	return strings.EqualFold(state, StateCompleted)
 }
 
-func getAssetTypeName(assetTypeID int) string {
+func GetAssetTypeName(assetTypeID int) string {
 	if assetTypeID <= 0 {
 		return "Unknown"
 	}
-	if assetTypeInfo, exists := assetTypeInfoByID[assetTypeID]; exists {
-		return assetTypeInfo.Name
+	if info, exists := AssetTypeInfoByID[assetTypeID]; exists {
+		return info.Name
 	}
 	return fmt.Sprintf("Type %d", assetTypeID)
 }
 
-func getAssetTypeEmoji(assetTypeID int) string {
-	if assetTypeInfo, exists := assetTypeInfoByID[assetTypeID]; exists && assetTypeInfo.Emoji != "" {
-		return assetTypeInfo.Emoji
+func GetAssetTypeEmoji(assetTypeID int) string {
+	if info, exists := AssetTypeInfoByID[assetTypeID]; exists && info.Emoji != "" {
+		return info.Emoji
 	}
 	return "🧩"
 }
 
-func shouldSkipRustExtractionForAssetType(assetTypeID int) bool {
-	assetTypeInfo, exists := assetTypeInfoByID[assetTypeID]
-	return exists && assetTypeInfo.SkipRustExtraction
+func ShouldSkipRustExtractionForAssetType(assetTypeID int) bool {
+	info, exists := AssetTypeInfoByID[assetTypeID]
+	return exists && info.SkipRustExtraction
 }
 
-func getAssetDownloadExtension(assetTypeID int) string {
-	if assetTypeInfo, exists := assetTypeInfoByID[assetTypeID]; exists && strings.TrimSpace(assetTypeInfo.DownloadExtension) != "" {
-		return assetTypeInfo.DownloadExtension
+func GetAssetDownloadExtension(assetTypeID int) string {
+	if info, exists := AssetTypeInfoByID[assetTypeID]; exists && strings.TrimSpace(info.DownloadExtension) != "" {
+		return info.DownloadExtension
 	}
 	return "rbxl"
 }

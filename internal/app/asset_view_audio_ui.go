@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 
+	"joxblox/internal/format"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 )
@@ -97,16 +99,16 @@ func (view *assetView) updateAudioPlaybackState(status audioPlayerStatus) {
 		if !view.audioSeekDragging {
 			view.suppressAudioSeekChange = true
 			if status.Duration > 0 {
-				view.audioProgressSlider.SetValue(clampAudioSliderValue(float64(status.Position) / float64(status.Duration)))
+				view.audioProgressSlider.SetValue(format.Clamp(float64(status.Position)/float64(status.Duration), 0.0, 1.0))
 			} else {
 				view.audioProgressSlider.SetValue(0)
 			}
 			view.suppressAudioSeekChange = false
 		}
 		view.suppressAudioVolumeChange = true
-		view.audioVolumeSlider.SetValue(clampAudioSliderValue(status.Volume))
+		view.audioVolumeSlider.SetValue(format.Clamp(status.Volume, 0.0, 1.0))
 		view.suppressAudioVolumeChange = false
-		view.audioVolumeValueLabel.SetText(fmt.Sprintf("%d%%", int(clampAudioSliderValue(status.Volume)*100)))
+		view.audioVolumeValueLabel.SetText(fmt.Sprintf("%d%%", int(format.Clamp(status.Volume, 0.0, 1.0)*100)))
 		view.playAudioButton.Refresh()
 		view.stopAudioButton.Refresh()
 		if view.audioControls != nil {

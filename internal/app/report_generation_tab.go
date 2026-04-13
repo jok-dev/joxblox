@@ -18,6 +18,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
+
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
 )
 
 type reportGenerationSummary struct {
@@ -211,21 +214,21 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 
 			mapPartsRaw, mapPartsErr := extractMapRenderPartsWithRustyAssetTool(sourcePath, prefixes, nil)
 			if mapPartsErr != nil {
-				logDebugf("Report generation map extraction failed for %s: %s", sourcePath, mapPartsErr.Error())
+				debug.Logf("Report generation map extraction failed for %s: %s", sourcePath, mapPartsErr.Error())
 			}
 			if isCanceled() {
 				return
 			}
 			warningData, warningErr := buildRBXLMissingMaterialVariantWarning(sourcePath, prefixes, nil)
 			if warningErr != nil {
-				logDebugf("Report generation material warning extraction failed for %s: %s", sourcePath, warningErr.Error())
+				debug.Logf("Report generation material warning extraction failed for %s: %s", sourcePath, warningErr.Error())
 			}
 			if isCanceled() {
 				return
 			}
 			mapParts := convertRustMapParts(mapPartsRaw)
 			reportMeshPartCount, reportPartCount := countReportGenerationParts(mapParts, positionedRefs)
-			logDebugf(
+			debug.Logf(
 				"Report generation extracted %d positioned refs and %d map parts for %s (meshparts=%d, parts=%d)",
 				len(positionedRefs),
 				len(mapParts),
@@ -276,7 +279,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 
 			summary, points := buildReportSummaryAndPoints(positionedRefs, resolved, mapParts, assetType.OversizedTextureThreshold)
 			cells := buildReportGenerationCells(points, mapParts, positionedRefs)
-			logDebugf(
+			debug.Logf(
 				"Report generation summary for %s (%s): meshparts=%d parts=%d points=%d cells=%d resolved=%d unique-assets=%d",
 				sourcePath,
 				selectedAssetType.ID,
@@ -478,7 +481,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 		longestRange = reportGenerationCellSizeStuds
 	}
 
-	gridDivisions := maxInt(1, int(math.Ceil(longestRange/reportGenerationCellSizeStuds)))
+	gridDivisions := max(1, int(math.Ceil(longestRange/reportGenerationCellSizeStuds)))
 	paddedLongestRange := float64(gridDivisions) * reportGenerationCellSizeStuds
 	scene := &rbxlHeatmapScene{
 		Points:   points,
@@ -505,8 +508,8 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 		if !renderInfo.HasPosition {
 			continue
 		}
-		column := clampHeatmapInt(int(math.Floor((renderInfo.X-scene.MinimumX)/cellSizeWorld)), 0, columnCount-1)
-		row := clampHeatmapInt(int(math.Floor((renderInfo.Z-scene.MinimumZ)/cellSizeWorld)), 0, rowCount-1)
+		column := format.Clamp(int(math.Floor((renderInfo.X-scene.MinimumX)/cellSizeWorld)), 0, columnCount-1)
+		row := format.Clamp(int(math.Floor((renderInfo.Z-scene.MinimumZ)/cellSizeWorld)), 0, rowCount-1)
 		cellKey := heatmapCellKey(row, column)
 		counts := partCountsByCell[cellKey]
 		switch normalizeReportGenerationInstanceType(renderInfo.InstanceType) {

@@ -24,6 +24,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
+
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
 )
 
 const (
@@ -520,14 +524,14 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		}
 	}
 	spreadSlider.OnChanged = func(value float64) {
-		heatSpread = clampHeatmapFloat64(value, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread)
+		heatSpread = format.Clamp(value, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread)
 		spreadValueLabel.SetText(fmt.Sprintf("%.2fx", heatSpread))
 		if currentScene != nil && heatmapReady && !loading.Load() {
 			rerenderCurrentScene("Updating heat spread...")
 		}
 	}
 	gridDensitySlider.OnChanged = func(value float64) {
-		gridDivisions = clampHeatmapInt(
+		gridDivisions = format.Clamp(
 			int(math.Round(value/float64(rbxlHeatmapGridDivisionStep)))*rbxlHeatmapGridDivisionStep,
 			rbxlHeatmapMinGridDivisions,
 			rbxlHeatmapMaxGridDivisions,
@@ -645,7 +649,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 			}
 			baseWarningText, warningErr := buildRBXLMissingMaterialVariantWarning(filePath, prefixes, nil)
 			if warningErr != nil {
-				logDebugf("Heatmap material warning extraction failed for %s: %s", filePath, warningErr.Error())
+				debug.Logf("Heatmap material warning extraction failed for %s: %s", filePath, warningErr.Error())
 			}
 
 			compareRefs := []positionedRustyAssetToolResult(nil)
@@ -671,7 +675,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 				}
 				compareWarningText, warningErr = buildRBXLMissingMaterialVariantWarning(comparePath, prefixes, nil)
 				if warningErr != nil {
-					logDebugf("Heatmap material warning extraction failed for %s: %s", comparePath, warningErr.Error())
+					debug.Logf("Heatmap material warning extraction failed for %s: %s", comparePath, warningErr.Error())
 				}
 			}
 
@@ -1130,8 +1134,8 @@ func renderHeatmapCells(outputImage *image.NRGBA, scene *rbxlHeatmapScene, heatO
 	if outputImage == nil || scene == nil || len(scene.Cells) == 0 {
 		return
 	}
-	baseAlpha := clampHeatmapFloat64(heatOpacity, 0.08, 1.0)
-	spread := clampHeatmapFloat64(heatSpread, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread)
+	baseAlpha := format.Clamp(heatOpacity, 0.08, 1.0)
+	spread := format.Clamp(heatSpread, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread)
 	maximums := buildHeatMetricMaximums(scene.Cells)
 	maxMetricValue := maxHeatMetricValue(scene.Cells, heatMetric, maximums)
 	if maxMetricValue <= 0 {
@@ -1256,8 +1260,8 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 	if cellSizeWorld <= 0 {
 		cellSizeWorld = 1
 	}
-	columnCount := maxInt(1, int(math.Ceil(rangeX/cellSizeWorld)))
-	rowCount := maxInt(1, int(math.Ceil(rangeZ/cellSizeWorld)))
+	columnCount := max(1, int(math.Ceil(rangeX/cellSizeWorld)))
+	rowCount := max(1, int(math.Ceil(rangeZ/cellSizeWorld)))
 	type heatmapCellAccumulator struct {
 		cell                 *rbxlHeatmapCell
 		baseSeenAssets       map[int64]struct{}
@@ -1269,8 +1273,8 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 	maxCellBytes := int64(0)
 	accumulatePoints := func(points []rbxlHeatmapPoint, apply func(accumulator *heatmapCellAccumulator, point rbxlHeatmapPoint)) {
 		for _, point := range points {
-			column := clampHeatmapInt(int(math.Floor((point.X-scene.MinimumX)/cellSizeWorld)), 0, columnCount-1)
-			row := clampHeatmapInt(int(math.Floor((point.Z-scene.MinimumZ)/cellSizeWorld)), 0, rowCount-1)
+			column := format.Clamp(int(math.Floor((point.X-scene.MinimumX)/cellSizeWorld)), 0, columnCount-1)
+			row := format.Clamp(int(math.Floor((point.Z-scene.MinimumZ)/cellSizeWorld)), 0, rowCount-1)
 			cellKey := fmt.Sprintf("%d:%d", row, column)
 			accumulator, found := cellByKey[cellKey]
 			if !found {
@@ -1283,10 +1287,10 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 						MinimumZ: scene.MinimumZ + float64(row)*cellSizeWorld,
 						MaximumZ: scene.MinimumZ + float64(row+1)*cellSizeWorld,
 					},
-				baseSeenAssets:       map[int64]struct{}{},
-				compareSeenAssets:    map[int64]struct{}{},
-				baseSeenInstances:    map[string]struct{}{},
-				compareSeenInstances: map[string]struct{}{},
+					baseSeenAssets:       map[int64]struct{}{},
+					compareSeenAssets:    map[int64]struct{}{},
+					baseSeenInstances:    map[string]struct{}{},
+					compareSeenInstances: map[string]struct{}{},
 				}
 				cellByKey[cellKey] = accumulator
 			}
@@ -1359,8 +1363,8 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 		if scene.DiffMode {
 			cell.Stats = cell.DeltaStats
 		}
-		if absInt64(cell.Stats.TotalBytes) > maxCellBytes {
-			maxCellBytes = absInt64(cell.Stats.TotalBytes)
+		if format.AbsInt64(cell.Stats.TotalBytes) > maxCellBytes {
+			maxCellBytes = format.AbsInt64(cell.Stats.TotalBytes)
 		}
 		cells = append(cells, *cell)
 	}
@@ -1388,10 +1392,10 @@ func heatmapPointHasMeshContent(point rbxlHeatmapPoint) bool {
 func heatmapCellPixelBounds(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, width int, height int) (int, int, int, int) {
 	minPixelX, maxPixelY := mapHeatmapWorldPoint(cell.MinimumX, cell.MinimumZ, scene.MinimumX, scene.MaximumX, scene.MinimumZ, scene.MaximumZ, width, height)
 	maxPixelX, minPixelY := mapHeatmapWorldPoint(cell.MaximumX, cell.MaximumZ, scene.MinimumX, scene.MaximumX, scene.MinimumZ, scene.MaximumZ, width, height)
-	startX := clampHeatmapInt(int(math.Floor(math.Min(minPixelX, maxPixelX))), 0, width-1)
-	endX := clampHeatmapInt(int(math.Ceil(math.Max(minPixelX, maxPixelX))), 0, width-1)
-	startY := clampHeatmapInt(int(math.Floor(math.Min(minPixelY, maxPixelY))), 0, height-1)
-	endY := clampHeatmapInt(int(math.Ceil(math.Max(minPixelY, maxPixelY))), 0, height-1)
+	startX := format.Clamp(int(math.Floor(math.Min(minPixelX, maxPixelX))), 0, width-1)
+	endX := format.Clamp(int(math.Ceil(math.Max(minPixelX, maxPixelX))), 0, width-1)
+	startY := format.Clamp(int(math.Floor(math.Min(minPixelY, maxPixelY))), 0, height-1)
+	endY := format.Clamp(int(math.Ceil(math.Max(minPixelY, maxPixelY))), 0, height-1)
 	return startX, endX, startY, endY
 }
 
@@ -1403,11 +1407,11 @@ func heatmapCellAtImagePoint(scene *rbxlHeatmapScene, imageX float64, imageY flo
 	if !inside {
 		return rbxlHeatmapCell{}, false
 	}
-	column := clampHeatmapInt(int(math.Floor((worldX-scene.MinimumX)/scene.CellSizeWorld)), 0, scene.ColumnCount-1)
-	row := clampHeatmapInt(int(math.Floor((worldZ-scene.MinimumZ)/scene.CellSizeWorld)), 0, scene.RowCount-1)
+	column := format.Clamp(int(math.Floor((worldX-scene.MinimumX)/scene.CellSizeWorld)), 0, scene.ColumnCount-1)
+	row := format.Clamp(int(math.Floor((worldZ-scene.MinimumZ)/scene.CellSizeWorld)), 0, scene.RowCount-1)
 
-	pixelX := clampHeatmapInt(int(math.Round(imageX)), 0, width-1)
-	pixelY := clampHeatmapInt(int(math.Round(imageY)), 0, height-1)
+	pixelX := format.Clamp(int(math.Round(imageX)), 0, width-1)
+	pixelY := format.Clamp(int(math.Round(imageY)), 0, height-1)
 	bestIndex := -1
 	bestCell := rbxlHeatmapCell{}
 	for rowOffset := -1; rowOffset <= 1; rowOffset++ {
@@ -1448,8 +1452,8 @@ func heatmapPointCellMatches(scene *rbxlHeatmapScene, point rbxlHeatmapPoint, ro
 	if scene == nil || scene.CellSizeWorld <= 0 || scene.ColumnCount <= 0 || scene.RowCount <= 0 {
 		return false
 	}
-	pointColumn := clampHeatmapInt(int(math.Floor((point.X-scene.MinimumX)/scene.CellSizeWorld)), 0, scene.ColumnCount-1)
-	pointRow := clampHeatmapInt(int(math.Floor((point.Z-scene.MinimumZ)/scene.CellSizeWorld)), 0, scene.RowCount-1)
+	pointColumn := format.Clamp(int(math.Floor((point.X-scene.MinimumX)/scene.CellSizeWorld)), 0, scene.ColumnCount-1)
+	pointRow := format.Clamp(int(math.Floor((point.Z-scene.MinimumZ)/scene.CellSizeWorld)), 0, scene.RowCount-1)
 	return pointRow == row && pointColumn == column
 }
 
@@ -1543,7 +1547,7 @@ func heatmapSquareRowsToScanResults(rows []heatmapSquareAssetRow) []scanResult {
 			InstanceName:       row.InstanceName,
 			InstancePath:       row.InstancePath,
 			PropertyName:       row.PropertyName,
-			Source:             sourceNoThumbnail,
+			Source:             roblox.SourceNoThumbnail,
 			State:              "Heatmap",
 			BytesSize:          int(row.TotalBytes),
 			TotalBytesSize:     int(row.TotalBytes),
@@ -1598,16 +1602,16 @@ func formatHeatmapCellStats(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) str
 			cell.BaseStats.UniqueAssetCount,
 			cell.BaseStats.UniqueTextureCount,
 			cell.BaseStats.UniqueMeshCount,
-			float64(cell.BaseStats.TotalBytes)/megabyte,
+			float64(cell.BaseStats.TotalBytes)/format.Megabyte,
 			cell.BaseStats.ReferenceCount+cell.DeltaStats.ReferenceCount,
 			cell.BaseStats.UniqueAssetCount+cell.DeltaStats.UniqueAssetCount,
 			cell.BaseStats.UniqueTextureCount+cell.DeltaStats.UniqueTextureCount,
 			cell.BaseStats.UniqueMeshCount+cell.DeltaStats.UniqueMeshCount,
-			float64(cell.BaseStats.TotalBytes+cell.DeltaStats.TotalBytes)/megabyte,
-			formatSignedSizeAuto(cell.Stats.TextureBytes),
-			formatSignedSizeAuto(cell.Stats.MeshBytes),
-			formatSignedIntCommas(cell.Stats.TriangleCount),
-			formatSignedIntCommas(cell.Stats.PixelCount),
+			float64(cell.BaseStats.TotalBytes+cell.DeltaStats.TotalBytes)/format.Megabyte,
+			format.FormatSignedSizeAuto(cell.Stats.TextureBytes),
+			format.FormatSignedSizeAuto(cell.Stats.MeshBytes),
+			format.FormatSignedIntCommas(cell.Stats.TriangleCount),
+			format.FormatSignedIntCommas(cell.Stats.PixelCount),
 		)
 	}
 	return fmt.Sprintf(
@@ -1621,11 +1625,11 @@ func formatHeatmapCellStats(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) str
 		cell.Stats.UniqueMeshCount,
 		centerX,
 		centerZ,
-		formatSizeAuto(int(cell.Stats.TextureBytes)),
-		formatSizeAuto(int(cell.Stats.MeshBytes)),
-		float64(cell.Stats.TotalBytes)/megabyte,
-		formatIntCommas(cell.Stats.TriangleCount),
-		formatIntCommas(cell.Stats.PixelCount),
+		format.FormatSizeAuto(int(cell.Stats.TextureBytes)),
+		format.FormatSizeAuto(int(cell.Stats.MeshBytes)),
+		float64(cell.Stats.TotalBytes)/format.Megabyte,
+		format.FormatIntCommas(cell.Stats.TriangleCount),
+		format.FormatIntCommas(cell.Stats.PixelCount),
 	)
 }
 
@@ -1634,59 +1638,59 @@ func formatHeatmapMetricSummary(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric)
 	switch heatMetric {
 	case heatMetricTotalBytes:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Total Byte Size = %s", formatSignedSizeAuto(cell.Stats.TotalBytes))
+			return fmt.Sprintf("Heat Delta: Total Byte Size = %s", format.FormatSignedSizeAuto(cell.Stats.TotalBytes))
 		}
-		return fmt.Sprintf("Heat: Total Byte Size = %s", formatSizeAuto(int(cell.Stats.TotalBytes)))
+		return fmt.Sprintf("Heat: Total Byte Size = %s", format.FormatSizeAuto(int(cell.Stats.TotalBytes)))
 	case heatMetricTextureBytes:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Texture Bytes = %s", formatSignedSizeAuto(cell.Stats.TextureBytes))
+			return fmt.Sprintf("Heat Delta: Texture Bytes = %s", format.FormatSignedSizeAuto(cell.Stats.TextureBytes))
 		}
-		return fmt.Sprintf("Heat: Texture Bytes = %s", formatSizeAuto(int(cell.Stats.TextureBytes)))
+		return fmt.Sprintf("Heat: Texture Bytes = %s", format.FormatSizeAuto(int(cell.Stats.TextureBytes)))
 	case heatMetricTexturePixels:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Texture Pixels = %s", formatSignedIntCommas(cell.Stats.PixelCount))
+			return fmt.Sprintf("Heat Delta: Texture Pixels = %s", format.FormatSignedIntCommas(cell.Stats.PixelCount))
 		}
-		return fmt.Sprintf("Heat: Texture Pixels = %s", formatIntCommas(cell.Stats.PixelCount))
+		return fmt.Sprintf("Heat: Texture Pixels = %s", format.FormatIntCommas(cell.Stats.PixelCount))
 	case heatMetricMeshBytes:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Mesh Bytes = %s", formatSignedSizeAuto(cell.Stats.MeshBytes))
+			return fmt.Sprintf("Heat Delta: Mesh Bytes = %s", format.FormatSignedSizeAuto(cell.Stats.MeshBytes))
 		}
-		return fmt.Sprintf("Heat: Mesh Bytes = %s", formatSizeAuto(int(cell.Stats.MeshBytes)))
+		return fmt.Sprintf("Heat: Mesh Bytes = %s", format.FormatSizeAuto(int(cell.Stats.MeshBytes)))
 	case heatMetricMeshTriangles:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Mesh Triangles = %s", formatSignedIntCommas(cell.Stats.TriangleCount))
+			return fmt.Sprintf("Heat Delta: Mesh Triangles = %s", format.FormatSignedIntCommas(cell.Stats.TriangleCount))
 		}
-		return fmt.Sprintf("Heat: Mesh Triangles = %s", formatIntCommas(cell.Stats.TriangleCount))
+		return fmt.Sprintf("Heat: Mesh Triangles = %s", format.FormatIntCommas(cell.Stats.TriangleCount))
 	case heatMetricUniqueTextureCount:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Unique Texture Count = %s", formatSignedIntCommas(cell.Stats.UniqueTextureCount))
+			return fmt.Sprintf("Heat Delta: Unique Texture Count = %s", format.FormatSignedIntCommas(cell.Stats.UniqueTextureCount))
 		}
-		return fmt.Sprintf("Heat: Unique Texture Count = %s", formatIntCommas(cell.Stats.UniqueTextureCount))
+		return fmt.Sprintf("Heat: Unique Texture Count = %s", format.FormatIntCommas(cell.Stats.UniqueTextureCount))
 	case heatMetricUniqueMeshCount:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Unique Mesh Count = %s", formatSignedIntCommas(cell.Stats.UniqueMeshCount))
+			return fmt.Sprintf("Heat Delta: Unique Mesh Count = %s", format.FormatSignedIntCommas(cell.Stats.UniqueMeshCount))
 		}
-		return fmt.Sprintf("Heat: Unique Mesh Count = %s", formatIntCommas(cell.Stats.UniqueMeshCount))
+		return fmt.Sprintf("Heat: Unique Mesh Count = %s", format.FormatIntCommas(cell.Stats.UniqueMeshCount))
 	case heatMetricUniqueAssetCount:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Unique Assets = %s", formatSignedIntCommas(cell.Stats.UniqueAssetCount))
+			return fmt.Sprintf("Heat Delta: Unique Assets = %s", format.FormatSignedIntCommas(cell.Stats.UniqueAssetCount))
 		}
-		return fmt.Sprintf("Heat: Unique Assets = %s", formatIntCommas(cell.Stats.UniqueAssetCount))
+		return fmt.Sprintf("Heat: Unique Assets = %s", format.FormatIntCommas(cell.Stats.UniqueAssetCount))
 	case heatMetricMeshPartCount:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: MeshParts = %s", formatSignedIntCommas(cell.Stats.MeshPartCount))
+			return fmt.Sprintf("Heat Delta: MeshParts = %s", format.FormatSignedIntCommas(cell.Stats.MeshPartCount))
 		}
-		return fmt.Sprintf("Heat: MeshParts = %s", formatIntCommas(cell.Stats.MeshPartCount))
+		return fmt.Sprintf("Heat: MeshParts = %s", format.FormatIntCommas(cell.Stats.MeshPartCount))
 	case heatMetricPartCount:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Parts = %s", formatSignedIntCommas(cell.Stats.PartCount))
+			return fmt.Sprintf("Heat Delta: Parts = %s", format.FormatSignedIntCommas(cell.Stats.PartCount))
 		}
-		return fmt.Sprintf("Heat: Parts = %s", formatIntCommas(cell.Stats.PartCount))
+		return fmt.Sprintf("Heat: Parts = %s", format.FormatIntCommas(cell.Stats.PartCount))
 	default:
 		if isDiff {
-			return fmt.Sprintf("Heat Delta: Total Byte Size = %s", formatSignedSizeAuto(cell.Stats.TotalBytes))
+			return fmt.Sprintf("Heat Delta: Total Byte Size = %s", format.FormatSignedSizeAuto(cell.Stats.TotalBytes))
 		}
-		return fmt.Sprintf("Heat: Total Byte Size = %s", formatSizeAuto(int(cell.Stats.TotalBytes)))
+		return fmt.Sprintf("Heat: Total Byte Size = %s", format.FormatSizeAuto(int(cell.Stats.TotalBytes)))
 	}
 }
 
@@ -1729,7 +1733,7 @@ func maxHeatMetricValue(cells []rbxlHeatmapCell, heatMetric rbxlHeatMetric, maxi
 }
 
 func applyHeatSpread(normalized float64, spread float64) float64 {
-	clamped := clampHeatmapFloat64(normalized, 0, 1)
+	clamped := format.Clamp(normalized, 0, 1)
 	if clamped <= 0 {
 		return 0
 	}
@@ -1766,48 +1770,28 @@ func normalizedMetricComponent(value float64, maximum float64) float64 {
 func formatHeatmapDeltaSummary(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) string {
 	switch heatMetric {
 	case heatMetricTotalBytes:
-		return formatSignedSizeAuto(cell.Stats.TotalBytes)
+		return format.FormatSignedSizeAuto(cell.Stats.TotalBytes)
 	case heatMetricTextureBytes:
-		return formatSignedSizeAuto(cell.Stats.TextureBytes)
+		return format.FormatSignedSizeAuto(cell.Stats.TextureBytes)
 	case heatMetricTexturePixels:
-		return formatSignedIntCommas(cell.Stats.PixelCount)
+		return format.FormatSignedIntCommas(cell.Stats.PixelCount)
 	case heatMetricMeshBytes:
-		return formatSignedSizeAuto(cell.Stats.MeshBytes)
+		return format.FormatSignedSizeAuto(cell.Stats.MeshBytes)
 	case heatMetricMeshTriangles:
-		return formatSignedIntCommas(cell.Stats.TriangleCount)
+		return format.FormatSignedIntCommas(cell.Stats.TriangleCount)
 	case heatMetricUniqueTextureCount:
-		return formatSignedIntCommas(cell.Stats.UniqueTextureCount)
+		return format.FormatSignedIntCommas(cell.Stats.UniqueTextureCount)
 	case heatMetricUniqueMeshCount:
-		return formatSignedIntCommas(cell.Stats.UniqueMeshCount)
+		return format.FormatSignedIntCommas(cell.Stats.UniqueMeshCount)
 	case heatMetricUniqueAssetCount:
-		return formatSignedIntCommas(cell.Stats.UniqueAssetCount)
+		return format.FormatSignedIntCommas(cell.Stats.UniqueAssetCount)
 	case heatMetricMeshPartCount:
-		return formatSignedIntCommas(cell.Stats.MeshPartCount)
+		return format.FormatSignedIntCommas(cell.Stats.MeshPartCount)
 	case heatMetricPartCount:
-		return formatSignedIntCommas(cell.Stats.PartCount)
+		return format.FormatSignedIntCommas(cell.Stats.PartCount)
 	default:
-		return formatSignedSizeAuto(cell.Stats.TotalBytes)
+		return format.FormatSignedSizeAuto(cell.Stats.TotalBytes)
 	}
-}
-
-func formatSignedSizeAuto(value int64) string {
-	if value == 0 {
-		return "0 B"
-	}
-	if value < 0 {
-		return "-" + formatSizeAuto(int(absInt64(value)))
-	}
-	return "+" + formatSizeAuto(int(value))
-}
-
-func formatSignedIntCommas(value int64) string {
-	if value == 0 {
-		return "0"
-	}
-	if value < 0 {
-		return "-" + formatIntCommas(absInt64(value))
-	}
-	return "+" + formatIntCommas(value)
 }
 
 func formatHeatmapBuildSummary(result rbxlHeatmapBuildResult) string {
@@ -1820,7 +1804,7 @@ func formatHeatmapBuildSummary(result rbxlHeatmapBuildResult) string {
 			result.ComparePointCount,
 			result.UniqueAssetCount,
 			result.CompareUniqueAssetCount,
-			formatSignedSizeAuto(deltaBytes),
+			format.FormatSignedSizeAuto(deltaBytes),
 			result.MissingPositionCount,
 			result.MissingSizeCount,
 			result.CompareMissingPositionCount,
@@ -1833,7 +1817,7 @@ func formatHeatmapBuildSummary(result rbxlHeatmapBuildResult) string {
 		result.PointCount,
 		result.UniqueAssetCount,
 		result.MapPartCount,
-		formatSizeAuto(int(result.TotalWeightedBytes)),
+		format.FormatSizeAuto(int(result.TotalWeightedBytes)),
 		result.MissingPositionCount,
 		result.MissingSizeCount,
 	)
@@ -1963,15 +1947,15 @@ func heatmapSquareRowColumnText(row heatmapSquareAssetRow, columnName string) st
 	case "Asset ID":
 		return fmt.Sprintf("%d", row.AssetID)
 	case "Total Byte Size":
-		return formatSizeAuto(int(row.TotalBytes))
+		return format.FormatSizeAuto(int(row.TotalBytes))
 	case "Texture Bytes":
-		return formatSizeAuto(int(row.TextureBytes))
+		return format.FormatSizeAuto(int(row.TextureBytes))
 	case "Texture Pixels":
-		return formatIntCommas(row.Pixels)
+		return format.FormatIntCommas(row.Pixels)
 	case "Mesh Bytes":
-		return formatSizeAuto(int(row.MeshBytes))
+		return format.FormatSizeAuto(int(row.MeshBytes))
 	case "Mesh Triangles":
-		return formatIntCommas(row.Triangles)
+		return format.FormatIntCommas(row.Triangles)
 	case "Instance Type":
 		if strings.TrimSpace(row.InstanceType) == "" {
 			return "-"
@@ -2065,13 +2049,6 @@ func formatHeatmapSquareWindowSummary(scene *rbxlHeatmapScene, cell rbxlHeatmapC
 	)
 }
 
-func absInt64(value int64) int64 {
-	if value < 0 {
-		return -value
-	}
-	return value
-}
-
 func convertRustMapParts(parts []mapRenderPartRustyAssetToolResult) []rbxlHeatmapMapPart {
 	converted := make([]rbxlHeatmapMapPart, 0, len(parts))
 	for _, part := range parts {
@@ -2093,19 +2070,19 @@ func convertRustMapParts(parts []mapRenderPartRustyAssetToolResult) []rbxlHeatma
 		}
 		transparency := 0.0
 		if part.Transparency != nil {
-			transparency = clampHeatmapFloat64(*part.Transparency, 0, 1)
+			transparency = format.Clamp(*part.Transparency, 0, 1)
 		}
 		red := 163
 		green := 162
 		blue := 165
 		if part.ColorR != nil {
-			red = clampHeatmapInt(*part.ColorR, 0, 255)
+			red = format.Clamp(*part.ColorR, 0, 255)
 		}
 		if part.ColorG != nil {
-			green = clampHeatmapInt(*part.ColorG, 0, 255)
+			green = format.Clamp(*part.ColorG, 0, 255)
 		}
 		if part.ColorB != nil {
-			blue = clampHeatmapInt(*part.ColorB, 0, 255)
+			blue = format.Clamp(*part.ColorB, 0, 255)
 		}
 		converted = append(converted, rbxlHeatmapMapPart{
 			InstanceType: strings.TrimSpace(part.InstanceType),
@@ -2180,7 +2157,7 @@ func drawGeneratedMapGround(outputImage *image.NRGBA) {
 	}
 	bounds := outputImage.Bounds()
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		vertical := float64(y-bounds.Min.Y) / float64(maxInt(1, bounds.Dy()-1))
+		vertical := float64(y-bounds.Min.Y) / float64(max(1, bounds.Dy()-1))
 		baseColor := color.NRGBA{
 			R: uint8(math.Round(38 + 10*vertical)),
 			G: uint8(math.Round(48 + 18*vertical)),
@@ -2205,10 +2182,10 @@ func drawGeneratedMapShadow(outputImage *image.NRGBA, scene *rbxlHeatmapScene, p
 	shadowDistance := (part.SizeY*rbxlHeatmapShadowPixelScale + heightScale*14.0 + 2.0) * (1 - part.Transparency*0.65)
 	shadowOffset := heatmapPixelPoint{X: shadowDistance * 0.85, Y: shadowDistance * 0.55}
 	shadowPolygon := offsetPolygon(pixelCorners, shadowOffset)
-	shadowStartX := clampHeatmapInt(startX+int(math.Floor(shadowOffset.X))-2, 0, outputImage.Bounds().Dx()-1)
-	shadowEndX := clampHeatmapInt(endX+int(math.Ceil(shadowOffset.X))+2, 0, outputImage.Bounds().Dx()-1)
-	shadowStartY := clampHeatmapInt(startY+int(math.Floor(shadowOffset.Y))-2, 0, outputImage.Bounds().Dy()-1)
-	shadowEndY := clampHeatmapInt(endY+int(math.Ceil(shadowOffset.Y))+2, 0, outputImage.Bounds().Dy()-1)
+	shadowStartX := format.Clamp(startX+int(math.Floor(shadowOffset.X))-2, 0, outputImage.Bounds().Dx()-1)
+	shadowEndX := format.Clamp(endX+int(math.Ceil(shadowOffset.X))+2, 0, outputImage.Bounds().Dx()-1)
+	shadowStartY := format.Clamp(startY+int(math.Floor(shadowOffset.Y))-2, 0, outputImage.Bounds().Dy()-1)
+	shadowEndY := format.Clamp(endY+int(math.Ceil(shadowOffset.Y))+2, 0, outputImage.Bounds().Dy()-1)
 	shadowAlpha := 0.18 + heightScale*0.22
 	shadowColor := color.NRGBA{R: 5, G: 7, B: 10, A: 255}
 	for y := shadowStartY; y <= shadowEndY; y++ {
@@ -2296,8 +2273,8 @@ func mapHeatmapWorldPoint(
 ) (float64, float64) {
 	contentWidth := float64(width - rbxlHeatmapPadding*2)
 	contentHeight := float64(height - rbxlHeatmapPadding*2)
-	normalizedX := clampHeatmapFloat64((x-minX)/(maxX-minX), 0, 1)
-	normalizedZ := clampHeatmapFloat64((z-minZ)/(maxZ-minZ), 0, 1)
+	normalizedX := format.Clamp((x-minX)/(maxX-minX), 0, 1)
+	normalizedZ := format.Clamp((z-minZ)/(maxZ-minZ), 0, 1)
 	pixelX := float64(rbxlHeatmapPadding) + normalizedX*contentWidth
 	pixelY := float64(height-rbxlHeatmapPadding) - normalizedZ*contentHeight
 	return pixelX, pixelY
@@ -2315,8 +2292,8 @@ func mapHeatmapPoint(
 ) (int, int) {
 	contentWidth := float64(width - rbxlHeatmapPadding*2)
 	contentHeight := float64(height - rbxlHeatmapPadding*2)
-	normalizedX := clampHeatmapFloat64((x-minX)/(maxX-minX), 0, 1)
-	normalizedZ := clampHeatmapFloat64((z-minZ)/(maxZ-minZ), 0, 1)
+	normalizedX := format.Clamp((x-minX)/(maxX-minX), 0, 1)
+	normalizedZ := format.Clamp((z-minZ)/(maxZ-minZ), 0, 1)
 	pixelX := int(math.Round(float64(rbxlHeatmapPadding) + normalizedX*contentWidth))
 	pixelY := int(math.Round(float64(height-rbxlHeatmapPadding) - normalizedZ*contentHeight))
 	if pixelX < 0 {
@@ -2403,10 +2380,10 @@ func mapPartPixelPolygon(outputImage *image.NRGBA, scene *rbxlHeatmapScene, part
 		minPixelY = math.Min(minPixelY, pixelY)
 		maxPixelY = math.Max(maxPixelY, pixelY)
 	}
-	startX := clampHeatmapInt(int(math.Floor(minPixelX)), 0, outputImage.Bounds().Dx()-1)
-	endX := clampHeatmapInt(int(math.Ceil(maxPixelX)), 0, outputImage.Bounds().Dx()-1)
-	startY := clampHeatmapInt(int(math.Floor(minPixelY)), 0, outputImage.Bounds().Dy()-1)
-	endY := clampHeatmapInt(int(math.Ceil(maxPixelY)), 0, outputImage.Bounds().Dy()-1)
+	startX := format.Clamp(int(math.Floor(minPixelX)), 0, outputImage.Bounds().Dx()-1)
+	endX := format.Clamp(int(math.Ceil(maxPixelX)), 0, outputImage.Bounds().Dx()-1)
+	startY := format.Clamp(int(math.Floor(minPixelY)), 0, outputImage.Bounds().Dy()-1)
+	endY := format.Clamp(int(math.Ceil(maxPixelY)), 0, outputImage.Bounds().Dy()-1)
 	return pixelCorners, startX, endX, startY, endY
 }
 
@@ -2445,7 +2422,7 @@ func buildHeatmapKernel(radius int) [][]float64 {
 }
 
 func heatmapGradientColor(normalized float64) color.NRGBA {
-	clamped := clampHeatmapFloat64(normalized, 0, 1)
+	clamped := format.Clamp(normalized, 0, 1)
 	stops := []struct {
 		position float64
 		color    color.NRGBA
@@ -2474,7 +2451,7 @@ func heatmapGradientColor(normalized float64) color.NRGBA {
 }
 
 func heatmapDiffGradientColor(metricValue float64, normalized float64) color.NRGBA {
-	clamped := clampHeatmapFloat64(normalized, 0, 1)
+	clamped := format.Clamp(normalized, 0, 1)
 	if metricValue < 0 {
 		return interpolateHeatmapColor(clamped, []heatmapGradientStop{
 			{position: 0.00, color: color.NRGBA{R: 72, G: 93, B: 140, A: 255}},
@@ -2490,7 +2467,7 @@ func heatmapDiffGradientColor(metricValue float64, normalized float64) color.NRG
 }
 
 func interpolateHeatmapColor(normalized float64, stops []heatmapGradientStop) color.NRGBA {
-	clamped := clampHeatmapFloat64(normalized, 0, 1)
+	clamped := format.Clamp(normalized, 0, 1)
 	if len(stops) == 0 {
 		return color.NRGBA{}
 	}
@@ -2512,7 +2489,7 @@ func interpolateHeatmapColor(normalized float64, stops []heatmapGradientStop) co
 }
 
 func blendNRGBA(base color.NRGBA, overlay color.NRGBA, alpha float64) color.NRGBA {
-	clampedAlpha := clampHeatmapFloat64(alpha, 0, 1)
+	clampedAlpha := format.Clamp(alpha, 0, 1)
 	inverseAlpha := 1 - clampedAlpha
 	return color.NRGBA{
 		R: uint8(math.Round(float64(base.R)*inverseAlpha + float64(overlay.R)*clampedAlpha)),
@@ -2717,26 +2694,6 @@ func blankHeatmapPreviewOption() previewDownloadOption {
 	}
 }
 
-func clampHeatmapFloat64(value float64, minimum float64, maximum float64) float64 {
-	if value < minimum {
-		return minimum
-	}
-	if value > maximum {
-		return maximum
-	}
-	return value
-}
-
-func clampHeatmapInt(value int, minimum int, maximum int) int {
-	if value < minimum {
-		return minimum
-	}
-	if value > maximum {
-		return maximum
-	}
-	return value
-}
-
 func mapPartHeightBounds(parts []rbxlHeatmapMapPart) (float64, float64) {
 	if len(parts) == 0 {
 		return 0, 0
@@ -2751,11 +2708,11 @@ func mapPartHeightBounds(parts []rbxlHeatmapMapPart) (float64, float64) {
 }
 
 func shadeHeatmapColor(base color.NRGBA, factor float64) color.NRGBA {
-	clamped := clampHeatmapFloat64(factor, 0, 1.4)
+	clamped := format.Clamp(factor, 0, 1.4)
 	return color.NRGBA{
-		R: uint8(math.Round(clampHeatmapFloat64(float64(base.R)*clamped, 0, 255))),
-		G: uint8(math.Round(clampHeatmapFloat64(float64(base.G)*clamped, 0, 255))),
-		B: uint8(math.Round(clampHeatmapFloat64(float64(base.B)*clamped, 0, 255))),
+		R: uint8(math.Round(format.Clamp(float64(base.R)*clamped, 0, 255))),
+		G: uint8(math.Round(format.Clamp(float64(base.G)*clamped, 0, 255))),
+		B: uint8(math.Round(format.Clamp(float64(base.B)*clamped, 0, 255))),
 		A: 255,
 	}
 }

@@ -14,6 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"joxblox/internal/debug"
+	"joxblox/internal/roblox"
 )
 
 const rustyAssetToolDefaultLimit = 5_000
@@ -108,15 +111,15 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath string, assetT
 	if cacheKeyOk {
 		if cached, found := assetIDsExtractorCache.Load(cacheKey); found {
 			entry := cached.(assetIDsExtractorCacheEntry)
-			logDebugf("Rusty Asset Tool scan extraction cache hit: %s (limit=%d)", filePath, limit)
+			debug.Logf("Rusty Asset Tool scan extraction cache hit: %s (limit=%d)", filePath, limit)
 			return entry.AssetIDs, entry.UseCounts, entry.References, entry.CommandOutput, nil
 		}
 	}
-	logDebugf(
+	debug.Logf(
 		"Rusty Asset Tool requested for file: %s (limit=%d, assetType=%s (%d))",
 		filePath,
 		limit,
-		getAssetTypeName(assetTypeID),
+		roblox.GetAssetTypeName(assetTypeID),
 		assetTypeID,
 	)
 
@@ -135,23 +138,23 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath string, assetT
 	if bundledBinaryPath, bundledErr := prepareBundledRustyAssetToolBinary(); bundledErr == nil {
 		commandName = bundledBinaryPath
 		commandArgs = []string{filePath, strconv.Itoa(limit)}
-		logDebugf("Using bundled Rusty Asset Tool binary: %s", bundledBinaryPath)
+		debug.Logf("Using bundled Rusty Asset Tool binary: %s", bundledBinaryPath)
 	} else if !errors.Is(bundledErr, errBundledRustyAssetToolUnavailable) {
-		logDebugf("Bundled Rusty Asset Tool prepare failed: %s", bundledErr.Error())
+		debug.Logf("Bundled Rusty Asset Tool prepare failed: %s", bundledErr.Error())
 		return nil, map[int64]int{}, []rustyAssetToolResult{}, "", bundledErr
 	} else if binaryPath, found := findRustyAssetToolBinaryPath(); found {
 		commandName = binaryPath
 		commandArgs = []string{filePath, strconv.Itoa(limit)}
-		logDebugf("Using Rusty Asset Tool binary: %s", binaryPath)
+		debug.Logf("Using Rusty Asset Tool binary: %s", binaryPath)
 	} else {
 		toolDirectoryPath, cargoManifestPath, found := findRustyAssetToolCargoManifestPath()
 		if !found {
-			logDebugf("Rusty Asset Tool unavailable: no bundled binary or Cargo manifest found")
+			debug.Logf("Rusty Asset Tool unavailable: no bundled binary or Cargo manifest found")
 			return nil, map[int64]int{}, []rustyAssetToolResult{}, "", fmt.Errorf("Rusty Asset Tool unavailable: bundled binary not found")
 		}
 		commandName = "cargo"
 		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", filePath, strconv.Itoa(limit)}
-		logDebugf("Rusty Asset Tool binary missing, using cargo run from %s", toolDirectoryPath)
+		debug.Logf("Rusty Asset Tool binary missing, using cargo run from %s", toolDirectoryPath)
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
@@ -170,16 +173,16 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath string, assetT
 	command.Stderr = &stderrBuffer
 	runErr := command.Run()
 	if commandContext.Err() != nil {
-		logDebugf("Rusty Asset Tool cancelled")
+		debug.Logf("Rusty Asset Tool cancelled")
 		return nil, map[int64]int{}, []rustyAssetToolResult{}, "", errScanStopped
 	}
 	if runErr != nil {
 		stderrText := strings.TrimSpace(stderrBuffer.String())
 		if stderrText == "" {
-			logDebugf("Rusty Asset Tool failed: %s", runErr.Error())
+			debug.Logf("Rusty Asset Tool failed: %s", runErr.Error())
 			return nil, map[int64]int{}, []rustyAssetToolResult{}, "", fmt.Errorf("Rusty Asset Tool failed: %s", runErr.Error())
 		} else {
-			logDebugf("Rusty Asset Tool failed: %s | stderr: %s", runErr.Error(), stderrText)
+			debug.Logf("Rusty Asset Tool failed: %s | stderr: %s", runErr.Error(), stderrText)
 			return nil, map[int64]int{}, []rustyAssetToolResult{}, "", fmt.Errorf("Rusty Asset Tool failed: %s", stderrText)
 		}
 	}
@@ -187,7 +190,7 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath string, assetT
 	commandOutput := stdoutBuffer.Bytes()
 	commandOutputText := string(commandOutput)
 	assetIDsFromDOM, useCountsByAssetID, extractedReferences := extractAssetIDsFromRustDOMJSON(commandOutputText, limit)
-	logDebugf(
+	debug.Logf(
 		"Rusty Asset Tool returned JSON bytes=%d and parsed references=%d",
 		len(commandOutput),
 		len(extractedReferences),
@@ -210,12 +213,12 @@ func extractFilteredRefsWithRustyAssetTool(filePath string, pathPrefixes []strin
 	cacheKey, cacheKeyOk := rustExtractorCacheKeyFor(filePath, pathPrefixes, "filtered")
 	if cacheKeyOk {
 		if cached, found := filteredRefsExtractorCache.Load(cacheKey); found {
-			logDebugf("Rusty Asset Tool filtered extraction cache hit: %s", filePath)
+			debug.Logf("Rusty Asset Tool filtered extraction cache hit: %s", filePath)
 			return cached.([]rustyAssetToolResult), nil
 		}
 	}
 	prefixArg := strings.Join(pathPrefixes, ",")
-	logDebugf("Rusty Asset Tool filtered extraction: %s (prefixes=%s)", filePath, prefixArg)
+	debug.Logf("Rusty Asset Tool filtered extraction: %s (prefixes=%s)", filePath, prefixArg)
 
 	commandContext, cancelCommand := context.WithCancel(context.Background())
 	defer cancelCommand()
@@ -246,7 +249,7 @@ func extractFilteredRefsWithRustyAssetTool(filePath string, pathPrefixes []strin
 		}
 		commandName = "cargo"
 		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", filePath, "0", prefixArg}
-		logDebugf("Rusty Asset Tool binary missing, using cargo run from %s", toolDirectoryPath)
+		debug.Logf("Rusty Asset Tool binary missing, using cargo run from %s", toolDirectoryPath)
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
@@ -279,7 +282,7 @@ func extractFilteredRefsWithRustyAssetTool(filePath string, pathPrefixes []strin
 	if err := json.Unmarshal(stdoutBuffer.Bytes(), &results); err != nil {
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
-	logDebugf("Rusty Asset Tool filtered extraction returned %d references", len(results))
+	debug.Logf("Rusty Asset Tool filtered extraction returned %d references", len(results))
 	if cacheKeyOk {
 		filteredRefsExtractorCache.Store(cacheKey, results)
 	}
@@ -293,12 +296,12 @@ func extractPositionedRefsWithRustyAssetTool(filePath string, pathPrefixes []str
 	cacheKey, cacheKeyOk := rustExtractorCacheKeyFor(filePath, pathPrefixes, "heatmap")
 	if cacheKeyOk {
 		if cached, found := positionedRefsExtractorCache.Load(cacheKey); found {
-			logDebugf("Rusty Asset Tool heatmap extraction cache hit: %s", filePath)
+			debug.Logf("Rusty Asset Tool heatmap extraction cache hit: %s", filePath)
 			return cached.([]positionedRustyAssetToolResult), nil
 		}
 	}
 	prefixArg := strings.Join(pathPrefixes, ",")
-	logDebugf("Rusty Asset Tool heatmap extraction: %s (prefixes=%s)", filePath, prefixArg)
+	debug.Logf("Rusty Asset Tool heatmap extraction: %s (prefixes=%s)", filePath, prefixArg)
 
 	commandContext, cancelCommand := context.WithCancel(context.Background())
 	defer cancelCommand()
@@ -347,7 +350,7 @@ func extractPositionedRefsWithRustyAssetTool(filePath string, pathPrefixes []str
 	if err := json.Unmarshal(stdoutBuffer.Bytes(), &results); err != nil {
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
-	logDebugf("Rusty Asset Tool heatmap extraction returned %d references", len(results))
+	debug.Logf("Rusty Asset Tool heatmap extraction returned %d references", len(results))
 	if cacheKeyOk {
 		positionedRefsExtractorCache.Store(cacheKey, results)
 	}
@@ -359,7 +362,7 @@ func extractMissingMaterialVariantsWithRustyAssetTool(filePath string, pathPrefi
 		return nil, nil
 	}
 	prefixArg := strings.Join(pathPrefixes, ",")
-	logDebugf("Rusty Asset Tool material warning extraction: %s (prefixes=%s)", filePath, prefixArg)
+	debug.Logf("Rusty Asset Tool material warning extraction: %s (prefixes=%s)", filePath, prefixArg)
 
 	commandContext, cancelCommand := context.WithCancel(context.Background())
 	defer cancelCommand()
@@ -408,7 +411,7 @@ func extractMissingMaterialVariantsWithRustyAssetTool(filePath string, pathPrefi
 	if err := json.Unmarshal(stdoutBuffer.Bytes(), &results); err != nil {
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
-	logDebugf("Rusty Asset Tool material warning extraction returned %d missing variants", len(results))
+	debug.Logf("Rusty Asset Tool material warning extraction returned %d missing variants", len(results))
 	return results, nil
 }
 
@@ -419,12 +422,12 @@ func extractMapRenderPartsWithRustyAssetTool(filePath string, pathPrefixes []str
 	cacheKey, cacheKeyOk := rustExtractorCacheKeyFor(filePath, pathPrefixes, "map")
 	if cacheKeyOk {
 		if cached, found := mapRenderPartsExtractorCache.Load(cacheKey); found {
-			logDebugf("Rusty Asset Tool map render extraction cache hit: %s", filePath)
+			debug.Logf("Rusty Asset Tool map render extraction cache hit: %s", filePath)
 			return cached.([]mapRenderPartRustyAssetToolResult), nil
 		}
 	}
 	prefixArg := strings.Join(pathPrefixes, ",")
-	logDebugf("Rusty Asset Tool map render extraction: %s (prefixes=%s)", filePath, prefixArg)
+	debug.Logf("Rusty Asset Tool map render extraction: %s (prefixes=%s)", filePath, prefixArg)
 
 	commandContext, cancelCommand := context.WithCancel(context.Background())
 	defer cancelCommand()
@@ -473,7 +476,7 @@ func extractMapRenderPartsWithRustyAssetTool(filePath string, pathPrefixes []str
 	if err := json.Unmarshal(stdoutBuffer.Bytes(), &results); err != nil {
 		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
 	}
-	logDebugf("Rusty Asset Tool map render extraction returned %d parts", len(results))
+	debug.Logf("Rusty Asset Tool map render extraction returned %d parts", len(results))
 	if cacheKeyOk {
 		mapRenderPartsExtractorCache.Store(cacheKey, results)
 	}
@@ -492,7 +495,7 @@ func extractMeshStatsWithRustyAssetToolFromBytes(fileBytes []byte) (meshHeaderIn
 
 	tempFile, createErr := os.CreateTemp("", "joxblox-rusty-asset-tool-mesh-stats-*.bin")
 	if createErr != nil {
-		logDebugf("Rusty Asset Tool mesh stats temp file create failed: %s", createErr.Error())
+		debug.Logf("Rusty Asset Tool mesh stats temp file create failed: %s", createErr.Error())
 		return meshHeaderInfo{}, createErr
 	}
 	tempFilePath := tempFile.Name()
@@ -500,11 +503,11 @@ func extractMeshStatsWithRustyAssetToolFromBytes(fileBytes []byte) (meshHeaderIn
 
 	if _, writeErr := tempFile.Write(fileBytes); writeErr != nil {
 		tempFile.Close()
-		logDebugf("Rusty Asset Tool mesh stats temp file write failed: %s", writeErr.Error())
+		debug.Logf("Rusty Asset Tool mesh stats temp file write failed: %s", writeErr.Error())
 		return meshHeaderInfo{}, writeErr
 	}
 	if closeErr := tempFile.Close(); closeErr != nil {
-		logDebugf("Rusty Asset Tool mesh stats temp file close failed: %s", closeErr.Error())
+		debug.Logf("Rusty Asset Tool mesh stats temp file close failed: %s", closeErr.Error())
 		return meshHeaderInfo{}, closeErr
 	}
 
@@ -533,7 +536,7 @@ func extractMeshStatsWithRustyAssetToolFromFile(filePath string) (meshHeaderInfo
 		}
 		commandName = "cargo"
 		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", "mesh-stats", filePath}
-		logDebugf("Using cargo run for Rusty Asset Tool mesh stats extraction from %s", toolDirectoryPath)
+		debug.Logf("Using cargo run for Rusty Asset Tool mesh stats extraction from %s", toolDirectoryPath)
 	}
 
 	command := exec.Command(commandName, commandArgs...)
@@ -580,7 +583,7 @@ func extractMeshPreviewWithRustyAssetToolFromBytesWithLimit(fileBytes []byte, ma
 
 	tempFile, createErr := os.CreateTemp("", "joxblox-rusty-asset-tool-mesh-preview-*.bin")
 	if createErr != nil {
-		logDebugf("Rusty Asset Tool mesh preview temp file create failed: %s", createErr.Error())
+		debug.Logf("Rusty Asset Tool mesh preview temp file create failed: %s", createErr.Error())
 		return meshPreviewData{}, createErr
 	}
 	tempFilePath := tempFile.Name()
@@ -588,11 +591,11 @@ func extractMeshPreviewWithRustyAssetToolFromBytesWithLimit(fileBytes []byte, ma
 
 	if _, writeErr := tempFile.Write(fileBytes); writeErr != nil {
 		tempFile.Close()
-		logDebugf("Rusty Asset Tool mesh preview temp file write failed: %s", writeErr.Error())
+		debug.Logf("Rusty Asset Tool mesh preview temp file write failed: %s", writeErr.Error())
 		return meshPreviewData{}, writeErr
 	}
 	if closeErr := tempFile.Close(); closeErr != nil {
-		logDebugf("Rusty Asset Tool mesh preview temp file close failed: %s", closeErr.Error())
+		debug.Logf("Rusty Asset Tool mesh preview temp file close failed: %s", closeErr.Error())
 		return meshPreviewData{}, closeErr
 	}
 
@@ -628,7 +631,7 @@ func extractMeshPreviewWithRustyAssetToolFromFileWithLimit(filePath string, maxT
 		}
 		commandName = "cargo"
 		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", "mesh-preview", filePath, strconv.Itoa(maxTriangles)}
-		logDebugf("Using cargo run for Rusty Asset Tool mesh preview extraction from %s", toolDirectoryPath)
+		debug.Logf("Using cargo run for Rusty Asset Tool mesh preview extraction from %s", toolDirectoryPath)
 	}
 
 	command := exec.Command(commandName, commandArgs...)
@@ -671,7 +674,7 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCountsFromBytes(fileBytes []by
 
 	tempFile, createErr := os.CreateTemp("", "joxblox-rusty-asset-tool-*.bin")
 	if createErr != nil {
-		logDebugf("Rusty Asset Tool temp file create failed: %s", createErr.Error())
+		debug.Logf("Rusty Asset Tool temp file create failed: %s", createErr.Error())
 		return nil, map[int64]int{}, []rustyAssetToolResult{}, "", createErr
 	}
 	tempFilePath := tempFile.Name()
@@ -680,15 +683,15 @@ func extractAssetIDsWithRustyAssetToolFromFileWithCountsFromBytes(fileBytes []by
 	_, writeErr := tempFile.Write(fileBytes)
 	closeErr := tempFile.Close()
 	if writeErr != nil {
-		logDebugf("Rusty Asset Tool temp file write failed: %s", writeErr.Error())
+		debug.Logf("Rusty Asset Tool temp file write failed: %s", writeErr.Error())
 		return nil, map[int64]int{}, []rustyAssetToolResult{}, "", writeErr
 	}
 	if closeErr != nil {
-		logDebugf("Rusty Asset Tool temp file close failed: %s", closeErr.Error())
+		debug.Logf("Rusty Asset Tool temp file close failed: %s", closeErr.Error())
 		return nil, map[int64]int{}, []rustyAssetToolResult{}, "", closeErr
 	}
 
-	logDebugf("Rusty Asset Tool processing in-memory payload (%d bytes)", len(fileBytes))
+	debug.Logf("Rusty Asset Tool processing in-memory payload (%d bytes)", len(fileBytes))
 	return extractAssetIDsWithRustyAssetToolFromFileWithCounts(tempFilePath, assetTypeID, limit, nil)
 }
 
@@ -841,13 +844,13 @@ func resolveRustyAssetToolSubcommandCommandWithPaths(subcommand string, filePath
 
 	if strings.TrimSpace(bundledBinaryPath) != "" {
 		commandArgs := append([]string{trimmedSubcommand, filePath}, filteredExtraArgs...)
-		logDebugf("Using bundled Rusty Asset Tool binary: %s", bundledBinaryPath)
+		debug.Logf("Using bundled Rusty Asset Tool binary: %s", bundledBinaryPath)
 		return bundledBinaryPath, commandArgs, false, nil
 	}
 
 	if strings.TrimSpace(binaryPath) != "" {
 		commandArgs := append([]string{trimmedSubcommand, filePath}, filteredExtraArgs...)
-		logDebugf("Using Rusty Asset Tool binary: %s", binaryPath)
+		debug.Logf("Using Rusty Asset Tool binary: %s", binaryPath)
 		return binaryPath, commandArgs, false, nil
 	}
 
@@ -857,7 +860,7 @@ func resolveRustyAssetToolSubcommandCommandWithPaths(subcommand string, filePath
 	toolDirectoryPath := filepath.Dir(cargoManifestPath)
 	commandArgs := []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", trimmedSubcommand, filePath}
 	commandArgs = append(commandArgs, filteredExtraArgs...)
-	logDebugf("Using cargo run for Rusty Asset Tool %s extraction from %s", trimmedSubcommand, toolDirectoryPath)
+	debug.Logf("Using cargo run for Rusty Asset Tool %s extraction from %s", trimmedSubcommand, toolDirectoryPath)
 	return "cargo", commandArgs, true, nil
 }
 
@@ -904,13 +907,13 @@ func replaceAssetIDsInRBXLWithRustyAssetTool(inputPath string, outputPath string
 	if bundledBinaryPath, bundledErr := prepareBundledRustyAssetToolBinary(); bundledErr == nil {
 		commandName = bundledBinaryPath
 		commandArgs = replaceArgs
-		logDebugf("Using bundled Rusty Asset Tool binary for replace: %s", bundledBinaryPath)
+		debug.Logf("Using bundled Rusty Asset Tool binary for replace: %s", bundledBinaryPath)
 	} else if !errors.Is(bundledErr, errBundledRustyAssetToolUnavailable) {
 		return 0, bundledErr
 	} else if binaryPath, found := findRustyAssetToolBinaryPath(); found {
 		commandName = binaryPath
 		commandArgs = replaceArgs
-		logDebugf("Using Rusty Asset Tool binary for replace: %s", binaryPath)
+		debug.Logf("Using Rusty Asset Tool binary for replace: %s", binaryPath)
 	} else {
 		_, cargoManifestPath, found := findRustyAssetToolCargoManifestPath()
 		if !found {
@@ -918,7 +921,7 @@ func replaceAssetIDsInRBXLWithRustyAssetTool(inputPath string, outputPath string
 		}
 		commandName = "cargo"
 		commandArgs = append([]string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--"}, replaceArgs...)
-		logDebugf("Rusty Asset Tool binary missing, using cargo run for replace")
+		debug.Logf("Rusty Asset Tool binary missing, using cargo run for replace")
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
@@ -937,33 +940,33 @@ func replaceAssetIDsInRBXLWithRustyAssetTool(inputPath string, outputPath string
 	command.Stderr = &stderrBuffer
 	runErr := command.Run()
 	if commandContext.Err() != nil {
-		logDebugf("Rusty Asset Tool replace cancelled")
+		debug.Logf("Rusty Asset Tool replace cancelled")
 		return 0, errScanStopped
 	}
 	if runErr != nil {
 		stderrText := strings.TrimSpace(stderrBuffer.String())
 		if stderrText != "" {
-			logDebugf("Rusty Asset Tool replace failed: %s | stderr: %s", runErr.Error(), stderrText)
+			debug.Logf("Rusty Asset Tool replace failed: %s | stderr: %s", runErr.Error(), stderrText)
 			return 0, fmt.Errorf("Rusty Asset Tool replace failed: %s", stderrText)
 		}
-		logDebugf("Rusty Asset Tool replace failed: %s", runErr.Error())
+		debug.Logf("Rusty Asset Tool replace failed: %s", runErr.Error())
 		return 0, fmt.Errorf("Rusty Asset Tool replace failed: %s", runErr.Error())
 	}
 
 	countText := strings.TrimSpace(stdoutBuffer.String())
 	count, parseErr := strconv.Atoi(countText)
 	if parseErr != nil {
-		logDebugf("Rusty Asset Tool replace returned non-numeric output: %s", countText)
+		debug.Logf("Rusty Asset Tool replace returned non-numeric output: %s", countText)
 		return 0, nil
 	}
-	logDebugf("Rusty Asset Tool replace completed: %d property values replaced", count)
+	debug.Logf("Rusty Asset Tool replace completed: %d property values replaced", count)
 	return count, nil
 }
 
 func extractAssetIDsFromRustDOMJSON(domJSON string, limit int) ([]int64, map[int64]int, []rustyAssetToolResult) {
 	extractorResults := []rustyAssetToolResult{}
 	if unmarshalErr := json.Unmarshal([]byte(domJSON), &extractorResults); unmarshalErr != nil {
-		logDebugf("Rusty Asset Tool JSON parse failed: %s", unmarshalErr.Error())
+		debug.Logf("Rusty Asset Tool JSON parse failed: %s", unmarshalErr.Error())
 		return []int64{}, map[int64]int{}, []rustyAssetToolResult{}
 	}
 

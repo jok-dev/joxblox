@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"joxblox/internal/roblox"
 )
 
 func TestAssetDownloadCachePathsStableAndDistinct(t *testing.T) {
@@ -29,7 +31,7 @@ func TestAssetDownloadJSONCacheEntryRoundTrip(t *testing.T) {
 	expected := cachedThumbnailInfo{
 		Info: thumbnailInfo{
 			ImageURL: "https://example.com/thumb.png",
-			State:    stateCompleted,
+			State:    roblox.StateCompleted,
 			Version:  "TN3",
 		},
 		RawJSON: `{"ok":true}`,

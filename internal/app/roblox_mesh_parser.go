@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
 )
 
 type meshHeaderInfo struct {
@@ -15,6 +18,7 @@ type meshHeaderInfo struct {
 
 const meshVersionPrefix = "version "
 const meshCoreMeshPrefix = "COREMESH"
+
 func parseMeshHeader(data []byte) (meshHeaderInfo, error) {
 	if len(data) < 13 {
 		return meshHeaderInfo{}, fmt.Errorf("data too short for mesh header")
@@ -183,7 +187,7 @@ func locateDracoPayloadStart(data []byte, bodyStart int) (int, error) {
 }
 
 func isMeshAssetType(assetTypeID int) bool {
-	return assetTypeID == assetTypeMesh || assetTypeID == 40
+	return assetTypeID == roblox.AssetTypeMesh || assetTypeID == 40
 }
 
 func formatMeshInfo(info meshHeaderInfo) string {
@@ -191,21 +195,5 @@ func formatMeshInfo(info meshHeaderInfo) string {
 	if version == "" {
 		version = "?"
 	}
-	return fmt.Sprintf("v%s · %s triangles · %s vertices", version, formatIntCommas(int64(info.NumFaces)), formatIntCommas(int64(info.NumVerts)))
-}
-
-func formatIntCommas(n int64) string {
-	s := strconv.FormatInt(n, 10)
-	if len(s) <= 3 {
-		return s
-	}
-	var result []byte
-	for i, ch := range s {
-		remaining := len(s) - i
-		if i > 0 && remaining%3 == 0 {
-			result = append(result, ',')
-		}
-		result = append(result, byte(ch))
-	}
-	return string(result)
+	return fmt.Sprintf("v%s · %s triangles · %s vertices", version, format.FormatIntCommas(int64(info.NumFaces)), format.FormatIntCommas(int64(info.NumVerts)))
 }

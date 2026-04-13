@@ -18,6 +18,9 @@ import (
 	"sync"
 	"time"
 
+	"joxblox/internal/debug"
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 )
 
@@ -510,7 +513,7 @@ func loadThumbnailPreviewWithTrace(request *rbxThumbRequest, trace *assetRequest
 		ReferencedAssetIDs: []int64{},
 		ChildAssets:        []childAssetInfo{},
 		TotalBytesSize:     thumbnailImageInfo.BytesSize,
-		Source:             sourceThumbnailsDirect,
+		Source:             roblox.SourceThumbnailsDirect,
 		State:              thumbnailDetails.State,
 		WarningMessage:     "",
 		AssetDeliveryJSON:  "",
@@ -551,7 +554,7 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 			economyRawJSON = economyInfo.RawJSON
 			if economyInfo.AssetTypeID > 0 {
 				assetTypeID = economyInfo.AssetTypeID
-				assetTypeName = getAssetTypeName(economyInfo.AssetTypeID)
+				assetTypeName = roblox.GetAssetTypeName(economyInfo.AssetTypeID)
 			}
 		}
 	}
@@ -596,8 +599,8 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 					ReferencedAssetIDs: referencedAssetIDs,
 					ChildAssets:        childAssets,
 					TotalBytesSize:     totalBytesSize,
-					Source:             sourceAssetDeliveryInGame,
-					State:              stateCompleted,
+					Source:             roblox.SourceAssetDeliveryInGame,
+					State:              roblox.StateCompleted,
 					WarningMessage:     "",
 					AssetDeliveryJSON:  assetDeliveryRawJSON,
 					ThumbnailJSON:      "",
@@ -610,7 +613,7 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 					DownloadIsOriginal: false,
 				}, nil
 			}
-			if assetTypeID > 0 && assetTypeID != assetTypeImage {
+			if assetTypeID > 0 && assetTypeID != roblox.AssetTypeImage {
 				assetDeliveryErr = fmt.Errorf("asset type %s (%d) is not directly previewable from AssetDelivery payload", assetTypeName, assetTypeID)
 			} else {
 				assetDeliveryErr = fmt.Errorf("AssetDelivery file is not an image preview")
@@ -725,7 +728,7 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 		ReferencedAssetIDs: referencedAssetIDs,
 		ChildAssets:        childAssets,
 		TotalBytesSize:     totalBytesSize,
-		Source:             sourceThumbnailsFallback,
+		Source:             roblox.SourceThumbnailsFallback,
 		State:              thumbnailInfo.State,
 		WarningMessage:     assetDeliveryErrText,
 		AssetDeliveryJSON:  assetDeliveryRawJSON,
@@ -770,8 +773,8 @@ func buildNoThumbnailPreviewResult(
 		ReferencedAssetIDs: referencedAssetIDs,
 		ChildAssets:        childAssets,
 		TotalBytesSize:     totalBytesSize,
-		Source:             sourceNoThumbnail,
-		State:              stateUnavailable,
+		Source:             roblox.SourceNoThumbnail,
+		State:              roblox.StateUnavailable,
 		WarningMessage:     warningMessage,
 		AssetDeliveryJSON:  assetDeliveryRawJSON,
 		ThumbnailJSON:      thumbnailRawJSON,
@@ -796,16 +799,16 @@ func fetchThumbnailInfoWithTrace(assetID int64, trace *assetRequestTrace) (*thum
 		var cachedEntry cachedThumbnailInfo
 		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, thumbnailMetadataCacheMaxAge, &cachedEntry)
 		if err != nil {
-			logDebugf("Thumbnail metadata cache read failed for %s: %s", cacheKey, err.Error())
+			debug.Logf("Thumbnail metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
 			trace.markDisk()
-			logDebugf("Thumbnail metadata cache hit for %s", cacheKey)
+			debug.Logf("Thumbnail metadata cache hit for %s", cacheKey)
 			return &cachedEntry.Info, cachedEntry.RawJSON, nil
 		}
 	}
 
 	trace.markNetwork()
-	response, err := doRobloxThumbnailGet(assetID, requestTimeout)
+	response, err := roblox.DoThumbnailGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, "", err
 	}
@@ -840,7 +843,7 @@ func fetchThumbnailInfoWithTrace(assetID int64, trace *assetRequestTrace) (*thum
 			Info:    *info,
 			RawJSON: rawResponse,
 		}); err != nil {
-			logDebugf("Thumbnail metadata cache write failed for %s: %s", cacheKey, err.Error())
+			debug.Logf("Thumbnail metadata cache write failed for %s: %s", cacheKey, err.Error())
 		}
 	}
 	return info, rawResponse, nil
@@ -857,10 +860,10 @@ func fetchThumbnailInfoForRequestWithTrace(request *rbxThumbRequest, trace *asse
 		var cachedEntry cachedThumbnailInfo
 		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, thumbnailMetadataCacheMaxAge, &cachedEntry)
 		if err != nil {
-			logDebugf("Thumbnail request metadata cache read failed for %s: %s", cacheKey, err.Error())
+			debug.Logf("Thumbnail request metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
 			trace.markDisk()
-			logDebugf("Thumbnail request metadata cache hit for %s", cacheKey)
+			debug.Logf("Thumbnail request metadata cache hit for %s", cacheKey)
 			return &cachedEntry.Info, cachedEntry.RawJSON, nil
 		}
 	}
@@ -878,7 +881,7 @@ func fetchThumbnailInfoForRequestWithTrace(request *rbxThumbRequest, trace *asse
 	}
 
 	trace.markNetwork()
-	response, err := doRobloxThumbnailBatchPost(bytes.NewReader(requestJSON), requestTimeout)
+	response, err := roblox.DoThumbnailBatchPost(bytes.NewReader(requestJSON), requestTimeout)
 	if err != nil {
 		return nil, "", err
 	}
@@ -913,7 +916,7 @@ func fetchThumbnailInfoForRequestWithTrace(request *rbxThumbRequest, trace *asse
 			Info:    *info,
 			RawJSON: rawResponse,
 		}); err != nil {
-			logDebugf("Thumbnail request metadata cache write failed for %s: %s", cacheKey, err.Error())
+			debug.Logf("Thumbnail request metadata cache write failed for %s: %s", cacheKey, err.Error())
 		}
 	}
 	return info, rawResponse, nil
@@ -945,16 +948,16 @@ func fetchAssetDeliveryInfoWithTrace(assetID int64, trace *assetRequestTrace) (*
 		var cachedEntry assetDeliveryInfo
 		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, assetDeliveryMetadataMaxAge, &cachedEntry)
 		if err != nil {
-			logDebugf("AssetDelivery metadata cache read failed for %s: %s", cacheKey, err.Error())
+			debug.Logf("AssetDelivery metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
 			trace.markDisk()
-			logDebugf("AssetDelivery metadata cache hit for %s", cacheKey)
+			debug.Logf("AssetDelivery metadata cache hit for %s", cacheKey)
 			return &cachedEntry, nil
 		}
 	}
 
 	trace.markNetwork()
-	response, err := doRobloxAssetDeliveryGet(assetID, requestTimeout)
+	response, err := roblox.DoAssetDeliveryGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -974,7 +977,7 @@ func fetchAssetDeliveryInfoWithTrace(assetID int64, trace *assetRequestTrace) (*
 	if err := json.Unmarshal(responseBytes, &apiResponse); err == nil {
 		info.Location = apiResponse.Location
 		info.AssetTypeID = apiResponse.AssetTypeID
-		info.AssetTypeName = getAssetTypeName(apiResponse.AssetTypeID)
+		info.AssetTypeName = roblox.GetAssetTypeName(apiResponse.AssetTypeID)
 	}
 
 	if response.StatusCode != http.StatusOK {
@@ -996,7 +999,7 @@ func fetchAssetDeliveryInfoWithTrace(assetID int64, trace *assetRequestTrace) (*
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildAssetDeliveryMetadataCacheKey(assetID)
 		if err := writeAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, info); err != nil {
-			logDebugf("AssetDelivery metadata cache write failed for %s: %s", cacheKey, err.Error())
+			debug.Logf("AssetDelivery metadata cache write failed for %s: %s", cacheKey, err.Error())
 		}
 	}
 
@@ -1110,7 +1113,7 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 		rustyAssetToolReferences := []rustyAssetToolResult{}
 		rustyAssetToolJSON := ""
 		var extractErr error
-		if !shouldSkipRustExtractionForAssetType(assetTypeID) {
+		if !roblox.ShouldSkipRustExtractionForAssetType(assetTypeID) {
 			referencedAssetIDs, rustyAssetToolReferences, rustyAssetToolJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
 		}
 		if extractErr != nil {
@@ -1142,7 +1145,7 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 	rustyAssetToolReferences := []rustyAssetToolResult{}
 	rustyAssetToolJSON := ""
 	var extractErr error
-	if !shouldSkipRustExtractionForAssetType(assetTypeID) {
+	if !roblox.ShouldSkipRustExtractionForAssetType(assetTypeID) {
 		referencedAssetIDs, rustyAssetToolReferences, rustyAssetToolJSON, extractErr = extractReferencedAssetIDsFromBytes(fileBytes, assetTypeID)
 	}
 	if extractErr != nil {
@@ -1168,7 +1171,7 @@ func buildAssetDownloadFileName(assetID int64, assetTypeID int, contentType stri
 		}
 	} else {
 		_ = contentType
-		fileExtension = getAssetDownloadExtension(assetTypeID)
+		fileExtension = roblox.GetAssetDownloadExtension(assetTypeID)
 	}
 	return fmt.Sprintf("asset_%d.%s", assetID, fileExtension)
 }
@@ -1185,7 +1188,7 @@ func buildFallbackWarningText(warningReason string) string {
 }
 
 func fetchAssetDetailsFromEconomy(assetID int64) (*economyAssetDetailsInfo, error) {
-	response, err := doRobloxEconomyDetailsGet(assetID, requestTimeout)
+	response, err := roblox.DoEconomyDetailsGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -1354,9 +1357,9 @@ func getAssetSelfInfoWithTrace(assetID int64, trace *assetRequestTrace) (assetSe
 func extractReferencedAssetIDsFromBytes(fileBytes []byte, assetTypeID int) ([]int64, []rustyAssetToolResult, string, error) {
 	rustAssetIDs, _, rustyAssetToolReferences, rustyAssetToolJSON, rustErr := extractAssetIDsWithRustyAssetToolFromFileWithCountsFromBytes(fileBytes, assetTypeID, rustyAssetToolDefaultLimit)
 	if rustErr != nil {
-		logDebugf("Referenced asset extraction Rusty Asset Tool path errored: %s", rustErr.Error())
+		debug.Logf("Referenced asset extraction Rusty Asset Tool path errored: %s", rustErr.Error())
 		return []int64{}, []rustyAssetToolResult{}, rustyAssetToolJSON, rustErr
 	}
-	logDebugf("Referenced asset extraction Rusty Asset Tool path returned %d IDs", len(rustAssetIDs))
+	debug.Logf("Referenced asset extraction Rusty Asset Tool path returned %d IDs", len(rustAssetIDs))
 	return rustAssetIDs, rustyAssetToolReferences, rustyAssetToolJSON, nil
 }

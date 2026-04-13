@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -739,8 +742,8 @@ func (explorer *scanResultsExplorer) updateStatsLabels() {
 	explorer.statsShownLabel.SetText(fmt.Sprintf("Shown: %d", shownRowsCount))
 	explorer.statsFailedLabel.SetText(fmt.Sprintf("Failed: %d", failedRowsCount))
 	explorer.statsDuplicateLabel.SetText(fmt.Sprintf("Duplicates: %d", explorer.duplicateRowsCount))
-	explorer.statsDuplicateSizeLabel.SetText(fmt.Sprintf("Duplicate Size: %s", formatSizeAuto(explorer.duplicateBytesTotal)))
-	explorer.statsSizeLabel.SetText(fmt.Sprintf("Shown Size: %s", formatSizeAuto(shownBytesTotal)))
+	explorer.statsDuplicateSizeLabel.SetText(fmt.Sprintf("Duplicate Size: %s", format.FormatSizeAuto(explorer.duplicateBytesTotal)))
+	explorer.statsSizeLabel.SetText(fmt.Sprintf("Shown Size: %s", format.FormatSizeAuto(shownBytesTotal)))
 	explorer.statsTrianglesLabel.SetText(fmt.Sprintf("Shown Triangles: %d", shownTrianglesTotal))
 }
 
@@ -865,7 +868,7 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 	explorer.explorerState = newAssetExplorerState(selectedResult.AssetID, rootPreview)
 	explorer.renderSelectedAsset(selectedResult.AssetID, selectedResult.FilePath, rootPreview)
 	needsFullPreview := selectedResult.AssetID > 0 && selectedResult.State != failedScanRowState &&
-		(selectedResult.Resource == nil || selectedResult.Source == sourceNoThumbnail || strings.TrimSpace(selectedResult.Source) == "")
+		(selectedResult.Resource == nil || selectedResult.Source == roblox.SourceNoThumbnail || strings.TrimSpace(selectedResult.Source) == "")
 	if !needsFullPreview {
 		return
 	}
@@ -903,7 +906,7 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 
 func (explorer *scanResultsExplorer) cellEmoji(row scanResult, columnName string) string {
 	if explorer.variant == scanResultsExplorerVariantScan && columnName == "Type" {
-		return getAssetTypeEmoji(row.AssetTypeID)
+		return roblox.GetAssetTypeEmoji(row.AssetTypeID)
 	}
 	return ""
 }
@@ -932,21 +935,21 @@ func (explorer *scanResultsExplorer) columnValue(row scanResult, columnName stri
 	case "Type":
 		return scanResultTypeLabel(row)
 	case "Self Size":
-		return formatSizeAuto(row.BytesSize)
+		return format.FormatSizeAuto(row.BytesSize)
 	case "Total Byte Size":
-		return formatSizeAuto(row.TotalBytesSize)
+		return format.FormatSizeAuto(row.TotalBytesSize)
 	case "Texture Bytes":
-		return formatSizeAuto(row.TextureBytes)
+		return format.FormatSizeAuto(row.TextureBytes)
 	case "Texture Pixels":
 		if row.PixelCount > 0 {
-			return formatIntCommas(row.PixelCount)
+			return format.FormatIntCommas(row.PixelCount)
 		}
 		return "-"
 	case "Mesh Bytes":
-		return formatSizeAuto(row.MeshBytes)
+		return format.FormatSizeAuto(row.MeshBytes)
 	case "Mesh Triangles", "Triangles":
 		if row.MeshNumFaces > 0 {
-			return formatIntCommas(int64(row.MeshNumFaces))
+			return format.FormatIntCommas(int64(row.MeshNumFaces))
 		}
 		return "-"
 	case "Dimensions":

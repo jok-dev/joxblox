@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 )
 
@@ -113,7 +115,7 @@ func applyPreviewToScanResult(result scanResult, previewResult *assetPreviewResu
 		}
 	}
 
-	warning := isThumbnailFallback(previewResult.Source) && !isCompletedState(previewResult.State)
+	warning := roblox.IsThumbnailFallback(previewResult.Source) && !roblox.IsCompletedState(previewResult.State)
 	result.FileSHA256 = statsInfo.SHA256
 	result.Source = previewResult.Source
 	result.State = previewResult.State

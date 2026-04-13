@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"joxblox/internal/format"
+
 	"fyne.io/fyne/v2"
 )
 
@@ -319,7 +321,7 @@ func reportScanJSONProgress(report scanJSONProgressReporter, progress float64) {
 	if report == nil {
 		return
 	}
-	report(clampProgressValue(progress))
+	report(format.Clamp(progress, 0.0, 1.0))
 }
 
 func mapScanResultToExportRow(row scanResult) scanTableExportRow {

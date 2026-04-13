@@ -9,6 +9,9 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -52,7 +55,7 @@ func saveAssetDownloadCacheSettings(settings assetDownloadCacheSettings) error {
 
 	currentApp.Preferences().SetBool(preferenceKeyAssetDownloadCacheEnabled, normalizedSettings.Enabled)
 	currentApp.Preferences().SetString(preferenceKeyAssetDownloadCacheFolder, normalizedSettings.Folder)
-	logDebugf("Settings saved (asset_download_cache_enabled=%t, asset_download_cache_folder=%q)", normalizedSettings.Enabled, normalizedSettings.Folder)
+	debug.Logf("Settings saved (asset_download_cache_enabled=%t, asset_download_cache_folder=%q)", normalizedSettings.Enabled, normalizedSettings.Folder)
 	return nil
 }
 
@@ -93,7 +96,7 @@ func loadMeshPreviewMouseLookSensitivity() float64 {
 	if stored <= 0 {
 		return meshPreviewDefaultMouseLookSensitivity
 	}
-	return clampFloat64(stored, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
+	return format.Clamp(stored, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
 }
 
 func saveMeshPreviewMouseLookSensitivity(value float64) error {
@@ -101,9 +104,9 @@ func saveMeshPreviewMouseLookSensitivity(value float64) error {
 	if currentApp == nil {
 		return fmt.Errorf("application preferences are unavailable")
 	}
-	normalized := clampFloat64(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
+	normalized := format.Clamp(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
 	currentApp.Preferences().SetFloat(preferenceKeyMeshPreviewLookSensitivity, normalized)
-	logDebugf("Settings saved (mesh_preview_look_sensitivity=%f)", normalized)
+	debug.Logf("Settings saved (mesh_preview_look_sensitivity=%f)", normalized)
 	return nil
 }
 
@@ -165,7 +168,7 @@ func showSettingsDialog(window fyne.Window) {
 	lookSensitivitySlider.Step = meshPreviewMouseLookSensitivityStep
 	lookSensitivitySlider.SetValue(currentLookSensitivity)
 	lookSensitivitySlider.OnChanged = func(value float64) {
-		lookSensitivityValueLabel.SetText(fmt.Sprintf("%.4f", clampFloat64(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)))
+		lookSensitivityValueLabel.SetText(fmt.Sprintf("%.4f", format.Clamp(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)))
 	}
 
 	statusLabel := widget.NewLabel("")
@@ -191,7 +194,7 @@ func showSettingsDialog(window fyne.Window) {
 					cacheFolderSizeLabel.SetText(fmt.Sprintf("Current folder size: unavailable (%s)", err.Error()))
 					return
 				}
-				cacheFolderSizeLabel.SetText(fmt.Sprintf("Current folder size: %s", formatSizeAuto64(totalBytes)))
+				cacheFolderSizeLabel.SetText(fmt.Sprintf("Current folder size: %s", format.FormatSizeAuto64(totalBytes)))
 			})
 		}(folderPath, requestToken)
 	}

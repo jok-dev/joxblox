@@ -8,6 +8,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -322,7 +326,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		if view.suppressAudioVolumeChange {
 			return
 		}
-		view.audioVolumeValueLabel.SetText(fmt.Sprintf("%d%%", int(clampAudioSliderValue(value)*100)))
+		view.audioVolumeValueLabel.SetText(fmt.Sprintf("%d%%", int(format.Clamp(value, 0.0, 1.0)*100)))
 		if view.audioPlayer == nil {
 			return
 		}
@@ -574,11 +578,11 @@ func (view *assetView) SetData(data assetViewData) {
 			view.DimensionsValue.SetText("-")
 		}
 	}
-	view.SelfSizeValue.SetText(formatSizeAuto(statsInfo.BytesSize))
+	view.SelfSizeValue.SetText(format.FormatSizeAuto(statsInfo.BytesSize))
 	if totalBytesSize <= 0 {
 		totalBytesSize = statsInfo.BytesSize
 	}
-	view.TotalSizeValue.SetText(formatSizeAuto(totalBytesSize))
+	view.TotalSizeValue.SetText(format.FormatSizeAuto(totalBytesSize))
 	setLabelTextOrDash(view.FormatValue, statsInfo.Format)
 	setLabelTextOrDash(view.ContentTypeValue, statsInfo.ContentType)
 	if assetTypeID > 0 {
@@ -638,8 +642,8 @@ func (view *assetView) SetData(data assetViewData) {
 	view.NoteLabel.Hide()
 	view.NoteLabel.SetText("")
 
-	isThumbnailFallbackSource := isThumbnailFallback(sourceDescription)
-	thumbnailStateNotCompleted := isThumbnailFallbackSource && !isCompletedState(stateDescription)
+	isThumbnailFallbackSource := roblox.IsThumbnailFallback(sourceDescription)
+	thumbnailStateNotCompleted := isThumbnailFallbackSource && !roblox.IsCompletedState(stateDescription)
 	if isThumbnailFallbackSource {
 		view.SourceValue.SetText(fmt.Sprintf("⚠ %s", sourceDescription))
 		view.SourceValue.Importance = widget.DangerImportance
@@ -754,7 +758,7 @@ func (view *assetView) showMeshPreview(downloadBytes []byte) {
 				view.PreviewContainer.Refresh()
 				return
 			}
-			logDebugf("Mesh preview unavailable for asset %d: %s", selectedAssetID, previewErr.Error())
+			debug.Logf("Mesh preview unavailable for asset %d: %s", selectedAssetID, previewErr.Error())
 			view.PreviewImage.Hide()
 			view.MeshPreview.Hide()
 			view.PreviewPlaceholder.SetText(friendlyMeshPreviewError(previewErr))
@@ -806,18 +810,4 @@ func friendlyMeshPreviewError(err error) string {
 		return "Mesh preview failed: asset tool not found"
 	}
 	return fmt.Sprintf("Mesh preview failed: %s", msg)
-}
-
-func formatSizeAuto(bytesSize int) string {
-	return formatSizeAuto64(int64(bytesSize))
-}
-
-func formatSizeAuto64(bytesSize int64) string {
-	if bytesSize >= megabyte {
-		return fmt.Sprintf("%.2f MB", float64(bytesSize)/megabyte)
-	}
-	if bytesSize >= 1024 {
-		return fmt.Sprintf("%.2f KB", float64(bytesSize)/1024.0)
-	}
-	return fmt.Sprintf("%d bytes", bytesSize)
 }

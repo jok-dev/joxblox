@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"joxblox/internal/debug"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/storage"
@@ -117,7 +119,7 @@ func (view *assetView) saveJSONExportToFile() {
 			dialog.ShowError(writeErr, window)
 			return
 		}
-		logDebugf("Saved JSON export for asset %d", view.currentAssetID)
+		debug.Logf("Saved JSON export for asset %d", view.currentAssetID)
 	}, window)
 	saveDialog.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
 	saveDialog.SetFileName(fmt.Sprintf("asset-%d-details.json", view.currentAssetID))

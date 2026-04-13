@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"joxblox/internal/format"
+)
 
 func TestGradeFromThresholds(t *testing.T) {
 	thresholds := [6]float64{50, 100, 200, 300, 400, 500}
@@ -38,18 +42,18 @@ func TestComputeMeshComplexityGrade(t *testing.T) {
 		expected  string
 	}{
 		{0, gradeAPlus},
-		{199_999, gradeAPlus},
-		{200_000, gradeA},
-		{499_999, gradeA},
-		{500_000, gradeB},
-		{999_999, gradeB},
-		{1_000_000, gradeC},
-		{1_999_999, gradeC},
-		{2_000_000, gradeD},
-		{3_999_999, gradeD},
-		{4_000_000, gradeE},
-		{7_999_999, gradeE},
-		{8_000_000, gradeF},
+		{4_999, gradeAPlus},
+		{5_000, gradeA},
+		{14_999, gradeA},
+		{15_000, gradeB},
+		{19_999, gradeB},
+		{20_000, gradeC},
+		{34_999, gradeC},
+		{35_000, gradeD},
+		{44_999, gradeD},
+		{45_000, gradeE},
+		{59_999, gradeE},
+		{60_000, gradeF},
 	}
 	for _, tt := range tests {
 		got := computeMeshComplexityGrade(tt.triangles, 0, false)
@@ -60,13 +64,13 @@ func TestComputeMeshComplexityGrade(t *testing.T) {
 }
 
 func TestComputeMeshComplexityGradeCellPercentile(t *testing.T) {
-	got := computeMeshComplexityGrade(8_000_000, 100_000, true)
+	got := computeMeshComplexityGrade(8_000_000, 4_000, true)
 	if got.Grade != gradeAPlus {
-		t.Errorf("expected A+ when cell p90 is 100k (100k/1000 = 100 < 200), got %s", got.Grade)
+		t.Errorf("expected A+ when cell p90 is 4000 (< 5000), got %s", got.Grade)
 	}
-	got = computeMeshComplexityGrade(100, 499_000, true)
+	got = computeMeshComplexityGrade(100, 10_000, true)
 	if got.Grade != gradeA {
-		t.Errorf("expected A when cell p90 is 499k (499k/1000 = 499 < 500), got %s", got.Grade)
+		t.Errorf("expected A when cell p90 is 10000 (>= 5000, < 15000), got %s", got.Grade)
 	}
 }
 
@@ -98,24 +102,24 @@ func TestComputeDrawCallGrade(t *testing.T) {
 }
 
 func TestComputeDuplicationWasteGrade(t *testing.T) {
-	total := int64(100 * megabyte)
+	total := int64(100 * format.Megabyte)
 	tests := []struct {
 		dupBytes int64
 		expected string
 	}{
 		{0, gradeAPlus},
-		{1 * megabyte, gradeAPlus},
-		{2 * megabyte, gradeA},
-		{4 * megabyte, gradeA},
-		{5 * megabyte, gradeB},
-		{14 * megabyte, gradeB},
-		{15 * megabyte, gradeC},
-		{24 * megabyte, gradeC},
-		{25 * megabyte, gradeD},
-		{39 * megabyte, gradeD},
-		{40 * megabyte, gradeE},
-		{59 * megabyte, gradeE},
-		{60 * megabyte, gradeF},
+		{1 * format.Megabyte, gradeAPlus},
+		{2 * format.Megabyte, gradeA},
+		{4 * format.Megabyte, gradeA},
+		{5 * format.Megabyte, gradeB},
+		{14 * format.Megabyte, gradeB},
+		{15 * format.Megabyte, gradeC},
+		{24 * format.Megabyte, gradeC},
+		{25 * format.Megabyte, gradeD},
+		{39 * format.Megabyte, gradeD},
+		{40 * format.Megabyte, gradeE},
+		{59 * format.Megabyte, gradeE},
+		{60 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
 		got := computeDuplicationWasteGrade(tt.dupBytes, total)
@@ -138,18 +142,18 @@ func TestComputeDownloadSizeGrade(t *testing.T) {
 		expected   string
 	}{
 		{0, gradeAPlus},
-		{19 * megabyte, gradeAPlus},
-		{20 * megabyte, gradeA},
-		{49 * megabyte, gradeA},
-		{50 * megabyte, gradeB},
-		{99 * megabyte, gradeB},
-		{100 * megabyte, gradeC},
-		{199 * megabyte, gradeC},
-		{200 * megabyte, gradeD},
-		{399 * megabyte, gradeD},
-		{400 * megabyte, gradeE},
-		{799 * megabyte, gradeE},
-		{800 * megabyte, gradeF},
+		{1 * format.Megabyte, gradeAPlus},
+		{2 * format.Megabyte, gradeA},
+		{4 * format.Megabyte, gradeA},
+		{5 * format.Megabyte, gradeB},
+		{7 * format.Megabyte, gradeB},
+		{8 * format.Megabyte, gradeC},
+		{11 * format.Megabyte, gradeC},
+		{12 * format.Megabyte, gradeD},
+		{19 * format.Megabyte, gradeD},
+		{20 * format.Megabyte, gradeE},
+		{29 * format.Megabyte, gradeE},
+		{30 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
 		got := computeDownloadSizeGrade(tt.totalBytes, 0, false)
@@ -267,18 +271,18 @@ func TestComputeTextureSizeGrade(t *testing.T) {
 		expected     string
 	}{
 		{0, gradeAPlus},
-		{9 * megabyte, gradeAPlus},
-		{10 * megabyte, gradeA},
-		{24 * megabyte, gradeA},
-		{25 * megabyte, gradeB},
-		{59 * megabyte, gradeB},
-		{60 * megabyte, gradeC},
-		{119 * megabyte, gradeC},
-		{120 * megabyte, gradeD},
-		{249 * megabyte, gradeD},
-		{250 * megabyte, gradeE},
-		{499 * megabyte, gradeE},
-		{500 * megabyte, gradeF},
+		{1 * format.Megabyte, gradeAPlus},
+		{2 * format.Megabyte, gradeA},
+		{3 * format.Megabyte, gradeA},
+		{4 * format.Megabyte, gradeB},
+		{5 * format.Megabyte, gradeB},
+		{6 * format.Megabyte, gradeC},
+		{7 * format.Megabyte, gradeC},
+		{8 * format.Megabyte, gradeD},
+		{11 * format.Megabyte, gradeD},
+		{12 * format.Megabyte, gradeE},
+		{19 * format.Megabyte, gradeE},
+		{20 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
 		got := computeTextureSizeGrade(tt.textureBytes, 0, false)
@@ -294,18 +298,18 @@ func TestComputeMeshSizeGrade(t *testing.T) {
 		expected  string
 	}{
 		{0, gradeAPlus},
-		{9 * megabyte, gradeAPlus},
-		{10 * megabyte, gradeA},
-		{24 * megabyte, gradeA},
-		{25 * megabyte, gradeB},
-		{59 * megabyte, gradeB},
-		{60 * megabyte, gradeC},
-		{119 * megabyte, gradeC},
-		{120 * megabyte, gradeD},
-		{249 * megabyte, gradeD},
-		{250 * megabyte, gradeE},
-		{499 * megabyte, gradeE},
-		{500 * megabyte, gradeF},
+		{format.Megabyte / 2, gradeAPlus},
+		{1 * format.Megabyte, gradeA},
+		{format.Megabyte + format.Megabyte/2, gradeA},
+		{2 * format.Megabyte, gradeB},
+		{format.Megabyte*2 + format.Megabyte/2, gradeB},
+		{3 * format.Megabyte, gradeC},
+		{4 * format.Megabyte, gradeC},
+		{5 * format.Megabyte, gradeD},
+		{9 * format.Megabyte, gradeD},
+		{10 * format.Megabyte, gradeE},
+		{14 * format.Megabyte, gradeE},
+		{15 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
 		got := computeMeshSizeGrade(tt.meshBytes, 0, false)
@@ -321,8 +325,7 @@ func TestComputeDuplicateCountGrade(t *testing.T) {
 		expected string
 	}{
 		{0, gradeAPlus},
-		{1, gradeAPlus},
-		{2, gradeA},
+		{1, gradeA},
 		{4, gradeA},
 		{5, gradeB},
 		{14, gradeB},
@@ -391,9 +394,9 @@ func TestCapGradeAtC(t *testing.T) {
 
 func TestDuplicatesCappedAtCInProfile(t *testing.T) {
 	summary := reportGenerationSummary{
-		TotalBytes:         5 * megabyte,
-		TextureBytes:       3 * megabyte,
-		MeshBytes:          2 * megabyte,
+		TotalBytes:         5 * format.Megabyte,
+		TextureBytes:       3 * format.Megabyte,
+		MeshBytes:          2 * format.Megabyte,
 		TriangleCount:      50_000,
 		DrawCallCount:      10,
 		DuplicateCount:     1,
@@ -414,10 +417,10 @@ func TestDuplicatesCappedAtCInProfile(t *testing.T) {
 
 func TestComputePerformanceProfileIntegration(t *testing.T) {
 	summary := reportGenerationSummary{
-		TotalBytes:            5 * megabyte,
-		TextureBytes:          3 * megabyte,
-		MeshBytes:             2 * megabyte,
-		TriangleCount:         50_000,
+		TotalBytes:            1 * format.Megabyte,
+		TextureBytes:          format.Megabyte / 2,
+		MeshBytes:             format.Megabyte / 2,
+		TriangleCount:         4_000,
 		OversizedTextureCount: 0,
 		DrawCallCount:         10,
 		DuplicateCount:        0,
@@ -444,9 +447,9 @@ func TestComputePerformanceProfileIntegration(t *testing.T) {
 
 func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 	summary := reportGenerationSummary{
-		TotalBytes:            800 * megabyte,
-		TextureBytes:          500 * megabyte,
-		MeshBytes:             500 * megabyte,
+		TotalBytes:            800 * format.Megabyte,
+		TextureBytes:          500 * format.Megabyte,
+		MeshBytes:             500 * format.Megabyte,
 		TriangleCount:         8_000_000,
 		OversizedTextureCount: 0,
 		DrawCallCount:         4000,
@@ -455,8 +458,8 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 		PartCount:             10000,
 	}
 	percentiles := reportCellPercentiles{
-		P90TotalBytes:    1 * float64(megabyte),
-		P90TextureBytes:  1 * float64(megabyte),
+		P90TotalBytes:    1 * float64(format.Megabyte),
+		P90TextureBytes:  1 * float64(format.Megabyte),
 		P90MeshBytes:     512 * 1024,
 		P90TriangleCount: 4_000,
 		P90UniqueAssets:  20,

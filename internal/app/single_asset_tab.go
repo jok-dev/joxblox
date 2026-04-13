@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"joxblox/internal/debug"
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
@@ -68,7 +71,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 			return
 		}
 		selectedTargetID := loadRequest.TargetID
-		logDebugf("Single asset load started for %s", loadRequest.logDescription())
+		debug.Logf("Single asset load started for %s", loadRequest.logDescription())
 
 		statusLabel.SetText("Loading image...")
 		goButton.Disable()
@@ -82,7 +85,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 
 		go func(selectedAssetID int64, request singleAssetLoadRequest) {
 			if request.requiresAuth() {
-				authErr := validateCurrentAuthCookie()
+				authErr := roblox.ValidateCurrentAuthCookie()
 				if authErr != nil {
 					fyne.Do(func() {
 						loadingSpinner.Stop()
@@ -103,7 +106,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 				goButton.Enable()
 				if loadErr != nil {
 					statusLabel.SetText(loadErr.Error())
-					logDebugf("Single asset load failed for %s: %s", request.logDescription(), loadErr.Error())
+					debug.Logf("Single asset load failed for %s: %s", request.logDescription(), loadErr.Error())
 					fyneDialog.ShowError(loadErr, window)
 					return
 				}
@@ -113,22 +116,22 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 				previewBox.Refresh()
 				requestSourceBreakdown := formatSingleRequestSourceBreakdown(trace.classifyRequestSource())
 				if isMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
-					if strings.EqualFold(previewResult.Source, sourceAssetDeliveryInGame) {
+					if strings.EqualFold(previewResult.Source, roblox.SourceAssetDeliveryInGame) {
 						statusLabel.SetText(fmt.Sprintf("Mesh loaded. %s", requestSourceBreakdown))
-						logDebugf("Single asset load complete for %d (mesh via AssetDelivery)", selectedAssetID)
+						debug.Logf("Single asset load complete for %d (mesh via AssetDelivery)", selectedAssetID)
 					} else {
 						statusLabel.SetText(fmt.Sprintf("Mesh loaded with thumbnail metadata fallback (state: %s). %s", previewResult.State, requestSourceBreakdown))
-						logDebugf("Single asset load complete for %d (mesh with thumbnail fallback, state=%s)", selectedAssetID, previewResult.State)
+						debug.Logf("Single asset load complete for %d (mesh with thumbnail fallback, state=%s)", selectedAssetID, previewResult.State)
 					}
-				} else if strings.EqualFold(previewResult.Source, sourceAssetDeliveryInGame) {
+				} else if strings.EqualFold(previewResult.Source, roblox.SourceAssetDeliveryInGame) {
 					statusLabel.SetText(fmt.Sprintf("Image loaded. %s", requestSourceBreakdown))
-					logDebugf("Single asset load complete for %d (AssetDelivery)", selectedAssetID)
-				} else if strings.EqualFold(previewResult.Source, sourceThumbnailsDirect) {
+					debug.Logf("Single asset load complete for %d (AssetDelivery)", selectedAssetID)
+				} else if strings.EqualFold(previewResult.Source, roblox.SourceThumbnailsDirect) {
 					statusLabel.SetText(fmt.Sprintf("Thumbnail loaded (state: %s). %s", previewResult.State, requestSourceBreakdown))
-					logDebugf("Single asset load complete for %d (direct thumbnail, state=%s)", selectedAssetID, previewResult.State)
+					debug.Logf("Single asset load complete for %d (direct thumbnail, state=%s)", selectedAssetID, previewResult.State)
 				} else {
 					statusLabel.SetText(fmt.Sprintf("Loaded fallback thumbnail (state: %s). %s", previewResult.State, requestSourceBreakdown))
-					logDebugf("Single asset load complete for %d (fallback thumbnail, state=%s)", selectedAssetID, previewResult.State)
+					debug.Logf("Single asset load complete for %d (fallback thumbnail, state=%s)", selectedAssetID, previewResult.State)
 				}
 			})
 		}(selectedTargetID, loadRequest)

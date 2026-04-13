@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"joxblox/internal/roblox"
 )
 
 const (
@@ -24,7 +26,7 @@ const (
 var errRateLimited = errors.New("rate limited by Roblox (HTTP 429)")
 var errUploadForbidden = errors.New("forbidden (HTTP 403)")
 
-var robloxOpenCloudUploadRateLimitPolicy = httpRateLimitPolicy{
+var robloxOpenCloudUploadRateLimitPolicy = roblox.HttpRateLimitPolicy{
 	InitialBackoff: 5 * time.Second,
 	MaxBackoff:     30 * time.Second,
 	MaxRetries:     0,
@@ -179,7 +181,7 @@ func createRobloxOpenCloudDecal(
 		return nil, fmt.Errorf("failed to finalize upload body: %w", err)
 	}
 
-	response, err := doRobloxRequestWithRateLimitPolicy(
+	response, err := roblox.DoRequestWithRateLimitPolicy(
 		http.MethodPost,
 		robloxOpenCloudCreateAssetURL,
 		&requestBody,
@@ -257,7 +259,7 @@ func getRobloxOpenCloudOperation(apiKey string, operationPath string) (*robloxOp
 		return nil, fmt.Errorf("operation path is empty")
 	}
 
-	response, err := doRobloxRequest(
+	response, err := roblox.DoRequest(
 		http.MethodGet,
 		robloxOpenCloudAssetsAPIBaseURL+"/"+trimmedPath,
 		nil,

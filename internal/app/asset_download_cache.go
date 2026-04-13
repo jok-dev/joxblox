@@ -13,6 +13,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"joxblox/internal/debug"
+	"joxblox/internal/roblox"
 )
 
 type assetDownloadCacheMetadata struct {
@@ -68,17 +71,17 @@ func downloadRobloxContentBytesWithCacheKeyAndTrace(urlString string, cacheKey s
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cachedBytes, cachedContentType, cacheHit, err := readAssetDownloadCacheEntry(cacheSettings.Folder, normalizedCacheKey)
 		if err != nil {
-			logDebugf("Asset cache read failed for %s: %s", normalizedCacheKey, err.Error())
+			debug.Logf("Asset cache read failed for %s: %s", normalizedCacheKey, err.Error())
 		} else if cacheHit {
 			assetDownloadCacheMetricState.diskHits.Add(1)
 			trace.markDisk()
-			logDebugf("Asset cache hit for %s", normalizedCacheKey)
+			debug.Logf("Asset cache hit for %s", normalizedCacheKey)
 			return cachedBytes, cachedContentType, nil
 		}
 		assetDownloadCacheMetricState.diskMisses.Add(1)
 	}
 
-	response, err := doRobloxAuthenticatedGet(trimmedURL, timeout)
+	response, err := roblox.DoAuthenticatedGet(trimmedURL, timeout)
 	if err != nil {
 		return nil, "", err
 	}
@@ -98,7 +101,7 @@ func downloadRobloxContentBytesWithCacheKeyAndTrace(urlString string, cacheKey s
 	contentType := normalizeDownloadedContentType(response.Header.Get("Content-Type"), bodyBytes)
 	if cacheSettings.Enabled && cacheSettings.Folder != "" && len(bodyBytes) > 0 {
 		if err := writeAssetDownloadCacheEntry(cacheSettings.Folder, normalizedCacheKey, trimmedURL, contentType, bodyBytes); err != nil {
-			logDebugf("Asset cache write failed for %s: %s", normalizedCacheKey, err.Error())
+			debug.Logf("Asset cache write failed for %s: %s", normalizedCacheKey, err.Error())
 		}
 	}
 
@@ -204,7 +207,7 @@ func writeAssetDownloadCacheEntry(cacheFolder string, cacheKey string, sourceURL
 		return err
 	}
 
-	logDebugf("Asset cache stored for %s", cacheKey)
+	debug.Logf("Asset cache stored for %s", cacheKey)
 	assetDownloadCacheMetricState.diskWrites.Add(1)
 	return nil
 }

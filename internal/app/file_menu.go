@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"joxblox/internal/debug"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
@@ -174,7 +176,7 @@ func clearAllScanResults(window fyne.Window, providers []scanTabFileActionsProvi
 			}
 			actions.SetResults(nil)
 		}
-		logDebugf("All scan tables cleared from file menu (rows_cleared=%d)", totalRows)
+		debug.Logf("All scan tables cleared from file menu (rows_cleared=%d)", totalRows)
 	}, window)
 }
 
@@ -223,7 +225,7 @@ func saveAllScanResults(window fyne.Window, providers []scanTabFileActionsProvid
 			return
 		}
 		progress.Hide()
-		logDebugf("Scan workspace exported: %s", selectedExportPath)
+		debug.Logf("Scan workspace exported: %s", selectedExportPath)
 	}()
 }
 
@@ -337,7 +339,7 @@ func loadAllScanResultsFromPathWithActionsAsync(
 					actions.AddRecentFile(importPath)
 				}
 			}
-			logDebugf("Scan workspace imported: %s", importPath)
+			debug.Logf("Scan workspace imported: %s", importPath)
 			if onComplete != nil {
 				onComplete(firstContextWithRows, true)
 			}

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"joxblox/internal/debug"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
@@ -388,10 +390,10 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				addRecentLoadedFile(importPath)
 				applyImportedResults(importedResults, fmt.Sprintf("Imported %d results.", len(importedResults)))
 				if importFormat == scanImportFormatWorkspace {
-					logDebugf("Scan workspace imported into context %s: %s (rows=%d)", options.ScanContextKey, importPath, len(importedResults))
+					debug.Logf("Scan workspace imported into context %s: %s (rows=%d)", options.ScanContextKey, importPath, len(importedResults))
 					return
 				}
-				logDebugf("Scan table imported: %s (rows=%d)", importPath, len(importedResults))
+				debug.Logf("Scan table imported: %s (rows=%d)", importPath, len(importedResults))
 			})
 		}()
 	}
@@ -442,7 +444,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			fyne.Do(func() {
 				progress.Hide()
 				explorer.SetStatus(fmt.Sprintf("Saved %d results.", len(resultsToExport)))
-				logDebugf("Scan table exported: %s (rows=%d)", selectedExportPath, len(resultsToExport))
+				debug.Logf("Scan table exported: %s (rows=%d)", selectedExportPath, len(resultsToExport))
 			})
 		}()
 	}
@@ -492,7 +494,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 
 	scanButton.OnTapped = func() {
 		if scanInProgress {
-			logDebugf("Scan stop requested")
+			debug.Logf("Scan stop requested")
 			requestStopScan()
 			explorer.SetStatus("Stopping scan...")
 			scanButton.Disable()
@@ -518,7 +520,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		explorer.SetResults([]scanResult{})
 		clearSimilaritySearch()
 		setWarning(materialVariantWarningData{})
-		logDebugf("Scan started for source: %s (limit=%d)", combinedSourcePath(), limitValue)
+		debug.Logf("Scan started for source: %s (limit=%d)", combinedSourcePath(), limitValue)
 		explorer.SetStatus(options.ScanningStatusText)
 		localStopSignal := newStopSignal()
 		activeStopSignal = localStopSignal
@@ -542,7 +544,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				if errors.Is(warningErr, errScanStopped) {
 					scanErr = errScanStopped
 				} else if warningErr != nil {
-					logDebugf("Scan warning build failed: %s", warningErr.Error())
+					debug.Logf("Scan warning build failed: %s", warningErr.Error())
 				} else {
 					warningData = nextWarning
 				}
@@ -566,7 +568,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 						filteredHits = append(filteredHits, hit)
 					}
 				}
-				logDebugf("Path filter: %d -> %d hits", len(hits), len(filteredHits))
+				debug.Logf("Path filter: %d -> %d hits", len(hits), len(filteredHits))
 				hits = filteredHits
 			}
 			if len(hits) == 0 {
@@ -595,7 +597,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 					for hit := range hitJobs {
 						scanRow, loadErr, requestSource := loadScanResultWithRequestSource(hit)
 						if loadErr != nil {
-							logDebugf("Scan result load failed for asset %d (file=%s, useCount=%d): %s", hit.AssetID, hit.FilePath, hit.UseCount, loadErr.Error())
+							debug.Logf("Scan result load failed for asset %d (file=%s, useCount=%d): %s", hit.AssetID, hit.FilePath, hit.UseCount, loadErr.Error())
 							scanRow = buildFailedScanResultFromHit(hit, loadErr)
 						}
 						loadOutcomes <- scanLoadOutcome{row: scanRow, loadErr: loadErr, requestSource: requestSource}

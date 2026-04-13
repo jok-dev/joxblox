@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"image/color"
 
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -20,9 +23,9 @@ func (view *assetView) SetHierarchy(rows []assetExplorerRow, selectedAssetID int
 		rowCopy := row
 		sizeText := "size unavailable"
 		if row.SelfBytesSize > 0 {
-			sizeText = formatSizeAuto(row.SelfBytesSize)
+			sizeText = format.FormatSizeAuto(row.SelfBytesSize)
 		}
-		nodeIcon := getAssetTypeEmoji(row.AssetTypeID)
+		nodeIcon := roblox.GetAssetTypeEmoji(row.AssetTypeID)
 		rowText := fmt.Sprintf("%s %d (%s)", nodeIcon, row.AssetID, sizeText)
 		rowButton := widget.NewButton(rowText, func() {
 			if view.hierarchySelectAsset != nil {

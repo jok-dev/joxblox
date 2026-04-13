@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"joxblox/internal/debug"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
@@ -144,7 +146,7 @@ func newDebugConsolePanel(onVisibilityChanged func(bool)) fyne.CanvasObject {
 			if onVisibilityChanged != nil {
 				onVisibilityChanged(true)
 			}
-			logDebugf("Debug console shown")
+			debug.Logf("Debug console shown")
 			return
 		}
 		consoleScroll.Hide()
@@ -153,7 +155,7 @@ func newDebugConsolePanel(onVisibilityChanged func(bool)) fyne.CanvasObject {
 		if onVisibilityChanged != nil {
 			onVisibilityChanged(false)
 		}
-		logDebugf("Debug console hidden")
+		debug.Logf("Debug console hidden")
 	}
 
 	header := container.NewVBox(

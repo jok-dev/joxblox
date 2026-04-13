@@ -8,6 +8,8 @@ import (
 	"math/bits"
 	"sort"
 
+	"joxblox/internal/roblox"
+
 	xdraw "golang.org/x/image/draw"
 )
 
@@ -88,7 +90,7 @@ func scanResultImageBytes(result scanResult) []byte {
 func computeSimilarityScores(queryHash uint64, querySHA256 string, results []scanResult) []similarityMatch {
 	matches := make([]similarityMatch, 0, len(results))
 	for i, result := range results {
-		if result.AssetTypeID != assetTypeImage {
+		if result.AssetTypeID != roblox.AssetTypeImage {
 			continue
 		}
 		imgBytes := scanResultImageBytes(result)

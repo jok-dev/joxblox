@@ -10,6 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
+
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/mp3"
@@ -116,7 +119,7 @@ func (player *assetAudioPlayer) TogglePlayPause() error {
 
 	if player.ctrl == nil {
 		streamer := player.buffer.Streamer(0, player.buffer.Len())
-		startPosition := clampAudioSamplePosition(player.positionSamples, player.buffer.Len())
+		startPosition := format.Clamp(player.positionSamples, 0, player.buffer.Len())
 		if startPosition >= player.buffer.Len() {
 			startPosition = 0
 		}
@@ -146,7 +149,7 @@ func (player *assetAudioPlayer) TogglePlayPause() error {
 	speaker.Lock()
 	player.ctrl.Paused = !player.ctrl.Paused
 	if player.streamer != nil {
-		player.positionSamples = clampAudioSamplePosition(player.streamer.Position(), player.buffer.Len())
+		player.positionSamples = format.Clamp(player.streamer.Position(), 0, player.buffer.Len())
 	}
 	speaker.Unlock()
 	message := "Playing"
@@ -202,7 +205,7 @@ func (player *assetAudioPlayer) SetVolume(volume float64) error {
 		player.mutex.Unlock()
 		return fmt.Errorf("audio playback is not available")
 	}
-	player.volumeValue = clampAudioSliderValue(volume)
+	player.volumeValue = format.Clamp(volume, 0.0, 1.0)
 	if player.volumeEffect != nil {
 		speaker.Lock()
 		applyVolumeLevel(player.volumeEffect, player.volumeValue)
@@ -221,8 +224,9 @@ func (player *assetAudioPlayer) SeekToFraction(fraction float64) error {
 		player.mutex.Unlock()
 		return fmt.Errorf("audio playback is not available")
 	}
-	targetPosition := clampAudioSamplePosition(
-		int(math.Round(clampAudioSliderValue(fraction)*float64(player.buffer.Len()))),
+	targetPosition := format.Clamp(
+		int(math.Round(format.Clamp(fraction, 0.0, 1.0)*float64(player.buffer.Len()))),
+		0,
 		player.buffer.Len(),
 	)
 	if player.streamer != nil {
@@ -325,10 +329,10 @@ func (player *assetAudioPlayer) snapshotLocked(message string) audioPlayerStatus
 	if player.buffer == nil {
 		return status
 	}
-	positionSamples := clampAudioSamplePosition(player.positionSamples, player.buffer.Len())
+	positionSamples := format.Clamp(player.positionSamples, 0, player.buffer.Len())
 	if player.streamer != nil {
 		speaker.Lock()
-		positionSamples = clampAudioSamplePosition(player.streamer.Position(), player.buffer.Len())
+		positionSamples = format.Clamp(player.streamer.Position(), 0, player.buffer.Len())
 		speaker.Unlock()
 		player.positionSamples = positionSamples
 	}
@@ -487,7 +491,7 @@ func orderedAudioDecoders(fileName string, contentType string) []audioDecoderCan
 }
 
 func isAudioAssetContent(assetTypeID int, contentType string) bool {
-	if assetTypeID == assetTypeAudio {
+	if assetTypeID == roblox.AssetTypeAudio {
 		return true
 	}
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "audio/")
@@ -510,34 +514,11 @@ func formatDurationCompact(duration time.Duration) string {
 	return fmt.Sprintf("%d:%02d", minutes, seconds)
 }
 
-func clampAudioSliderValue(value float64) float64 {
-	if value < 0 {
-		return 0
-	}
-	if value > 1 {
-		return 1
-	}
-	return value
-}
-
-func clampAudioSamplePosition(position int, maxSamples int) int {
-	if position < 0 {
-		return 0
-	}
-	if maxSamples <= 0 {
-		return 0
-	}
-	if position > maxSamples {
-		return maxSamples
-	}
-	return position
-}
-
 func applyVolumeLevel(effect *effects.Volume, volume float64) {
 	if effect == nil {
 		return
 	}
-	clampedVolume := clampAudioSliderValue(volume)
+	clampedVolume := format.Clamp(volume, 0.0, 1.0)
 	if clampedVolume <= 0 {
 		effect.Silent = true
 		effect.Volume = 0

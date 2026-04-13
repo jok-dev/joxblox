@@ -24,6 +24,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
+
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
 )
 
 const optimizeMaxRetries = 2
@@ -130,7 +134,7 @@ func verifyAssetWithRetry(id int64, stopChannel <-chan struct{}) (*assetDelivery
 		if attempt >= verifyMaxRetries {
 			return deliveryInfo, err
 		}
-		logDebugf("Verify asset %d attempt %d failed: %v (retrying in %v)", id, attempt+1, err, backoff)
+		debug.Logf("Verify asset %d attempt %d failed: %v (retrying in %v)", id, attempt+1, err, backoff)
 		select {
 		case <-stopChannel:
 			return nil, errScanStopped
@@ -184,8 +188,8 @@ func verifyImageAssets(
 				}
 				if err != nil {
 					failedCount.Add(1)
-					logDebugf("Verify asset %d failed after retries: %v", id, err)
-				} else if deliveryInfo != nil && deliveryInfo.AssetTypeID == assetTypeImage {
+					debug.Logf("Verify asset %d failed after retries: %v", id, err)
+				} else if deliveryInfo != nil && deliveryInfo.AssetTypeID == roblox.AssetTypeImage {
 					mu.Lock()
 					confirmed[id] = deliveryInfo.Location
 					mu.Unlock()
@@ -202,7 +206,7 @@ func verifyImageAssets(
 	wg.Wait()
 	failed := failedCount.Load()
 	if failed > 0 {
-		logDebugf("Verification complete: %d confirmed images, %d failed to verify out of %d candidates", len(confirmed), failed, total)
+		debug.Logf("Verification complete: %d confirmed images, %d failed to verify out of %d candidates", len(confirmed), failed, total)
 	}
 	return confirmed
 }
@@ -257,7 +261,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 	apiKeyEntry := widget.NewPasswordEntry()
 	apiKeyEntry.SetPlaceHolder("Open Cloud API key")
 	rememberKeyCheck := widget.NewCheck("Save to keychain", nil)
-	if storedKey, loadErr := LoadOpenCloudAPIKeyFromKeyring(); loadErr == nil && storedKey != "" {
+	if storedKey, loadErr := roblox.LoadOpenCloudAPIKeyFromKeyring(); loadErr == nil && storedKey != "" {
 		apiKeyEntry.SetText(storedKey)
 		rememberKeyCheck.SetChecked(true)
 	}
@@ -480,7 +484,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 		scanProgressBar.Show()
 		scanProgressBar.Start()
 		go func() {
-			if authErr := validateCurrentAuthCookie(); authErr != nil {
+			if authErr := roblox.ValidateCurrentAuthCookie(); authErr != nil {
 				fyne.Do(func() {
 					scanProgressBar.Stop()
 					scanProgressBar.Hide()
@@ -705,7 +709,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 		statusLabel.SetText("Validating auth cookie...")
 
 		go func() {
-			authErr := validateCurrentAuthCookie()
+			authErr := roblox.ValidateCurrentAuthCookie()
 			fyne.Do(func() {
 				if authErr != nil {
 					statusLabel.SetText("Auth cookie expired or invalid")
@@ -731,9 +735,9 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 					}
 
 					if rememberKeyCheck.Checked {
-						_ = SaveOpenCloudAPIKeyToKeyring(apiKey)
+						_ = roblox.SaveOpenCloudAPIKeyToKeyring(apiKey)
 					} else {
-						_ = DeleteOpenCloudAPIKeyFromKeyring()
+						_ = roblox.DeleteOpenCloudAPIKeyFromKeyring()
 					}
 
 					inProgress = true
@@ -939,7 +943,7 @@ func runOptimization(
 					recordResult(fmt.Sprintf("OK   %d -> %d (%dx%d -> %dx%d, %s -> %s)",
 						result.AssetID, result.NewAssetID,
 						result.OrigWidth, result.OrigHeight, result.NewWidth, result.NewHeight,
-						formatSizeAuto(result.OrigBytes), formatSizeAuto(result.NewBytes)))
+						format.FormatSizeAuto(result.OrigBytes), format.FormatSizeAuto(result.NewBytes)))
 				case "skip":
 					skippedCount.Add(1)
 					recordResult(fmt.Sprintf("SKIP %d: %s", result.AssetID, result.Message))
@@ -1053,7 +1057,7 @@ func runOptimization(
 	if origTotal > 0 {
 		reduction := float64(origTotal-newTotal) / float64(origTotal) * 100
 		savingsText = fmt.Sprintf(" Total size: %s -> %s (%.0f%% reduction).",
-			formatSizeAuto(int(origTotal)), formatSizeAuto(int(newTotal)), reduction)
+			format.FormatSizeAuto(int(origTotal)), format.FormatSizeAuto(int(newTotal)), reduction)
 	}
 
 	fyne.Do(func() {
@@ -1096,7 +1100,7 @@ func processOptimizeAsset(
 	downloadFromURL := func(url string) ([]byte, error) {
 		bodyBytes, _, err := downloadRobloxContentBytesWithCacheKey(
 			url,
-			buildAssetFileContentCacheKey(asset.ID, assetTypeImage),
+			buildAssetFileContentCacheKey(asset.ID, roblox.AssetTypeImage),
 			30*time.Second,
 		)
 		if err != nil {
@@ -1113,7 +1117,7 @@ func processOptimizeAsset(
 		if deliveryErr == nil && len(imageBytes) > 0 {
 			goto downloaded
 		}
-		logDebugf("Optimize: asset %d cached URL failed, will re-fetch: %v", asset.ID, deliveryErr)
+		debug.Logf("Optimize: asset %d cached URL failed, will re-fetch: %v", asset.ID, deliveryErr)
 	}
 
 	for attempt := 0; attempt <= optimizeMaxRetries; attempt++ {
@@ -1126,7 +1130,7 @@ func processOptimizeAsset(
 			if deliveryErr == nil {
 				deliveryErr = fmt.Errorf("no delivery URL")
 			}
-			logDebugf("Optimize: asset %d delivery attempt %d failed: %s", asset.ID, attempt+1, deliveryErr.Error())
+			debug.Logf("Optimize: asset %d delivery attempt %d failed: %s", asset.ID, attempt+1, deliveryErr.Error())
 			continue
 		}
 		imageBytes, deliveryErr = downloadFromURL(deliveryInfo.Location)
@@ -1148,7 +1152,7 @@ downloaded:
 		return optimizeAssetResult{
 			AssetID: asset.ID,
 			Status:  "skip",
-			Message: fmt.Sprintf("%s (under %s threshold)", formatSizeAuto(len(imageBytes)), formatSizeAuto(minSizeBytes)),
+			Message: fmt.Sprintf("%s (under %s threshold)", format.FormatSizeAuto(len(imageBytes)), format.FormatSizeAuto(minSizeBytes)),
 		}
 	}
 
@@ -1172,8 +1176,8 @@ downloaded:
 		return fail(fmt.Sprintf("resize failed - %s", resizeErr.Error()))
 	}
 
-	newWidth := maxInt(1, int(float64(origWidth)*scale))
-	newHeight := maxInt(1, int(float64(origHeight)*scale))
+	newWidth := max(1, int(float64(origWidth)*scale))
+	newHeight := max(1, int(float64(origHeight)*scale))
 
 	uploadFileName := fmt.Sprintf("optimized_%d.png", asset.ID)
 
@@ -1202,7 +1206,7 @@ downloaded:
 			return fail(uploadErr.Error())
 		}
 		if errors.Is(uploadErr, errRateLimited) {
-			logDebugf("Optimize: asset %d rate limited, backing off %s", asset.ID, rateLimitBackoff)
+			debug.Logf("Optimize: asset %d rate limited, backing off %s", asset.ID, rateLimitBackoff)
 			onRateLimitStart()
 			select {
 			case <-stop.channel:
@@ -1215,7 +1219,7 @@ downloaded:
 			continue
 		}
 		attempts++
-		logDebugf("Optimize: asset %d upload attempt %d failed: %s", asset.ID, attempts, uploadErr.Error())
+		debug.Logf("Optimize: asset %d upload attempt %d failed: %s", asset.ID, attempts, uploadErr.Error())
 		if attempts > optimizeMaxRetries {
 			break
 		}

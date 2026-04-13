@@ -4,10 +4,12 @@ import (
 	"image/color"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
+
+	"joxblox/internal/format"
 )
 
 const (
@@ -199,8 +201,8 @@ func (viewer *zoomPanImage) updateLayout() {
 	scaledHeight := imageHeight * float32(viewer.zoom)
 	baseX := (size.Width - scaledWidth) / 2
 	baseY := (size.Height - scaledHeight) / 2
-	positionX := clampFloat32(baseX+viewer.offsetX, minFloat32(size.Width-scaledWidth, baseX), maxFloat32(0, baseX))
-	positionY := clampFloat32(baseY+viewer.offsetY, minFloat32(size.Height-scaledHeight, baseY), maxFloat32(0, baseY))
+	positionX := format.Clamp(baseX+viewer.offsetX, min(size.Width-scaledWidth, baseX), max(0, baseX))
+	positionY := format.Clamp(baseY+viewer.offsetY, min(size.Height-scaledHeight, baseY), max(0, baseY))
 
 	if scaledWidth <= size.Width {
 		positionX = baseX
@@ -229,7 +231,7 @@ func (viewer *zoomPanImage) normalizedCenter() (float32, float32) {
 	positionX, positionY, _, _ := viewer.layoutMetrics()
 	centerX := (size.Width/2 - positionX) / scaledWidth
 	centerY := (size.Height/2 - positionY) / scaledHeight
-	return clampFloat32(centerX, 0, 1), clampFloat32(centerY, 0, 1)
+	return format.Clamp(centerX, 0, 1), format.Clamp(centerY, 0, 1)
 }
 
 func (viewer *zoomPanImage) setNormalizedCenter(centerX float32, centerY float32) {
@@ -237,8 +239,8 @@ func (viewer *zoomPanImage) setNormalizedCenter(centerX float32, centerY float32
 	scaledWidth, scaledHeight := viewer.scaledDimensions()
 	baseX := (size.Width - scaledWidth) / 2
 	baseY := (size.Height - scaledHeight) / 2
-	desiredPositionX := size.Width/2 - clampFloat32(centerX, 0, 1)*scaledWidth
-	desiredPositionY := size.Height/2 - clampFloat32(centerY, 0, 1)*scaledHeight
+	desiredPositionX := size.Width/2 - format.Clamp(centerX, 0, 1)*scaledWidth
+	desiredPositionY := size.Height/2 - format.Clamp(centerY, 0, 1)*scaledHeight
 	viewer.offsetX = desiredPositionX - baseX
 	viewer.offsetY = desiredPositionY - baseY
 }
@@ -253,8 +255,8 @@ func (viewer *zoomPanImage) layoutMetrics() (float32, float32, float32, float32)
 	scaledWidth, scaledHeight := viewer.scaledDimensions()
 	baseX := (size.Width - scaledWidth) / 2
 	baseY := (size.Height - scaledHeight) / 2
-	positionX := clampFloat32(baseX+viewer.offsetX, minFloat32(size.Width-scaledWidth, baseX), maxFloat32(0, baseX))
-	positionY := clampFloat32(baseY+viewer.offsetY, minFloat32(size.Height-scaledHeight, baseY), maxFloat32(0, baseY))
+	positionX := format.Clamp(baseX+viewer.offsetX, min(size.Width-scaledWidth, baseX), max(0, baseX))
+	positionY := format.Clamp(baseY+viewer.offsetY, min(size.Height-scaledHeight, baseY), max(0, baseY))
 	return positionX, positionY, scaledWidth, scaledHeight
 }
 
@@ -272,28 +274,4 @@ func previewOptionDimensions(option previewDownloadOption) (float32, float32) {
 		imageHeight = float32(previewHeight)
 	}
 	return imageWidth, imageHeight
-}
-
-func minFloat32(left float32, right float32) float32 {
-	if left < right {
-		return left
-	}
-	return right
-}
-
-func maxFloat32(left float32, right float32) float32 {
-	if left > right {
-		return left
-	}
-	return right
-}
-
-func clampFloat32(value float32, minimum float32, maximum float32) float32 {
-	if value < minimum {
-		return minimum
-	}
-	if value > maximum {
-		return maximum
-	}
-	return value
 }

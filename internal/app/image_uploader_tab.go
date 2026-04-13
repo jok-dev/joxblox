@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"joxblox/internal/debug"
+	"joxblox/internal/roblox"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -202,8 +205,8 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 	descriptionEntry.SetPlaceHolder("Optional asset description")
 	descriptionEntry.SetMinRowsVisible(2)
 
-	if storedAPIKey, loadErr := LoadOpenCloudAPIKeyFromKeyring(); loadErr != nil {
-		logDebugf("Failed to load Open Cloud API key from keychain: %s", loadErr.Error())
+	if storedAPIKey, loadErr := roblox.LoadOpenCloudAPIKeyFromKeyring(); loadErr != nil {
+		debug.Logf("Failed to load Open Cloud API key from keychain: %s", loadErr.Error())
 	} else if storedAPIKey != "" {
 		apiKeyEntry.SetText(storedAPIKey)
 		rememberAPIKeyCheck.SetChecked(true)
@@ -375,11 +378,11 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 				ID:      creatorID,
 			}
 			if rememberAPIKeyCheck.Checked {
-				if saveErr := SaveOpenCloudAPIKeyToKeyring(apiKey); saveErr != nil {
+				if saveErr := roblox.SaveOpenCloudAPIKeyToKeyring(apiKey); saveErr != nil {
 					statusLabel.SetText(fmt.Sprintf("Failed to save API key: %s", saveErr.Error()))
 					return
 				}
-			} else if deleteErr := DeleteOpenCloudAPIKeyFromKeyring(); deleteErr != nil {
+			} else if deleteErr := roblox.DeleteOpenCloudAPIKeyFromKeyring(); deleteErr != nil {
 				statusLabel.SetText(fmt.Sprintf("Failed to clear saved API key: %s", deleteErr.Error()))
 				return
 			}

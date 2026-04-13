@@ -11,6 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -231,10 +234,10 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	workspaceOnlyCheck.SetChecked(true)
 	opacitySlider.OnChanged = func(value float64) {
 		viewer.SetOpacity(value)
-		opacityValueLabel.SetText(fmt.Sprintf("%d%%", int(math.Round(clampHeatmapFloat64(value, 0.1, 1.0)*100))))
+		opacityValueLabel.SetText(fmt.Sprintf("%d%%", int(math.Round(format.Clamp(value, 0.1, 1.0)*100))))
 	}
 	spreadSlider.OnChanged = func(value float64) {
-		currentHeatSpread = clampHeatmapFloat64(value, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread)
+		currentHeatSpread = format.Clamp(value, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread)
 		spreadValueLabel.SetText(fmt.Sprintf("%.2fx", currentHeatSpread))
 		if !loading.Load() {
 			rerenderPreview("Updating heat spread...")
@@ -354,7 +357,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 			}
 
 			uniqueTextureRefs := uniqueModelHeatmapTextureReferences(instances)
-			logDebugf("model heatmap: %d unique texture refs across %d mesh instances", len(uniqueTextureRefs), len(instances))
+			debug.Logf("model heatmap: %d unique texture refs across %d mesh instances", len(uniqueTextureRefs), len(instances))
 			resolvedTextures := resolveModelHeatmapTextures(uniqueTextureRefs, func(done int, total int) {
 				fyne.Do(func() {
 					if isCanceled() {
@@ -374,7 +377,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 					resolvedTextureBytes += textureData.BytesSize
 				}
 			}
-			logDebugf("model heatmap: resolved %d/%d textures (%d bytes)", resolvedTextureHits, len(uniqueTextureRefs), resolvedTextureBytes)
+			debug.Logf("model heatmap: resolved %d/%d textures (%d bytes)", resolvedTextureHits, len(uniqueTextureRefs), resolvedTextureBytes)
 
 			renderState, buildErr := buildModelHeatmapRenderState(instances, resolvedMeshes, resolvedTextures)
 			if buildErr != nil {
@@ -1176,8 +1179,8 @@ func modelHeatmapColor(heatValue float64, maxHeatValue float64, heatSpread float
 		return stops[0].color
 	}
 	ratio := math.Log1p(heatValue) / math.Log1p(maxHeatValue)
-	ratio = applyHeatSpread(ratio, clampHeatmapFloat64(heatSpread, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread))
-	ratio = clampFloat64(ratio, 0, 1)
+	ratio = applyHeatSpread(ratio, format.Clamp(heatSpread, rbxlHeatmapMinSpread, rbxlHeatmapMaxSpread))
+	ratio = format.Clamp(ratio, 0, 1)
 	for i := 1; i < len(stops); i++ {
 		if ratio > stops[i].position {
 			continue
@@ -1216,33 +1219,33 @@ func cloneModelHeatmapResolvedMeshes(source map[string]modelHeatmapResolvedMesh)
 
 func formatModelHeatmapSummary(summary modelHeatmapSceneSummary) string {
 	summaryParts := []string{
-		fmt.Sprintf("Rendered %s/%s MeshParts", formatIntCommas(int64(summary.RenderedMeshPartCount)), formatIntCommas(int64(summary.MeshPartCount))),
-		fmt.Sprintf("%s unique meshes", formatIntCommas(int64(summary.UniqueMeshCount))),
-		fmt.Sprintf("%s triangles", formatIntCommas(int64(summary.TriangleCount))),
+		fmt.Sprintf("Rendered %s/%s MeshParts", format.FormatIntCommas(int64(summary.RenderedMeshPartCount)), format.FormatIntCommas(int64(summary.MeshPartCount))),
+		fmt.Sprintf("%s unique meshes", format.FormatIntCommas(int64(summary.UniqueMeshCount))),
+		fmt.Sprintf("%s triangles", format.FormatIntCommas(int64(summary.TriangleCount))),
 	}
 	if summary.PreviewTriangleCount > 0 && summary.PreviewTriangleCount != summary.TriangleCount {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s preview triangles", formatIntCommas(int64(summary.PreviewTriangleCount))))
+		summaryParts = append(summaryParts, fmt.Sprintf("%s preview triangles", format.FormatIntCommas(int64(summary.PreviewTriangleCount))))
 	}
 	if summary.UniqueTextureCount > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s unique textures", formatIntCommas(int64(summary.UniqueTextureCount))))
+		summaryParts = append(summaryParts, fmt.Sprintf("%s unique textures", format.FormatIntCommas(int64(summary.UniqueTextureCount))))
 	}
 	if summary.TextureBytes > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s texture bytes", formatSizeAuto(int(summary.TextureBytes))))
+		summaryParts = append(summaryParts, fmt.Sprintf("%s texture bytes", format.FormatSizeAuto(int(summary.TextureBytes))))
 	}
 	if summary.MaxHeatValue > 0 {
 		switch normalizedModelHeatmapMode(summary.HeatMode) {
 		case modelHeatmapModeTriangles:
-			summaryParts = append(summaryParts, fmt.Sprintf("max mesh %s tris", formatIntCommas(int64(math.Round(summary.MaxHeatValue)))))
+			summaryParts = append(summaryParts, fmt.Sprintf("max mesh %s tris", format.FormatIntCommas(int64(math.Round(summary.MaxHeatValue)))))
 		case modelHeatmapModeTexture:
-			summaryParts = append(summaryParts, fmt.Sprintf("max mesh texture %s", formatSizeAuto(int(math.Round(summary.MaxHeatValue)))))
+			summaryParts = append(summaryParts, fmt.Sprintf("max mesh texture %s", format.FormatSizeAuto(int(math.Round(summary.MaxHeatValue)))))
 		case modelHeatmapModeSizeScaledTexture:
-			summaryParts = append(summaryParts, fmt.Sprintf("max texture density %s/stud^2", formatSizeAuto(int(math.Round(summary.MaxTextureDensity)))))
+			summaryParts = append(summaryParts, fmt.Sprintf("max texture density %s/stud^2", format.FormatSizeAuto(int(math.Round(summary.MaxTextureDensity)))))
 		default:
 			summaryParts = append(summaryParts, fmt.Sprintf("max density %.2f tri/stud^2", summary.MaxDensity))
 		}
 	}
 	if summary.FailedMeshCount > 0 {
-		summaryParts = append(summaryParts, fmt.Sprintf("%s failed", formatIntCommas(int64(summary.FailedMeshCount))))
+		summaryParts = append(summaryParts, fmt.Sprintf("%s failed", format.FormatIntCommas(int64(summary.FailedMeshCount))))
 	}
 	return strings.Join(summaryParts, " · ")
 }
@@ -1260,7 +1263,7 @@ func modelHeatmapLegendText(mode modelHeatmapMode) string {
 }
 
 func formatModelHeatmapPartInfo(info modelHeatmapBatchInfo, mode modelHeatmapMode) string {
-	triangleLine := fmt.Sprintf("Triangles: %s", formatIntCommas(int64(info.TriangleCount)))
+	triangleLine := fmt.Sprintf("Triangles: %s", format.FormatIntCommas(int64(info.TriangleCount)))
 	densityLine := fmt.Sprintf("Density: %.2f tri/stud²", info.Density)
 	textureLine := formatModelHeatmapTexturePartInfoLine(info)
 	lines := []string{}
@@ -1291,8 +1294,8 @@ func formatModelHeatmapTexturePartInfoLine(info modelHeatmapBatchInfo) string {
 	return fmt.Sprintf(
 		"Textures: %d · bytes %s · density %s/stud²",
 		info.TextureCount,
-		formatSizeAuto(int(info.TextureBytes)),
-		formatSizeAuto(int(math.Round(info.TextureDensity))),
+		format.FormatSizeAuto(int(info.TextureBytes)),
+		format.FormatSizeAuto(int(math.Round(info.TextureDensity))),
 	)
 }
 
@@ -1305,7 +1308,7 @@ func debugExportModelHeatmapOBJ(batches []meshPreviewBatchData, infos []debugBat
 	tempPath := filepath.Join(os.TempDir(), "joxblox-heatmap-debug.obj")
 	f, err := os.Create(tempPath)
 	if err != nil {
-		logDebugf("debug OBJ export failed: %s", err.Error())
+		debug.Logf("debug OBJ export failed: %s", err.Error())
 		return
 	}
 	defer f.Close()
@@ -1344,5 +1347,5 @@ func debugExportModelHeatmapOBJ(batches []meshPreviewBatchData, infos []debugBat
 		globalVertexOffset += vertexCount
 	}
 
-	logDebugf("debug OBJ exported to %s (%d batches, %d vertices)", tempPath, len(batches), globalVertexOffset)
+	debug.Logf("debug OBJ exported to %s (%d batches, %d vertices)", tempPath, len(batches), globalVertexOffset)
 }

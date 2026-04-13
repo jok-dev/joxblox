@@ -20,6 +20,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
+
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
+	"joxblox/internal/roblox"
 )
 
 var (
@@ -80,7 +84,7 @@ func (view *assetView) uploadSelectedPreviewVariant() {
 
 	apiKeyEntry := widget.NewPasswordEntry()
 	apiKeyEntry.SetPlaceHolder("Open Cloud API key")
-	if storedKey, loadErr := LoadOpenCloudAPIKeyFromKeyring(); loadErr == nil && storedKey != "" {
+	if storedKey, loadErr := roblox.LoadOpenCloudAPIKeyFromKeyring(); loadErr == nil && storedKey != "" {
 		apiKeyEntry.SetText(storedKey)
 	}
 
@@ -186,11 +190,11 @@ func (view *assetView) saveRawAssetToFile(fileName string, fileBytes []byte) {
 	if !saved {
 		return
 	}
-	logDebugf("Saved original asset file for asset %d (%s)", view.currentAssetID, fileName)
+	debug.Logf("Saved original asset file for asset %d (%s)", view.currentAssetID, fileName)
 }
 
 func formatVariantSizeInfo(option previewDownloadOption) string {
-	sizeText := formatSizeAuto(len(option.bytes))
+	sizeText := format.FormatSizeAuto(len(option.bytes))
 	if option.width > 0 && option.height > 0 {
 		return fmt.Sprintf("%dx%d · %s", option.width, option.height, sizeText)
 	}
@@ -337,13 +341,13 @@ func (view *assetView) showExpandedMeshWindow() {
 
 	meshInfoText := fmt.Sprintf(
 		"Shown Triangles: %s / %s",
-		formatIntCommas(int64(view.currentMeshPreviewData.PreviewTriangleCount)),
-		formatIntCommas(int64(view.currentMeshPreviewData.TriangleCount)),
+		format.FormatIntCommas(int64(view.currentMeshPreviewData.PreviewTriangleCount)),
+		format.FormatIntCommas(int64(view.currentMeshPreviewData.TriangleCount)),
 	)
 	if view.currentMeshPreviewData.PreviewTriangleCount == 0 || view.currentMeshPreviewData.PreviewTriangleCount == view.currentMeshPreviewData.TriangleCount {
 		meshInfoText = fmt.Sprintf(
 			"Triangles: %s",
-			formatIntCommas(int64(view.currentMeshPreviewData.TriangleCount)),
+			format.FormatIntCommas(int64(view.currentMeshPreviewData.TriangleCount)),
 		)
 	}
 	topBar := container.NewHBox(
@@ -395,7 +399,7 @@ func (view *assetView) savePreviewVariantToFile(option previewDownloadOption) {
 	if !saved {
 		return
 	}
-	logDebugf("Saved preview image for asset %d (%s)", view.currentAssetID, option.fileName)
+	debug.Logf("Saved preview image for asset %d (%s)", view.currentAssetID, option.fileName)
 }
 
 func buildOriginalPreviewOption(resource fyne.Resource, assetID int64) previewDownloadOption {
@@ -420,7 +424,7 @@ func formatPreviewOptionLabel(baseLabel string, optionByteCount int, originalByt
 	if trimmedBaseLabel == "" {
 		trimmedBaseLabel = "Preview"
 	}
-	sizeText := formatSizeAuto(optionByteCount)
+	sizeText := format.FormatSizeAuto(optionByteCount)
 	if originalByteCount <= 0 || optionByteCount <= 0 || optionByteCount == originalByteCount {
 		return fmt.Sprintf("%s (%s)", trimmedBaseLabel, sizeText)
 	}
@@ -466,8 +470,8 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64, scaler x
 	baseExtension := previewOutputExtension(resourceName, imageFormat)
 	threeQuarterBytes, threeQuarterErr := encodeScaledPreview(decodedImage, imageFormat, 0.75, scaler)
 	if threeQuarterErr == nil {
-		threeQuarterWidth := maxInt(1, int(float64(baseBounds.Dx())*0.75))
-		threeQuarterHeight := maxInt(1, int(float64(baseBounds.Dy())*0.75))
+		threeQuarterWidth := max(1, int(float64(baseBounds.Dx())*0.75))
+		threeQuarterHeight := max(1, int(float64(baseBounds.Dy())*0.75))
 		options = append(options, previewDownloadOption{
 			labelText: "Three Quarters",
 			fileName:  previewVariantFileName(resourceName, "three_quarters", baseExtension),
@@ -478,8 +482,8 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64, scaler x
 	}
 	halfBytes, halfErr := encodeResizedPreview(decodedImage, imageFormat, 2, scaler)
 	if halfErr == nil {
-		halfWidth := maxInt(1, baseBounds.Dx()/2)
-		halfHeight := maxInt(1, baseBounds.Dy()/2)
+		halfWidth := max(1, baseBounds.Dx()/2)
+		halfHeight := max(1, baseBounds.Dy()/2)
 		options = append(options, previewDownloadOption{
 			labelText: "Half",
 			fileName:  previewVariantFileName(resourceName, "half", baseExtension),
@@ -490,8 +494,8 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64, scaler x
 	}
 	thirdBytes, thirdErr := encodeScaledPreview(decodedImage, imageFormat, 1.0/3.0, scaler)
 	if thirdErr == nil {
-		thirdWidth := maxInt(1, int(float64(baseBounds.Dx())/3.0))
-		thirdHeight := maxInt(1, int(float64(baseBounds.Dy())/3.0))
+		thirdWidth := max(1, int(float64(baseBounds.Dx())/3.0))
+		thirdHeight := max(1, int(float64(baseBounds.Dy())/3.0))
 		options = append(options, previewDownloadOption{
 			labelText: "Third",
 			fileName:  previewVariantFileName(resourceName, "third", baseExtension),
@@ -502,8 +506,8 @@ func buildPreviewDownloadOptions(resource fyne.Resource, assetID int64, scaler x
 	}
 	quarterBytes, quarterErr := encodeResizedPreview(decodedImage, imageFormat, 4, scaler)
 	if quarterErr == nil {
-		quarterWidth := maxInt(1, baseBounds.Dx()/4)
-		quarterHeight := maxInt(1, baseBounds.Dy()/4)
+		quarterWidth := max(1, baseBounds.Dx()/4)
+		quarterHeight := max(1, baseBounds.Dy()/4)
 		options = append(options, previewDownloadOption{
 			labelText: "Quarter",
 			fileName:  previewVariantFileName(resourceName, "quarter", baseExtension),
@@ -689,8 +693,8 @@ func encodeResizedPreview(sourceImage image.Image, _ string, divisor int, scaler
 		return nil, fmt.Errorf("resize divisor must be greater than 1")
 	}
 	sourceBounds := sourceImage.Bounds()
-	targetWidth := maxInt(1, sourceBounds.Dx()/divisor)
-	targetHeight := maxInt(1, sourceBounds.Dy()/divisor)
+	targetWidth := max(1, sourceBounds.Dx()/divisor)
+	targetHeight := max(1, sourceBounds.Dy()/divisor)
 	return encodeScaledPNG(sourceImage, targetWidth, targetHeight, scaler)
 }
 
@@ -702,8 +706,8 @@ func encodeScaledPreview(sourceImage image.Image, _ string, scale float64, scale
 		return nil, fmt.Errorf("preview scale must be positive")
 	}
 	sourceBounds := sourceImage.Bounds()
-	targetWidth := maxInt(1, int(float64(sourceBounds.Dx())*scale))
-	targetHeight := maxInt(1, int(float64(sourceBounds.Dy())*scale))
+	targetWidth := max(1, int(float64(sourceBounds.Dx())*scale))
+	targetHeight := max(1, int(float64(sourceBounds.Dy())*scale))
 	return encodeScaledPNG(sourceImage, targetWidth, targetHeight, scaler)
 }
 
@@ -846,11 +850,4 @@ func bleedTransparentPixels(sourceImage *image.NRGBA) *image.NRGBA {
 	}
 
 	return resultImage
-}
-
-func maxInt(left int, right int) int {
-	if left > right {
-		return left
-	}
-	return right
 }

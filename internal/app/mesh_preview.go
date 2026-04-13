@@ -23,6 +23,9 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
+
+	"joxblox/internal/debug"
+	"joxblox/internal/format"
 )
 
 const maxMeshPreviewTriangles = 20000
@@ -148,7 +151,7 @@ func (viewer *meshPreviewWidget) applyMouseLookDelta(deltaX float32, deltaY floa
 	lookSensitivity := loadMeshPreviewMouseLookSensitivity()
 	viewer.yaw -= float64(deltaX) * lookSensitivity
 	viewer.pitch += float64(deltaY) * lookSensitivity
-	viewer.pitch = clampFloat64(viewer.pitch, -meshPreviewKeyboardMaximumPitchRad, meshPreviewKeyboardMaximumPitchRad)
+	viewer.pitch = format.Clamp(viewer.pitch, -meshPreviewKeyboardMaximumPitchRad, meshPreviewKeyboardMaximumPitchRad)
 }
 
 func (viewer *meshPreviewWidget) Tapped(event *fyne.PointEvent) {
@@ -177,7 +180,7 @@ func (viewer *meshPreviewWidget) Tapped(event *fyne.PointEvent) {
 	go func(expectedToken uint64, activeProcess *meshRendererProcess) {
 		batchIndex, pickErr := activeProcess.pick(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, yawSnapshot, pitchSnapshot, 1.0, clickX, clickY)
 		if pickErr != nil {
-			logDebugf("mesh renderer subprocess pick failed: %s", pickErr.Error())
+			debug.Logf("mesh renderer subprocess pick failed: %s", pickErr.Error())
 			return
 		}
 		fyne.Do(func() {
@@ -287,7 +290,7 @@ func (viewer *meshPreviewWidget) UpdateSceneColors(data meshPreviewData) {
 	}
 	go func(activeProcess *meshRendererProcess, colors []color.NRGBA) {
 		if recolorErr := activeProcess.recolorScene(colors); recolorErr != nil {
-			logDebugf("mesh renderer recolor failed: %s", recolorErr.Error())
+			debug.Logf("mesh renderer recolor failed: %s", recolorErr.Error())
 			fyne.Do(func() {
 				viewer.SetDataPreserveView(data)
 			})
@@ -315,7 +318,7 @@ func (viewer *meshPreviewWidget) SetZoom(nextZoom float64) {
 	if viewer == nil {
 		return
 	}
-	viewer.zoom = clampFloat64(nextZoom, 0.35, 5.0)
+	viewer.zoom = format.Clamp(nextZoom, 0.35, 5.0)
 	viewer.render()
 }
 
@@ -323,7 +326,7 @@ func (viewer *meshPreviewWidget) SetOpacity(nextOpacity float64) {
 	if viewer == nil {
 		return
 	}
-	viewer.opacity = clampFloat64(nextOpacity, 0.1, 1.0)
+	viewer.opacity = format.Clamp(nextOpacity, 0.1, 1.0)
 	viewer.render()
 }
 
@@ -660,7 +663,7 @@ func (viewer *meshPreviewWidget) render() {
 	go func() {
 		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex)
 		if renderErr != nil {
-			logDebugf("mesh renderer subprocess render failed: %s", renderErr.Error())
+			debug.Logf("mesh renderer subprocess render failed: %s", renderErr.Error())
 			return
 		}
 		fyne.Do(func() {
@@ -675,12 +678,12 @@ func (viewer *meshPreviewWidget) render() {
 
 func (viewer *meshPreviewWidget) startProcessAndLoad() {
 	if !viewer.data.hasRenderableGeometry() {
-		logDebugf("mesh renderer: no raw positions/indices, skipping")
+		debug.Logf("mesh renderer: no raw positions/indices, skipping")
 		return
 	}
 	proc, startErr := startMeshRendererProcess()
 	if startErr != nil {
-		logDebugf("mesh renderer process start failed: %s", startErr.Error())
+		debug.Logf("mesh renderer process start failed: %s", startErr.Error())
 		return
 	}
 	sceneBatches := viewer.data.renderableBatches()
@@ -694,7 +697,7 @@ func (viewer *meshPreviewWidget) startProcessAndLoad() {
 		loadErr = proc.load(normalizeMeshPreviewPositionsCopy(viewer.data.RawPositions), viewer.data.RawIndices)
 	}
 	if loadErr != nil {
-		logDebugf("mesh renderer load failed: %s", loadErr.Error())
+		debug.Logf("mesh renderer load failed: %s", loadErr.Error())
 		proc.stop()
 		return
 	}
@@ -704,7 +707,7 @@ func (viewer *meshPreviewWidget) startProcessAndLoad() {
 		totalVertices += len(batch.RawPositions) / 3
 		totalIndices += len(batch.RawIndices)
 	}
-	logDebugf("mesh renderer GPU subprocess started (%d batches, %d vertices, %d indices)", len(sceneBatches), totalVertices, totalIndices)
+	debug.Logf("mesh renderer GPU subprocess started (%d batches, %d vertices, %d indices)", len(sceneBatches), totalVertices, totalIndices)
 	viewer.process = proc
 }
 
@@ -948,7 +951,7 @@ func (p *meshRendererProcess) render(width int, height int, cameraX float64, cam
 		return nil, fmt.Errorf("process not alive")
 	}
 
-	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, clampFloat64(opacity, 0.1, 1.0), bgHex)
+	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex)
 	if _, err := io.WriteString(p.stdin, cmd); err != nil {
 		p.alive = false
 		return nil, fmt.Errorf("write render: %w", err)
@@ -1237,7 +1240,7 @@ func normalizeMeshPreviewPositionsCopy(positions []float32) []float32 {
 }
 
 func meshPreviewInitialCameraPosition(yaw float64, pitch float64, zoom float64) (float64, float64, float64) {
-	distance := 3.0 / clampFloat64(zoom, 0.35, 5.0)
+	distance := 3.0 / format.Clamp(zoom, 0.35, 5.0)
 	sinYaw := math.Sin(yaw)
 	cosYaw := math.Cos(yaw)
 	sinPitch := math.Sin(pitch)
@@ -1246,8 +1249,8 @@ func meshPreviewInitialCameraPosition(yaw float64, pitch float64, zoom float64) 
 }
 
 func meshPreviewFOVYRadians(zoom float64) float64 {
-	clampedZoom := clampFloat64(zoom, 0.35, 5.0)
-	fovDegrees := clampFloat64(45.0/clampedZoom, 15.0, 90.0)
+	clampedZoom := format.Clamp(zoom, 0.35, 5.0)
+	fovDegrees := format.Clamp(45.0/clampedZoom, 15.0, 90.0)
 	return fovDegrees * math.Pi / 180.0
 }
 
@@ -1381,14 +1384,4 @@ func centerAndNormalizePositions(positions []float32) {
 	for i := range positions {
 		positions[i] /= radius
 	}
-}
-
-func clampFloat64(value float64, minimum float64, maximum float64) float64 {
-	if value < minimum {
-		return minimum
-	}
-	if value > maximum {
-		return maximum
-	}
-	return value
 }

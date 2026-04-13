@@ -3,6 +3,8 @@ package app
 import (
 	"math"
 	"testing"
+
+	"joxblox/internal/format"
 )
 
 func TestBuildReportSummaryAndPoints(t *testing.T) {
@@ -53,8 +55,8 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 	resolved := map[string]reportGenerationResolvedAsset{
 		scanAssetReferenceKey(111, "rbxassetid://111"): {
 			Stats: rbxlHeatmapAssetStats{
-				TotalBytes:    5 * megabyte,
-				TextureBytes:  3 * megabyte,
+				TotalBytes:    5 * format.Megabyte,
+				TextureBytes:  3 * format.Megabyte,
 				PixelCount:    512 * 512,
 				TriangleCount: 0,
 			},
@@ -62,24 +64,24 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 		},
 		scanAssetReferenceKey(222, "rbxthumb://type=Asset&id=111&w=420&h=420"): {
 			Stats: rbxlHeatmapAssetStats{
-				TotalBytes:   5 * megabyte,
-				TextureBytes: 3 * megabyte,
+				TotalBytes:   5 * format.Megabyte,
+				TextureBytes: 3 * format.Megabyte,
 				PixelCount:   512 * 512,
 			},
 			FileSHA256: "same-hash",
 		},
 		scanAssetReferenceKey(333, "rbxassetid://333"): {
 			Stats: rbxlHeatmapAssetStats{
-				TotalBytes:   5 * megabyte,
-				TextureBytes: 3 * megabyte,
+				TotalBytes:   5 * format.Megabyte,
+				TextureBytes: 3 * format.Megabyte,
 				PixelCount:   1024 * 1024,
 			},
 			FileSHA256: "same-hash",
 		},
 		scanAssetReferenceKey(444, "rbxassetid://444"): {
 			Stats: rbxlHeatmapAssetStats{
-				TotalBytes:    7 * megabyte,
-				MeshBytes:     7 * megabyte,
+				TotalBytes:    7 * format.Megabyte,
+				MeshBytes:     7 * format.Megabyte,
 				TriangleCount: 4321,
 			},
 			FileSHA256: "different-hash",
@@ -88,14 +90,14 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 
 	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, defaultLargeTextureThreshold)
 
-	if summary.TotalBytes != 22*megabyte {
-		t.Fatalf("expected total bytes %d, got %d", 22*megabyte, summary.TotalBytes)
+	if summary.TotalBytes != 22*format.Megabyte {
+		t.Fatalf("expected total bytes %d, got %d", 22*format.Megabyte, summary.TotalBytes)
 	}
-	if summary.TextureBytes != 9*megabyte {
-		t.Fatalf("expected texture bytes %d, got %d", 9*megabyte, summary.TextureBytes)
+	if summary.TextureBytes != 9*format.Megabyte {
+		t.Fatalf("expected texture bytes %d, got %d", 9*format.Megabyte, summary.TextureBytes)
 	}
-	if summary.MeshBytes != 7*megabyte {
-		t.Fatalf("expected mesh bytes %d, got %d", 7*megabyte, summary.MeshBytes)
+	if summary.MeshBytes != 7*format.Megabyte {
+		t.Fatalf("expected mesh bytes %d, got %d", 7*format.Megabyte, summary.MeshBytes)
 	}
 	if summary.TriangleCount != 4321 {
 		t.Fatalf("expected triangle count 4321, got %d", summary.TriangleCount)
@@ -103,8 +105,8 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 	if summary.DuplicateCount != 2 {
 		t.Fatalf("expected duplicate count 2, got %d", summary.DuplicateCount)
 	}
-	if summary.DuplicateSizeBytes != 10*megabyte {
-		t.Fatalf("expected duplicate size bytes %d, got %d", 10*megabyte, summary.DuplicateSizeBytes)
+	if summary.DuplicateSizeBytes != 10*format.Megabyte {
+		t.Fatalf("expected duplicate size bytes %d, got %d", 10*format.Megabyte, summary.DuplicateSizeBytes)
 	}
 	if summary.ReferenceCount != 4 {
 		t.Fatalf("expected reference count 4, got %d", summary.ReferenceCount)
@@ -151,8 +153,8 @@ func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
 	resolved := map[string]reportGenerationResolvedAsset{
 		scanAssetReferenceKey(111, "rbxassetid://111"): {
 			Stats: rbxlHeatmapAssetStats{
-				TotalBytes:   5 * megabyte,
-				TextureBytes: 3 * megabyte,
+				TotalBytes:   5 * format.Megabyte,
+				TextureBytes: 3 * format.Megabyte,
 			},
 			FileSHA256: "hash1",
 		},
@@ -160,8 +162,8 @@ func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
 
 	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, defaultLargeTextureThreshold)
 
-	if summary.TotalBytes != 5*megabyte {
-		t.Errorf("expected total bytes %d, got %d", 5*megabyte, summary.TotalBytes)
+	if summary.TotalBytes != 5*format.Megabyte {
+		t.Errorf("expected total bytes %d, got %d", 5*format.Megabyte, summary.TotalBytes)
 	}
 	if summary.MeshPartCount != 1 {
 		t.Errorf("expected MeshPartCount 1, got %d", summary.MeshPartCount)
@@ -208,11 +210,11 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 	}
 	resolved := map[string]reportGenerationResolvedAsset{
 		scanAssetReferenceKey(111, "rbxassetid://111"): {
-			Stats:      rbxlHeatmapAssetStats{TotalBytes: 5 * megabyte},
+			Stats:      rbxlHeatmapAssetStats{TotalBytes: 5 * format.Megabyte},
 			FileSHA256: "same-hash",
 		},
 		scanAssetReferenceKey(222, "rbxassetid://222"): {
-			Stats:      rbxlHeatmapAssetStats{TotalBytes: 5 * megabyte},
+			Stats:      rbxlHeatmapAssetStats{TotalBytes: 5 * format.Megabyte},
 			FileSHA256: "same-hash",
 		},
 	}
@@ -225,8 +227,8 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 	if summary.UniqueReferenceCount != 2 {
 		t.Fatalf("expected unique reference count 2, got %d", summary.UniqueReferenceCount)
 	}
-	if summary.TotalBytes != 10*megabyte {
-		t.Fatalf("expected total bytes %d after deduping repeated refs, got %d", 10*megabyte, summary.TotalBytes)
+	if summary.TotalBytes != 10*format.Megabyte {
+		t.Fatalf("expected total bytes %d after deduping repeated refs, got %d", 10*format.Megabyte, summary.TotalBytes)
 	}
 	if summary.ResolvedCount != 2 {
 		t.Fatalf("expected resolved count 2 after deduping repeated refs, got %d", summary.ResolvedCount)
@@ -234,8 +236,8 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 	if summary.DuplicateCount != 1 {
 		t.Fatalf("expected duplicate count 1 by unique resolved reference, got %d", summary.DuplicateCount)
 	}
-	if summary.DuplicateSizeBytes != 5*megabyte {
-		t.Fatalf("expected duplicate size bytes %d, got %d", 5*megabyte, summary.DuplicateSizeBytes)
+	if summary.DuplicateSizeBytes != 5*format.Megabyte {
+		t.Fatalf("expected duplicate size bytes %d, got %d", 5*format.Megabyte, summary.DuplicateSizeBytes)
 	}
 	if summary.DrawCallCount != 3 {
 		t.Fatalf("expected draw call count 3, got %d", summary.DrawCallCount)
@@ -270,8 +272,8 @@ func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T)
 	resolved := map[string]reportGenerationResolvedAsset{
 		scanAssetReferenceKey(111, "rbxassetid://111"): {
 			Stats: rbxlHeatmapAssetStats{
-				TotalBytes:    5 * megabyte,
-				MeshBytes:     5 * megabyte,
+				TotalBytes:    5 * format.Megabyte,
+				MeshBytes:     5 * format.Megabyte,
 				TriangleCount: 123,
 			},
 			FileSHA256: "same-hash",
@@ -283,8 +285,8 @@ func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T)
 	if summary.TriangleCount != 246 {
 		t.Fatalf("expected triangle count 246 across two mesh instances, got %d", summary.TriangleCount)
 	}
-	if summary.TotalBytes != 5*megabyte {
-		t.Fatalf("expected total bytes to remain deduped at %d, got %d", 5*megabyte, summary.TotalBytes)
+	if summary.TotalBytes != 5*format.Megabyte {
+		t.Fatalf("expected total bytes to remain deduped at %d, got %d", 5*format.Megabyte, summary.TotalBytes)
 	}
 	if summary.ResolvedCount != 1 {
 		t.Fatalf("expected resolved count 1 for one unique resolved asset, got %d", summary.ResolvedCount)
@@ -307,8 +309,8 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 	resolved := map[string]reportGenerationResolvedAsset{
 		scanAssetReferenceKey(111, "rbxassetid://111"): {
 			Stats: rbxlHeatmapAssetStats{
-				TotalBytes: 5 * megabyte,
-				MeshBytes:  5 * megabyte,
+				TotalBytes: 5 * format.Megabyte,
+				MeshBytes:  5 * format.Megabyte,
 			},
 			FileSHA256: "hash1",
 		},
@@ -316,7 +318,7 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 	mapParts := []rbxlHeatmapMapPart{
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart1"},
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2"},
-		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2"},
+		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart3"},
 		{InstanceType: "Part", InstancePath: "Workspace.Part1"},
 		{InstanceType: "Part", InstancePath: "Workspace.Part2"},
 	}

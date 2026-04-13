@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"joxblox/internal/format"
+)
 
 func TestReportGenerationAssetTypeByID(t *testing.T) {
 	mapAssetType, found := reportGenerationAssetTypeByID("map")
@@ -44,9 +48,9 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 	}
 
 	summary := reportGenerationSummary{
-		TotalBytes:            800 * megabyte,
-		TextureBytes:          500 * megabyte,
-		MeshBytes:             500 * megabyte,
+		TotalBytes:            800 * format.Megabyte,
+		TextureBytes:          500 * format.Megabyte,
+		MeshBytes:             500 * format.Megabyte,
 		TriangleCount:         8_000_000,
 		OversizedTextureCount: 0,
 		DrawCallCount:         4000,

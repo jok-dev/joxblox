@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"joxblox/internal/format"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
@@ -166,7 +168,7 @@ func buildMissingMaterialVariantWarningData(fileLabel string, missing []missingM
 		detailLines = append(detailLines, "- "+name)
 	}
 	return materialVariantWarningData{
-		Summary:     "Warning: " + formatIntCommas(int64(variantCount)) + " " + variantWord + " missing in MaterialService for " + label + ".",
+		Summary:     "Warning: " + format.FormatIntCommas(int64(variantCount)) + " " + variantWord + " missing in MaterialService for " + label + ".",
 		DetailTitle: "Missing MaterialVariants",
 		DetailText: strings.Join(detailLines, "\n") +
 			"\n\nYou won't get a perfect look at all textures since some will be in missing materials.",
