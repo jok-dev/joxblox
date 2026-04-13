@@ -12,7 +12,7 @@ import (
 )
 
 func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
-	testApp := fyneapp.New()
+	testApp := fyneapp.NewWithID("dev.jok.joxblox.test")
 	defer testApp.Quit()
 
 	view := newAssetView("No image loaded", false)
@@ -55,7 +55,7 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 }
 
 func TestAssetViewSetDataShowsInGameSizeMetric(t *testing.T) {
-	testApp := fyneapp.New()
+	testApp := fyneapp.NewWithID("dev.jok.joxblox.test")
 	defer testApp.Quit()
 
 	view := newAssetView("No image loaded", false)

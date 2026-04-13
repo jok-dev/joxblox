@@ -31,7 +31,7 @@ var appIconSVG []byte
 func Run() {
 	debug.Logf = logDebugf
 	initializeDebugLogFile()
-	guiApp := app.New()
+	guiApp := app.NewWithID("dev.jok.joxblox")
 	appIcon := fyne.NewStaticResource("app_icon.svg", appIconSVG)
 	guiApp.SetIcon(appIcon)
 	window := guiApp.NewWindow(appDisplayName)

@@ -1,6 +1,6 @@
 [Details]
 Icon = "app_icon.png"
 Name = "Roblox Asset Explorer"
-ID = "com.voldex.robloxassetexplorer"
+ID = "dev.jok.robloxassetexplorer"
 Version = "0.1.0"
 Build = 2
