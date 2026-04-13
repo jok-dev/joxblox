@@ -1,4 +1,4 @@
-package app
+package ui
 
 import (
 	"fmt"
@@ -30,7 +30,7 @@ var debugConsole = &debugConsoleState{
 	subscribers: map[int]func([]string){},
 }
 
-func logDebugf(format string, args ...any) {
+func LogDebugf(format string, args ...any) {
 	messageText := fmt.Sprintf(format, args...)
 	debugConsole.appendLine(messageText)
 }
@@ -91,8 +91,11 @@ func (state *debugConsoleState) subscribe(onUpdate func([]string)) func() {
 	}
 }
 
-func initializeDebugLogFile() {
-	repositoryRootPath, rootErr := getRepositoryRootPath()
+func InitializeDebugLogFile() {
+	if GetRepositoryRootPath == nil {
+		return
+	}
+	repositoryRootPath, rootErr := GetRepositoryRootPath()
 	if rootErr != nil {
 		return
 	}
@@ -112,7 +115,7 @@ func appendLineToLogFile(logFilePath string, line string) {
 	_, _ = logFileHandle.WriteString(line + "\n")
 }
 
-func newDebugConsolePanel(onVisibilityChanged func(bool)) fyne.CanvasObject {
+func NewDebugConsolePanel(onVisibilityChanged func(bool)) fyne.CanvasObject {
 	consoleGrid := widget.NewTextGrid()
 	consoleGrid.SetText("Debug logs will appear here...")
 

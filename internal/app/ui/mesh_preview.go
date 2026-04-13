@@ -1,4 +1,4 @@
-package app
+package ui
 
 import (
 	"bufio"
@@ -29,41 +29,50 @@ import (
 	"joxblox/internal/format"
 )
 
-const maxMeshPreviewTriangles = 20000
-const minMeshPreviewRenderDimension = 32
+const MaxMeshPreviewTriangles = 20000
+const MinMeshPreviewRenderDimension = 32
+
+const (
+	PreviewWidth  = 440
+	PreviewHeight = 300
+)
+
+var GetPrimaryWindow func() fyne.Window
+var LoadMouseLookSensitivity func() float64
+var GetRepositoryRootPath func() (string, error)
 
 const (
 	meshPreviewKeyboardTickInterval        = time.Second / 60
 	meshPreviewKeyboardMovePerSecond       = 1.8
 	meshPreviewKeyboardFastMultiplier      = 2.75
 	meshPreviewKeyboardMaximumPitchRad     = 1.35
-	meshPreviewDefaultMouseLookSensitivity = 0.00625
-	meshPreviewMinimumMouseLookSensitivity = 0.001
-	meshPreviewMaximumMouseLookSensitivity = 0.03
-	meshPreviewMouseLookSensitivityStep    = 0.0005
+	MeshPreviewDefaultMouseLookSensitivity = 0.00625
+	MeshPreviewMinimumMouseLookSensitivity = 0.001
+	MeshPreviewMaximumMouseLookSensitivity = 0.03
+	MeshPreviewMouseLookSensitivityStep    = 0.0005
 	meshPreviewScrollMoveDistance          = 0.35
 )
 
-type meshPreviewData struct {
+type MeshPreviewData struct {
 	RawPositions         []float32
 	RawIndices           []uint32
 	RawColors            []uint8
-	Batches              []meshPreviewBatchData
+	Batches              []MeshPreviewBatchData
 	TriangleCount        uint32
 	PreviewTriangleCount uint32
 }
 
-type meshPreviewBatchData struct {
+type MeshPreviewBatchData struct {
 	RawPositions []float32
 	RawIndices   []uint32
 	RawColors    []uint8
 }
 
-type meshPreviewWidget struct {
+type MeshPreviewWidget struct {
 	widget.BaseWidget
 	background     *canvas.Rectangle
 	image          *canvas.Image
-	data           meshPreviewData
+	data           MeshPreviewData
 	selectedBatch  int
 	opacity        float64
 	cameraX        float64
@@ -95,12 +104,12 @@ type meshPreviewKeyState struct {
 	fast     bool
 }
 
-func newMeshPreviewWidget() *meshPreviewWidget {
+func NewMeshPreviewWidget() *MeshPreviewWidget {
 	initialYaw := -0.35
 	initialPitch := 0.3
 	initialZoom := 1.0
 	initialCameraX, initialCameraY, initialCameraZ := meshPreviewInitialCameraPosition(initialYaw, initialPitch, initialZoom)
-	viewer := &meshPreviewWidget{
+	viewer := &MeshPreviewWidget{
 		background:    canvas.NewRectangle(color.NRGBA{R: 14, G: 17, B: 22, A: 255}),
 		image:         canvas.NewImageFromImage(nil),
 		selectedBatch: -1,
@@ -118,20 +127,20 @@ func newMeshPreviewWidget() *meshPreviewWidget {
 	return viewer
 }
 
-func meshPreviewControlsText() string {
+func MeshPreviewControlsText() string {
 	return "Hold right click to look, WASD to move, scroll to move forward/back, Shift to go faster"
 }
 
-func (viewer *meshPreviewWidget) CreateRenderer() fyne.WidgetRenderer {
+func (viewer *MeshPreviewWidget) CreateRenderer() fyne.WidgetRenderer {
 	content := container.NewWithoutLayout(viewer.background, viewer.image)
 	return widget.NewSimpleRenderer(content)
 }
 
-func (viewer *meshPreviewWidget) MinSize() fyne.Size {
-	return fyne.NewSize(previewWidth, previewHeight)
+func (viewer *MeshPreviewWidget) MinSize() fyne.Size {
+	return fyne.NewSize(PreviewWidth, PreviewHeight)
 }
 
-func (viewer *meshPreviewWidget) Resize(size fyne.Size) {
+func (viewer *MeshPreviewWidget) Resize(size fyne.Size) {
 	viewer.BaseWidget.Resize(size)
 	viewer.background.Resize(size)
 	viewer.background.Move(fyne.NewPos(0, 0))
@@ -140,23 +149,26 @@ func (viewer *meshPreviewWidget) Resize(size fyne.Size) {
 	viewer.render()
 }
 
-func (viewer *meshPreviewWidget) Dragged(event *fyne.DragEvent) {
+func (viewer *MeshPreviewWidget) Dragged(event *fyne.DragEvent) {
 }
 
-func (viewer *meshPreviewWidget) DragEnd() {}
+func (viewer *MeshPreviewWidget) DragEnd() {}
 
-func (viewer *meshPreviewWidget) applyMouseLookDelta(deltaX float32, deltaY float32) {
-	if viewer == nil || !viewer.data.hasRenderableGeometry() {
+func (viewer *MeshPreviewWidget) applyMouseLookDelta(deltaX float32, deltaY float32) {
+	if viewer == nil || !viewer.data.HasRenderableGeometry() {
 		return
 	}
-	lookSensitivity := loadMeshPreviewMouseLookSensitivity()
+	lookSensitivity := MeshPreviewDefaultMouseLookSensitivity
+	if LoadMouseLookSensitivity != nil {
+		lookSensitivity = LoadMouseLookSensitivity()
+	}
 	viewer.yaw -= float64(deltaX) * lookSensitivity
 	viewer.pitch += float64(deltaY) * lookSensitivity
 	viewer.pitch = format.Clamp(viewer.pitch, -meshPreviewKeyboardMaximumPitchRad, meshPreviewKeyboardMaximumPitchRad)
 }
 
-func (viewer *meshPreviewWidget) Tapped(event *fyne.PointEvent) {
-	if viewer == nil || event == nil || !viewer.data.hasRenderableGeometry() {
+func (viewer *MeshPreviewWidget) Tapped(event *fyne.PointEvent) {
+	if viewer == nil || event == nil || !viewer.data.HasRenderableGeometry() {
 		return
 	}
 	viewer.requestFocus()
@@ -219,8 +231,8 @@ func rayTriangleIntersect(ox, oy, oz, dx, dy, dz, v0x, v0y, v0z, v1x, v1y, v1z, 
 	return t
 }
 
-func (viewer *meshPreviewWidget) Scrolled(event *fyne.ScrollEvent) {
-	if viewer == nil || event == nil || !viewer.data.hasRenderableGeometry() {
+func (viewer *MeshPreviewWidget) Scrolled(event *fyne.ScrollEvent) {
+	if viewer == nil || event == nil || !viewer.data.HasRenderableGeometry() {
 		return
 	}
 	viewer.requestFocus()
@@ -233,25 +245,25 @@ func (viewer *meshPreviewWidget) Scrolled(event *fyne.ScrollEvent) {
 	}
 }
 
-func (viewer *meshPreviewWidget) Clear() {
+func (viewer *MeshPreviewWidget) Clear() {
 	viewer.renderToken.Add(1)
 	viewer.stopKeyboardMovement()
-	viewer.data = meshPreviewData{}
+	viewer.data = MeshPreviewData{}
 	viewer.selectedBatch = -1
 	viewer.image.Image = nil
 	viewer.image.Refresh()
 	viewer.stopProcess()
 }
 
-func (viewer *meshPreviewWidget) SetData(data meshPreviewData) {
+func (viewer *MeshPreviewWidget) SetData(data MeshPreviewData) {
 	viewer.applyData(data, true)
 }
 
-func (viewer *meshPreviewWidget) SetDataPreserveView(data meshPreviewData) {
+func (viewer *MeshPreviewWidget) SetDataPreserveView(data MeshPreviewData) {
 	viewer.applyData(data, false)
 }
 
-func (viewer *meshPreviewWidget) applyData(data meshPreviewData, resetView bool) {
+func (viewer *MeshPreviewWidget) applyData(data MeshPreviewData, resetView bool) {
 	viewer.stopProcess()
 	viewer.data = data
 	viewer.selectedBatch = -1
@@ -270,7 +282,7 @@ func (viewer *meshPreviewWidget) applyData(data meshPreviewData, resetView bool)
 	}()
 }
 
-func (viewer *meshPreviewWidget) UpdateSceneColors(data meshPreviewData) {
+func (viewer *MeshPreviewWidget) UpdateSceneColors(data MeshPreviewData) {
 	if viewer == nil {
 		return
 	}
@@ -278,7 +290,7 @@ func (viewer *meshPreviewWidget) UpdateSceneColors(data meshPreviewData) {
 		viewer.SetDataPreserveView(data)
 		return
 	}
-	batchColors, colorsErr := meshPreviewBatchBaseColors(data.renderableBatches())
+	batchColors, colorsErr := MeshPreviewBatchBaseColors(data.RenderableBatches())
 	if colorsErr != nil {
 		viewer.SetDataPreserveView(data)
 		return
@@ -306,7 +318,7 @@ func (viewer *meshPreviewWidget) UpdateSceneColors(data meshPreviewData) {
 	}(proc, batchColors)
 }
 
-func (viewer *meshPreviewWidget) SetBackground(fill color.Color) {
+func (viewer *MeshPreviewWidget) SetBackground(fill color.Color) {
 	if viewer == nil || viewer.background == nil {
 		return
 	}
@@ -315,7 +327,7 @@ func (viewer *meshPreviewWidget) SetBackground(fill color.Color) {
 	viewer.render()
 }
 
-func (viewer *meshPreviewWidget) SetZoom(nextZoom float64) {
+func (viewer *MeshPreviewWidget) SetZoom(nextZoom float64) {
 	if viewer == nil {
 		return
 	}
@@ -323,7 +335,7 @@ func (viewer *meshPreviewWidget) SetZoom(nextZoom float64) {
 	viewer.render()
 }
 
-func (viewer *meshPreviewWidget) SetOpacity(nextOpacity float64) {
+func (viewer *MeshPreviewWidget) SetOpacity(nextOpacity float64) {
 	if viewer == nil {
 		return
 	}
@@ -331,11 +343,11 @@ func (viewer *meshPreviewWidget) SetOpacity(nextOpacity float64) {
 	viewer.render()
 }
 
-func (viewer *meshPreviewWidget) SetSelectedBatch(batchIndex int) {
+func (viewer *MeshPreviewWidget) SetSelectedBatch(batchIndex int) {
 	if viewer == nil {
 		return
 	}
-	if batchIndex < 0 || batchIndex >= len(viewer.data.renderableBatches()) {
+	if batchIndex < 0 || batchIndex >= len(viewer.data.RenderableBatches()) {
 		batchIndex = -1
 	}
 	if viewer.selectedBatch == batchIndex {
@@ -345,50 +357,50 @@ func (viewer *meshPreviewWidget) SetSelectedBatch(batchIndex int) {
 	viewer.render()
 }
 
-func (viewer *meshPreviewWidget) SelectedBatch() int {
+func (viewer *MeshPreviewWidget) SelectedBatch() int {
 	if viewer == nil {
 		return -1
 	}
 	return viewer.selectedBatch
 }
 
-func (viewer *meshPreviewWidget) SetFocusCanvas(canvas fyne.Canvas) {
+func (viewer *MeshPreviewWidget) SetFocusCanvas(canvas fyne.Canvas) {
 	if viewer == nil {
 		return
 	}
 	viewer.focusCanvas = canvas
 }
 
-func (viewer *meshPreviewWidget) FocusGained() {}
+func (viewer *MeshPreviewWidget) FocusGained() {}
 
-func (viewer *meshPreviewWidget) FocusLost() {
+func (viewer *MeshPreviewWidget) FocusLost() {
 	viewer.stopKeyboardMovement()
 }
 
-func (viewer *meshPreviewWidget) TypedRune(_ rune) {}
+func (viewer *MeshPreviewWidget) TypedRune(_ rune) {}
 
-func (viewer *meshPreviewWidget) TypedKey(_ *fyne.KeyEvent) {}
+func (viewer *MeshPreviewWidget) TypedKey(_ *fyne.KeyEvent) {}
 
-func (viewer *meshPreviewWidget) KeyDown(event *fyne.KeyEvent) {
+func (viewer *MeshPreviewWidget) KeyDown(event *fyne.KeyEvent) {
 	if viewer == nil || event == nil {
 		return
 	}
 	viewer.updateKeyboardState(event.Name, true)
 }
 
-func (viewer *meshPreviewWidget) KeyUp(event *fyne.KeyEvent) {
+func (viewer *MeshPreviewWidget) KeyUp(event *fyne.KeyEvent) {
 	if viewer == nil || event == nil {
 		return
 	}
 	viewer.updateKeyboardState(event.Name, false)
 }
 
-func (viewer *meshPreviewWidget) MouseIn(_ *desktop.MouseEvent) {
+func (viewer *MeshPreviewWidget) MouseIn(_ *desktop.MouseEvent) {
 	viewer.requestFocus()
 	viewer.hasLastMouse = false
 }
 
-func (viewer *meshPreviewWidget) MouseMoved(event *desktop.MouseEvent) {
+func (viewer *MeshPreviewWidget) MouseMoved(event *desktop.MouseEvent) {
 	if viewer == nil || event == nil {
 		return
 	}
@@ -403,11 +415,11 @@ func (viewer *meshPreviewWidget) MouseMoved(event *desktop.MouseEvent) {
 	viewer.hasLastMouse = true
 }
 
-func (viewer *meshPreviewWidget) MouseOut() {
+func (viewer *MeshPreviewWidget) MouseOut() {
 	viewer.hasLastMouse = false
 }
 
-func (viewer *meshPreviewWidget) MouseDown(event *desktop.MouseEvent) {
+func (viewer *MeshPreviewWidget) MouseDown(event *desktop.MouseEvent) {
 	if viewer == nil || event == nil {
 		return
 	}
@@ -422,7 +434,7 @@ func (viewer *meshPreviewWidget) MouseDown(event *desktop.MouseEvent) {
 	}
 }
 
-func (viewer *meshPreviewWidget) MouseUp(event *desktop.MouseEvent) {
+func (viewer *MeshPreviewWidget) MouseUp(event *desktop.MouseEvent) {
 	if viewer == nil || event == nil {
 		return
 	}
@@ -437,13 +449,13 @@ func (viewer *meshPreviewWidget) MouseUp(event *desktop.MouseEvent) {
 	}
 }
 
-func (viewer *meshPreviewWidget) requestFocus() {
+func (viewer *MeshPreviewWidget) requestFocus() {
 	if viewer == nil {
 		return
 	}
 	canvas := viewer.focusCanvas
-	if canvas == nil {
-		if window := getPrimaryWindow(); window != nil {
+	if canvas == nil && GetPrimaryWindow != nil {
+		if window := GetPrimaryWindow(); window != nil {
 			canvas = window.Canvas()
 		}
 	}
@@ -452,7 +464,7 @@ func (viewer *meshPreviewWidget) requestFocus() {
 	}
 }
 
-func (viewer *meshPreviewWidget) updateKeyboardState(keyName fyne.KeyName, pressed bool) {
+func (viewer *MeshPreviewWidget) updateKeyboardState(keyName fyne.KeyName, pressed bool) {
 	if viewer == nil {
 		return
 	}
@@ -471,7 +483,7 @@ func (viewer *meshPreviewWidget) updateKeyboardState(keyName fyne.KeyName, press
 	viewer.keyStateMutex.Unlock()
 }
 
-func (viewer *meshPreviewWidget) ensureKeyboardMovementLocked() {
+func (viewer *MeshPreviewWidget) ensureKeyboardMovementLocked() {
 	if viewer.movementStop != nil {
 		return
 	}
@@ -480,7 +492,7 @@ func (viewer *meshPreviewWidget) ensureKeyboardMovementLocked() {
 	go viewer.runKeyboardMovement(stopCh)
 }
 
-func (viewer *meshPreviewWidget) stopKeyboardMovement() {
+func (viewer *MeshPreviewWidget) stopKeyboardMovement() {
 	if viewer == nil {
 		return
 	}
@@ -489,7 +501,7 @@ func (viewer *meshPreviewWidget) stopKeyboardMovement() {
 	viewer.keyStateMutex.Unlock()
 }
 
-func (viewer *meshPreviewWidget) stopKeyboardMovementLocked() {
+func (viewer *MeshPreviewWidget) stopKeyboardMovementLocked() {
 	viewer.keyState = meshPreviewKeyState{}
 	if viewer.movementStop == nil {
 		return
@@ -498,7 +510,7 @@ func (viewer *meshPreviewWidget) stopKeyboardMovementLocked() {
 	viewer.movementStop = nil
 }
 
-func (viewer *meshPreviewWidget) runKeyboardMovement(stopCh chan struct{}) {
+func (viewer *MeshPreviewWidget) runKeyboardMovement(stopCh chan struct{}) {
 	ticker := time.NewTicker(meshPreviewKeyboardTickInterval)
 	defer ticker.Stop()
 
@@ -530,7 +542,7 @@ func (viewer *meshPreviewWidget) runKeyboardMovement(stopCh chan struct{}) {
 			}
 
 			fyne.Do(func() {
-				if viewer == nil || !viewer.data.hasRenderableGeometry() {
+				if viewer == nil || !viewer.data.HasRenderableGeometry() {
 					return
 				}
 				if lookDX != 0 || lookDY != 0 {
@@ -619,7 +631,7 @@ func (state meshPreviewKeyState) moveDelta(deltaSeconds float64, yaw float64, pi
 	return moveX, moveY, moveZ
 }
 
-func (viewer *meshPreviewWidget) moveAlongView(distance float64) {
+func (viewer *MeshPreviewWidget) moveAlongView(distance float64) {
 	if viewer == nil || distance == 0 {
 		return
 	}
@@ -630,17 +642,17 @@ func (viewer *meshPreviewWidget) moveAlongView(distance float64) {
 	viewer.render()
 }
 
-func (viewer *meshPreviewWidget) render() {
+func (viewer *MeshPreviewWidget) render() {
 	if viewer == nil {
 		return
 	}
 	size := viewer.Size()
-	if size.Width < minMeshPreviewRenderDimension || size.Height < minMeshPreviewRenderDimension {
+	if size.Width < MinMeshPreviewRenderDimension || size.Height < MinMeshPreviewRenderDimension {
 		return
 	}
 	width := int(math.Max(1, float64(size.Width)))
 	height := int(math.Max(1, float64(size.Height)))
-	if !viewer.data.hasRenderableGeometry() {
+	if !viewer.data.HasRenderableGeometry() {
 		viewer.renderToken.Add(1)
 		viewer.image.Image = nil
 		viewer.image.Refresh()
@@ -677,8 +689,13 @@ func (viewer *meshPreviewWidget) render() {
 	}()
 }
 
-func (viewer *meshPreviewWidget) startProcessAndLoad() {
-	if !viewer.data.hasRenderableGeometry() {
+// Render schedules a mesh redraw at the current widget size when geometry and the renderer process are ready.
+func (viewer *MeshPreviewWidget) Render() {
+	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) startProcessAndLoad() {
+	if !viewer.data.HasRenderableGeometry() {
 		debug.Logf("mesh renderer: no raw positions/indices, skipping")
 		return
 	}
@@ -687,7 +704,7 @@ func (viewer *meshPreviewWidget) startProcessAndLoad() {
 		debug.Logf("mesh renderer process start failed: %s", startErr.Error())
 		return
 	}
-	sceneBatches := viewer.data.renderableBatches()
+	sceneBatches := viewer.data.RenderableBatches()
 	var loadErr error
 	switch {
 	case len(viewer.data.Batches) > 0:
@@ -712,23 +729,23 @@ func (viewer *meshPreviewWidget) startProcessAndLoad() {
 	viewer.process = proc
 }
 
-func (viewer *meshPreviewWidget) stopProcess() {
+func (viewer *MeshPreviewWidget) stopProcess() {
 	if viewer.process != nil {
 		viewer.process.stop()
 		viewer.process = nil
 	}
 }
 
-func (viewer *meshPreviewWidget) cameraPosition() (float64, float64, float64) {
+func (viewer *MeshPreviewWidget) cameraPosition() (float64, float64, float64) {
 	if viewer == nil {
 		return 0, 0, 0
 	}
 	return viewer.cameraX, viewer.cameraY, viewer.cameraZ
 }
 
-func (viewer *meshPreviewWidget) canReuseProcessForData(nextData meshPreviewData) bool {
-	currentBatches := viewer.data.renderableBatches()
-	nextBatches := nextData.renderableBatches()
+func (viewer *MeshPreviewWidget) canReuseProcessForData(nextData MeshPreviewData) bool {
+	currentBatches := viewer.data.RenderableBatches()
+	nextBatches := nextData.RenderableBatches()
 	if len(currentBatches) == 0 || len(currentBatches) != len(nextBatches) {
 		return false
 	}
@@ -846,7 +863,7 @@ func (p *meshRendererProcess) loadColored(positions []float32, indices []uint32,
 	return nil
 }
 
-func (p *meshRendererProcess) loadScene(batches []meshPreviewBatchData) error {
+func (p *meshRendererProcess) loadScene(batches []MeshPreviewBatchData) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.alive {
@@ -1050,10 +1067,12 @@ func resolveMeshRendererCommand() (string, []string, bool) {
 	if binaryPath, found := findMeshRendererBinaryPath(); found {
 		return binaryPath, nil, true
 	}
-	if repoRoot, err := getRepositoryRootPath(); err == nil && strings.TrimSpace(repoRoot) != "" {
-		rendererSourcePath := filepath.Join(repoRoot, "tools", "mesh-renderer", "main.go")
-		if _, statErr := os.Stat(rendererSourcePath); statErr == nil {
-			return "go", []string{"run", rendererSourcePath}, true
+	if GetRepositoryRootPath != nil {
+		if repoRoot, err := GetRepositoryRootPath(); err == nil && strings.TrimSpace(repoRoot) != "" {
+			rendererSourcePath := filepath.Join(repoRoot, "tools", "mesh-renderer", "main.go")
+			if _, statErr := os.Stat(rendererSourcePath); statErr == nil {
+				return "go", []string{"run", rendererSourcePath}, true
+			}
 		}
 	}
 	return "", nil, false
@@ -1067,9 +1086,11 @@ func findMeshRendererBinaryPath() (string, bool) {
 		dir := filepath.Dir(execPath)
 		candidates = append(candidates, filepath.Join(dir, name))
 	}
-	if repoRoot, err := getRepositoryRootPath(); err == nil && strings.TrimSpace(repoRoot) != "" {
-		candidates = append(candidates, filepath.Join(repoRoot, name))
-		candidates = append(candidates, filepath.Join(repoRoot, "tools", "mesh-renderer", name))
+	if GetRepositoryRootPath != nil {
+		if repoRoot, err := GetRepositoryRootPath(); err == nil && strings.TrimSpace(repoRoot) != "" {
+			candidates = append(candidates, filepath.Join(repoRoot, name))
+			candidates = append(candidates, filepath.Join(repoRoot, "tools", "mesh-renderer", name))
+		}
 	}
 	if wd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, filepath.Join(wd, name))
@@ -1083,15 +1104,15 @@ func findMeshRendererBinaryPath() (string, bool) {
 	return "", false
 }
 
-func buildMeshPreviewData(positions []float32, indices []uint32, triangleCount uint32, previewTriangleCount uint32) (meshPreviewData, error) {
-	return buildMeshPreviewDataWithColors(positions, indices, nil, triangleCount, previewTriangleCount)
+func BuildMeshPreviewData(positions []float32, indices []uint32, triangleCount uint32, previewTriangleCount uint32) (MeshPreviewData, error) {
+	return BuildMeshPreviewDataWithColors(positions, indices, nil, triangleCount, previewTriangleCount)
 }
 
-func buildMeshPreviewDataWithColors(positions []float32, indices []uint32, colors []uint8, triangleCount uint32, previewTriangleCount uint32) (meshPreviewData, error) {
+func BuildMeshPreviewDataWithColors(positions []float32, indices []uint32, colors []uint8, triangleCount uint32, previewTriangleCount uint32) (MeshPreviewData, error) {
 	if err := validateMeshPreviewBatch(positions, indices, colors); err != nil {
-		return meshPreviewData{}, err
+		return MeshPreviewData{}, err
 	}
-	return meshPreviewData{
+	return MeshPreviewData{
 		RawPositions:         append([]float32(nil), positions...),
 		RawIndices:           append([]uint32(nil), indices...),
 		RawColors:            append([]uint8(nil), colors...),
@@ -1100,22 +1121,22 @@ func buildMeshPreviewDataWithColors(positions []float32, indices []uint32, color
 	}, nil
 }
 
-func buildMeshPreviewSceneData(batches []meshPreviewBatchData, triangleCount uint32, previewTriangleCount uint32) (meshPreviewData, error) {
+func BuildMeshPreviewSceneData(batches []MeshPreviewBatchData, triangleCount uint32, previewTriangleCount uint32) (MeshPreviewData, error) {
 	if len(batches) == 0 {
-		return meshPreviewData{}, fmt.Errorf("mesh preview is empty")
+		return MeshPreviewData{}, fmt.Errorf("mesh preview is empty")
 	}
-	validatedBatches := make([]meshPreviewBatchData, 0, len(batches))
+	validatedBatches := make([]MeshPreviewBatchData, 0, len(batches))
 	for _, batch := range batches {
 		if err := validateMeshPreviewBatch(batch.RawPositions, batch.RawIndices, batch.RawColors); err != nil {
-			return meshPreviewData{}, err
+			return MeshPreviewData{}, err
 		}
-		validatedBatches = append(validatedBatches, meshPreviewBatchData{
+		validatedBatches = append(validatedBatches, MeshPreviewBatchData{
 			RawPositions: append([]float32(nil), batch.RawPositions...),
 			RawIndices:   append([]uint32(nil), batch.RawIndices...),
 			RawColors:    append([]uint8(nil), batch.RawColors...),
 		})
 	}
-	return meshPreviewData{
+	return MeshPreviewData{
 		Batches:              validatedBatches,
 		TriangleCount:        triangleCount,
 		PreviewTriangleCount: previewTriangleCount,
@@ -1165,7 +1186,7 @@ func meshPreviewDefaultColors(vertexCount int) []uint8 {
 	return colors
 }
 
-func meshPreviewBatchBaseColors(batches []meshPreviewBatchData) ([]color.NRGBA, error) {
+func MeshPreviewBatchBaseColors(batches []MeshPreviewBatchData) ([]color.NRGBA, error) {
 	if len(batches) == 0 {
 		return nil, fmt.Errorf("scene is empty")
 	}
@@ -1192,8 +1213,8 @@ func meshPreviewBatchBaseColors(batches []meshPreviewBatchData) ([]color.NRGBA, 
 	return result, nil
 }
 
-func cloneMeshPreviewData(data meshPreviewData) meshPreviewData {
-	cloned := meshPreviewData{
+func CloneMeshPreviewData(data MeshPreviewData) MeshPreviewData {
+	cloned := MeshPreviewData{
 		RawPositions:         append([]float32(nil), data.RawPositions...),
 		RawIndices:           append([]uint32(nil), data.RawIndices...),
 		RawColors:            append([]uint8(nil), data.RawColors...),
@@ -1201,9 +1222,9 @@ func cloneMeshPreviewData(data meshPreviewData) meshPreviewData {
 		PreviewTriangleCount: data.PreviewTriangleCount,
 	}
 	if len(data.Batches) > 0 {
-		cloned.Batches = make([]meshPreviewBatchData, 0, len(data.Batches))
+		cloned.Batches = make([]MeshPreviewBatchData, 0, len(data.Batches))
 		for _, batch := range data.Batches {
-			cloned.Batches = append(cloned.Batches, meshPreviewBatchData{
+			cloned.Batches = append(cloned.Batches, MeshPreviewBatchData{
 				RawPositions: append([]float32(nil), batch.RawPositions...),
 				RawIndices:   append([]uint32(nil), batch.RawIndices...),
 				RawColors:    append([]uint8(nil), batch.RawColors...),
@@ -1213,8 +1234,8 @@ func cloneMeshPreviewData(data meshPreviewData) meshPreviewData {
 	return cloned
 }
 
-func cloneMeshPreviewDataWithSharedGeometry(data meshPreviewData) meshPreviewData {
-	cloned := meshPreviewData{
+func CloneMeshPreviewDataWithSharedGeometry(data MeshPreviewData) MeshPreviewData {
+	cloned := MeshPreviewData{
 		RawPositions:         data.RawPositions,
 		RawIndices:           data.RawIndices,
 		RawColors:            append([]uint8(nil), data.RawColors...),
@@ -1222,7 +1243,7 @@ func cloneMeshPreviewDataWithSharedGeometry(data meshPreviewData) meshPreviewDat
 		PreviewTriangleCount: data.PreviewTriangleCount,
 	}
 	if len(data.Batches) > 0 {
-		cloned.Batches = make([]meshPreviewBatchData, len(data.Batches))
+		cloned.Batches = make([]MeshPreviewBatchData, len(data.Batches))
 		copy(cloned.Batches, data.Batches)
 		for i := range cloned.Batches {
 			cloned.Batches[i].RawColors = append([]uint8(nil), data.Batches[i].RawColors...)
@@ -1296,8 +1317,8 @@ func meshPreviewVectorLength(vector [3]float64) float64 {
 	return math.Sqrt(vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2])
 }
 
-func (data meshPreviewData) hasRenderableGeometry() bool {
-	for _, batch := range data.renderableBatches() {
+func (data MeshPreviewData) HasRenderableGeometry() bool {
+	for _, batch := range data.RenderableBatches() {
 		if len(batch.RawPositions) >= 9 && len(batch.RawIndices) >= 3 {
 			return true
 		}
@@ -1305,28 +1326,28 @@ func (data meshPreviewData) hasRenderableGeometry() bool {
 	return false
 }
 
-func (data meshPreviewData) sceneBatches() []meshPreviewBatchData {
+func (data MeshPreviewData) SceneBatches() []MeshPreviewBatchData {
 	if len(data.Batches) > 0 {
 		return data.Batches
 	}
 	if len(data.RawPositions) == 0 || len(data.RawIndices) == 0 {
 		return nil
 	}
-	return []meshPreviewBatchData{{
+	return []MeshPreviewBatchData{{
 		RawPositions: data.RawPositions,
 		RawIndices:   data.RawIndices,
 		RawColors:    data.RawColors,
 	}}
 }
 
-func (data meshPreviewData) renderableBatches() []meshPreviewBatchData {
+func (data MeshPreviewData) RenderableBatches() []MeshPreviewBatchData {
 	if len(data.Batches) > 0 {
 		return data.Batches
 	}
 	if len(data.RawPositions) == 0 || len(data.RawIndices) == 0 {
 		return nil
 	}
-	return []meshPreviewBatchData{{
+	return []MeshPreviewBatchData{{
 		RawPositions: normalizeMeshPreviewPositionsCopy(data.RawPositions),
 		RawIndices:   append([]uint32(nil), data.RawIndices...),
 		RawColors:    append([]uint8(nil), data.RawColors...),
@@ -1387,26 +1408,26 @@ func centerAndNormalizePositions(positions []float32) {
 	}
 }
 
-func extractMeshPreviewFromBytes(fileBytes []byte) (meshPreviewData, error) {
-	return extractMeshPreviewFromBytesWithLimit(fileBytes, maxMeshPreviewTriangles)
+func ExtractMeshPreviewFromBytes(fileBytes []byte) (MeshPreviewData, error) {
+	return ExtractMeshPreviewFromBytesWithLimit(fileBytes, MaxMeshPreviewTriangles)
 }
 
-func extractMeshPreviewFromBytesWithLimit(fileBytes []byte, maxTriangles int) (meshPreviewData, error) {
+func ExtractMeshPreviewFromBytesWithLimit(fileBytes []byte, maxTriangles int) (MeshPreviewData, error) {
 	raw, err := extractor.ExtractMeshPreviewRawFromBytes(fileBytes, maxTriangles)
 	if err != nil {
-		return meshPreviewData{}, err
+		return MeshPreviewData{}, err
 	}
-	return buildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
+	return BuildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
 }
 
-func extractMeshPreviewFromFile(filePath string) (meshPreviewData, error) {
-	return extractMeshPreviewFromFileWithLimit(filePath, maxMeshPreviewTriangles)
+func ExtractMeshPreviewFromFile(filePath string) (MeshPreviewData, error) {
+	return ExtractMeshPreviewFromFileWithLimit(filePath, MaxMeshPreviewTriangles)
 }
 
-func extractMeshPreviewFromFileWithLimit(filePath string, maxTriangles int) (meshPreviewData, error) {
+func ExtractMeshPreviewFromFileWithLimit(filePath string, maxTriangles int) (MeshPreviewData, error) {
 	raw, err := extractor.ExtractMeshPreviewRawFromFile(filePath, maxTriangles)
 	if err != nil {
-		return meshPreviewData{}, err
+		return MeshPreviewData{}, err
 	}
-	return buildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
+	return BuildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
 }

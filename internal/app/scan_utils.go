@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 )
 
@@ -164,7 +165,7 @@ func extractAssetReferencesFromFile(filePath string, stopChannel <-chan struct{}
 func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bool, output *[]extractedScanReference) {
 	thumbMatches := rbxThumbPattern.FindAllString(line, -1)
 	for _, thumbMatch := range thumbMatches {
-		loadRequest, err := parseSingleAssetLoadRequest(thumbMatch)
+		loadRequest, err := loader.ParseSingleAssetLoadRequest(thumbMatch)
 		if err != nil {
 			continue
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 
 	"fyne.io/fyne/v2"
@@ -205,9 +206,9 @@ func saveAllScanResults(window fyne.Window, providers []scanTabFileActionsProvid
 		selectedExportPath += ".json"
 	}
 	tablesByContext := snapshotScanWorkspace(collectedActions)
-	progress := newProgressDialog(window, "Save JSON", "Serializing all scan tables...")
-	serializeProgress := progressRangeReporter(progress, 0.05, 0.8, "Serializing all scan tables...")
-	writeProgress := progressRangeReporter(progress, 0.8, 1, "Writing JSON file...")
+	progress := ui.NewProgressDialog(window, "Save JSON", "Serializing all scan tables...")
+	serializeProgress := ui.ProgressRangeReporter(progress, 0.05, 0.8, "Serializing all scan tables...")
+	writeProgress := ui.ProgressRangeReporter(progress, 0.8, 1, "Writing JSON file...")
 	go func() {
 		payloadBytes, marshalErr := marshalScanWorkspace(tablesByContext, serializeProgress)
 		if marshalErr != nil {
@@ -292,9 +293,9 @@ func loadAllScanResultsFromPathWithActionsAsync(
 	importPath string,
 	onComplete func(string, bool),
 ) {
-	progress := newProgressDialog(window, "Load JSON", "Reading scan tables...")
-	readProgress := progressRangeReporter(progress, 0, 0.3, "Reading scan tables...")
-	parseProgress := progressRangeReporter(progress, 0.3, 0.9, "Parsing scan tables...")
+	progress := ui.NewProgressDialog(window, "Load JSON", "Reading scan tables...")
+	readProgress := ui.ProgressRangeReporter(progress, 0, 0.3, "Reading scan tables...")
+	parseProgress := ui.ProgressRangeReporter(progress, 0.3, 0.9, "Parsing scan tables...")
 	go func() {
 		payloadBytes, readErr := readFileWithProgress(importPath, readProgress)
 		if readErr != nil {

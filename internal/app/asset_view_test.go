@@ -7,6 +7,9 @@ import (
 	"image/png"
 	"testing"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
+
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
 )
@@ -16,7 +19,7 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 	defer testApp.Quit()
 
 	view := newAssetView("No image loaded", false)
-	view.currentMeshPreviewData = meshPreviewData{
+	view.currentMeshPreviewData = ui.MeshPreviewData{
 		RawPositions: []float32{0, 0, 0},
 		RawIndices:   []uint32{0, 0, 0},
 	}
@@ -26,7 +29,7 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 		AssetID:       123,
 		AssetTypeID:   1,
 		AssetTypeName: "Image",
-		PreviewImageInfo: &imageInfo{
+		PreviewImageInfo: &loader.ImageInfo{
 			Resource:    fyne.NewStaticResource("texture.png", textureBytes),
 			Width:       1,
 			Height:      1,
@@ -34,7 +37,7 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 			Format:      "png",
 			ContentType: "image/png",
 		},
-		StatsInfo: &imageInfo{
+		StatsInfo: &loader.ImageInfo{
 			Width:       1,
 			Height:      1,
 			BytesSize:   len(textureBytes),
@@ -67,7 +70,7 @@ func TestAssetViewSetDataShowsInGameSizeMetric(t *testing.T) {
 		SceneSurfaceArea:   2,
 		LargestSurfacePath: "Workspace.Building.Wall.Decal",
 		LargeTextureScore:  4096,
-		PreviewImageInfo: &imageInfo{
+		PreviewImageInfo: &loader.ImageInfo{
 			Resource:    fyne.NewStaticResource("texture.png", textureBytes),
 			Width:       1,
 			Height:      1,
@@ -75,7 +78,7 @@ func TestAssetViewSetDataShowsInGameSizeMetric(t *testing.T) {
 			Format:      "png",
 			ContentType: "image/png",
 		},
-		StatsInfo: &imageInfo{
+		StatsInfo: &loader.ImageInfo{
 			Width:       1,
 			Height:      1,
 			BytesSize:   len(textureBytes),

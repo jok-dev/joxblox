@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"bytes"
@@ -32,18 +32,39 @@ const (
 	thumbnailMetadataCacheMaxAge = 30 * time.Minute
 )
 
+// CacheSettings holds the configuration for the asset download cache.
+type CacheSettings struct {
+	Enabled bool
+	Folder  string
+}
+
+// LoadCacheSettings returns the current cache configuration.
+var LoadCacheSettings func() CacheSettings = func() CacheSettings { return CacheSettings{} }
+
+// AudioMetadata holds extracted audio file metadata.
+type AudioMetadata struct {
+	Duration time.Duration
+	Format   string
+}
+
+// ExtractAudio extracts audio metadata from file bytes.
+var ExtractAudio func(fileName, contentType string, data []byte) (*AudioMetadata, error)
+
+// IsAudioContent returns whether the given asset type and content type represent audio.
+var IsAudioContent func(assetTypeID int, contentType string) bool
+
 var assetIDPattern = regexp.MustCompile(`\d+`)
 
-type assetSelfInfo struct {
+type AssetSelfInfo struct {
 	BytesSize   int
 	AssetTypeID int
 }
 
 var assetSizeCache = struct {
 	mutex         sync.RWMutex
-	infoByAssetID map[int64]assetSelfInfo
+	infoByAssetID map[int64]AssetSelfInfo
 }{
-	infoByAssetID: map[int64]assetSelfInfo{},
+	infoByAssetID: map[int64]AssetSelfInfo{},
 }
 
 type thumbnailsResponse struct {
@@ -57,7 +78,7 @@ type thumbnailsData struct {
 	Version  string `json:"version"`
 }
 
-type imageInfo struct {
+type ImageInfo struct {
 	Resource                 *fyne.StaticResource
 	Width                    int
 	Height                   int
@@ -70,7 +91,7 @@ type imageInfo struct {
 	SHA256                   string
 }
 
-type childAssetInfo struct {
+type ChildAssetInfo struct {
 	AssetID      int64
 	BytesSize    int
 	AssetTypeID  int
@@ -81,11 +102,11 @@ type childAssetInfo struct {
 	PropertyName string
 }
 
-type assetPreviewResult struct {
-	Image              *imageInfo
-	Stats              *imageInfo
+type AssetPreviewResult struct {
+	Image              *ImageInfo
+	Stats              *ImageInfo
 	ReferencedAssetIDs []int64
-	ChildAssets        []childAssetInfo
+	ChildAssets        []ChildAssetInfo
 	TotalBytesSize     int
 	Source             string
 	State              string
@@ -101,18 +122,18 @@ type assetPreviewResult struct {
 	DownloadIsOriginal bool
 }
 
-type thumbnailInfo struct {
+type ThumbnailInfo struct {
 	ImageURL string
 	State    string
 	Version  string
 }
 
-type singleAssetLoadRequest struct {
+type SingleAssetLoadRequest struct {
 	TargetID         int64
-	ThumbnailRequest *rbxThumbRequest
+	ThumbnailRequest *RbxThumbRequest
 }
 
-type rbxThumbRequest struct {
+type RbxThumbRequest struct {
 	Type       string
 	TargetID   int64
 	Width      int
@@ -122,7 +143,7 @@ type rbxThumbRequest struct {
 	IsCircular bool
 }
 
-type thumbnailsBatchRequest struct {
+type ThumbnailsBatchRequest struct {
 	Type       string `json:"type"`
 	TargetID   int64  `json:"targetId"`
 	Size       string `json:"size"`
@@ -141,25 +162,25 @@ type assetDeliveryErrorEntry struct {
 	Message string `json:"message"`
 }
 
-type assetDeliveryInfo struct {
+type AssetDeliveryInfo struct {
 	Location      string
 	RawJSON       string
 	AssetTypeID   int
 	AssetTypeName string
 }
 
-type cachedThumbnailInfo struct {
-	Info    thumbnailInfo
+type CachedThumbnailInfo struct {
+	Info    ThumbnailInfo
 	RawJSON string
 }
 
-type assetRequestTrace struct {
+type AssetRequestTrace struct {
 	mutex       sync.Mutex
 	usedDisk    bool
 	usedNetwork bool
 }
 
-func (trace *assetRequestTrace) markDisk() {
+func (trace *AssetRequestTrace) MarkDisk() {
 	if trace == nil {
 		return
 	}
@@ -168,7 +189,7 @@ func (trace *assetRequestTrace) markDisk() {
 	trace.mutex.Unlock()
 }
 
-func (trace *assetRequestTrace) markNetwork() {
+func (trace *AssetRequestTrace) MarkNetwork() {
 	if trace == nil {
 		return
 	}
@@ -177,7 +198,7 @@ func (trace *assetRequestTrace) markNetwork() {
 	trace.mutex.Unlock()
 }
 
-func (trace *assetRequestTrace) classifyRequestSource() heatmap.RequestSource {
+func (trace *AssetRequestTrace) ClassifyRequestSource() heatmap.RequestSource {
 	if trace == nil {
 		return heatmap.SourceMemory
 	}
@@ -196,13 +217,13 @@ type economyAssetDetailsResponse struct {
 	AssetTypeID int `json:"AssetTypeId"`
 }
 
-type economyAssetDetailsInfo struct {
+type EconomyAssetDetailsInfo struct {
 	AssetTypeID int
 	RawJSON     string
 }
 
-type assetFileInfo struct {
-	Info                     *imageInfo
+type AssetFileInfo struct {
+	Info                     *ImageInfo
 	IsImage                  bool
 	ReferencedAssetIDs       []int64
 	RustyAssetToolReferences []extractor.Result
@@ -211,7 +232,7 @@ type assetFileInfo struct {
 	FileName                 string
 }
 
-func parseAssetID(rawInput string) (int64, error) {
+func ParseAssetID(rawInput string) (int64, error) {
 	trimmedInput := strings.TrimSpace(rawInput)
 	if trimmedInput == "" {
 		return 0, fmt.Errorf("Please enter an asset ID")
@@ -230,27 +251,27 @@ func parseAssetID(rawInput string) (int64, error) {
 	return assetID, nil
 }
 
-func parseSingleAssetLoadRequest(rawInput string) (singleAssetLoadRequest, error) {
+func ParseSingleAssetLoadRequest(rawInput string) (SingleAssetLoadRequest, error) {
 	trimmedInput := strings.TrimSpace(rawInput)
 	if strings.HasPrefix(strings.ToLower(trimmedInput), "rbxthumb://") {
 		thumbnailRequest, err := parseRbxThumbRequest(trimmedInput)
 		if err != nil {
-			return singleAssetLoadRequest{}, err
+			return SingleAssetLoadRequest{}, err
 		}
-		return singleAssetLoadRequest{
+		return SingleAssetLoadRequest{
 			TargetID:         thumbnailRequest.TargetID,
 			ThumbnailRequest: thumbnailRequest,
 		}, nil
 	}
 
-	assetID, err := parseAssetID(trimmedInput)
+	assetID, err := ParseAssetID(trimmedInput)
 	if err != nil {
-		return singleAssetLoadRequest{}, err
+		return SingleAssetLoadRequest{}, err
 	}
-	return singleAssetLoadRequest{TargetID: assetID}, nil
+	return SingleAssetLoadRequest{TargetID: assetID}, nil
 }
 
-func parseRbxThumbRequest(rawInput string) (*rbxThumbRequest, error) {
+func parseRbxThumbRequest(rawInput string) (*RbxThumbRequest, error) {
 	trimmedInput := strings.TrimSpace(rawInput)
 	normalizedInput := strings.ToLower(trimmedInput)
 	if !strings.HasPrefix(normalizedInput, "rbxthumb://") {
@@ -272,7 +293,7 @@ func parseRbxThumbRequest(rawInput string) (*rbxThumbRequest, error) {
 		return nil, fmt.Errorf("rbxthumb URL is missing a type parameter")
 	}
 
-	targetIDString := firstNonEmptyString(
+	targetIDString := FirstNonEmptyString(
 		queryValues.Get("id"),
 		queryValues.Get("targetId"),
 		queryValues.Get("assetId"),
@@ -305,7 +326,7 @@ func parseRbxThumbRequest(rawInput string) (*rbxThumbRequest, error) {
 		isCircular = parsedIsCircular
 	}
 
-	return &rbxThumbRequest{
+	return &RbxThumbRequest{
 		Type:       thumbnailType,
 		TargetID:   targetID,
 		Width:      width,
@@ -330,8 +351,8 @@ func parseThumbnailDimensions(queryValues url.Values) (int, int, error) {
 		return 0, 0, fmt.Errorf("rbxthumb size parameter is invalid")
 	}
 
-	widthString := firstNonEmptyString(queryValues.Get("w"), queryValues.Get("width"))
-	heightString := firstNonEmptyString(queryValues.Get("h"), queryValues.Get("height"))
+	widthString := FirstNonEmptyString(queryValues.Get("w"), queryValues.Get("width"))
+	heightString := FirstNonEmptyString(queryValues.Get("h"), queryValues.Get("height"))
 	if strings.TrimSpace(widthString) == "" || strings.TrimSpace(heightString) == "" {
 		return 0, 0, fmt.Errorf("rbxthumb URL is missing width and height parameters")
 	}
@@ -357,7 +378,7 @@ func normalizeThumbnailFormat(rawFormat string) (string, error) {
 	}
 }
 
-func firstNonEmptyString(values ...string) string {
+func FirstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		trimmedValue := strings.TrimSpace(value)
 		if trimmedValue != "" {
@@ -367,52 +388,52 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
-func loadSingleAssetPreview(request singleAssetLoadRequest) (*assetPreviewResult, error) {
-	return loadSingleAssetPreviewWithTrace(request, nil)
+func LoadSingleAssetPreview(request SingleAssetLoadRequest) (*AssetPreviewResult, error) {
+	return LoadSingleAssetPreviewWithTrace(request, nil)
 }
 
-func loadSingleAssetPreviewWithTrace(request singleAssetLoadRequest, trace *assetRequestTrace) (*assetPreviewResult, error) {
+func LoadSingleAssetPreviewWithTrace(request SingleAssetLoadRequest, trace *AssetRequestTrace) (*AssetPreviewResult, error) {
 	if request.ThumbnailRequest != nil {
 		return loadThumbnailPreviewWithTrace(request.ThumbnailRequest, trace)
 	}
-	return loadAssetPreviewWithTrace(request.TargetID, trace)
+	return LoadBestImageInfoWithOptionsAndTrace(request.TargetID, false, trace)
 }
 
-func loadAssetStatsPreviewForReference(assetID int64, assetInput string) (*assetPreviewResult, error) {
-	return loadAssetStatsPreviewForReferenceWithTrace(assetID, assetInput, nil)
+func LoadAssetStatsPreviewForReference(assetID int64, assetInput string) (*AssetPreviewResult, error) {
+	return LoadAssetStatsPreviewForReferenceWithTrace(assetID, assetInput, nil)
 }
 
-func loadAssetStatsPreviewForReferenceWithTrace(assetID int64, assetInput string, trace *assetRequestTrace) (*assetPreviewResult, error) {
-	request, err := buildSingleAssetLoadRequest(assetID, assetInput)
+func LoadAssetStatsPreviewForReferenceWithTrace(assetID int64, assetInput string, trace *AssetRequestTrace) (*AssetPreviewResult, error) {
+	request, err := BuildSingleAssetLoadRequest(assetID, assetInput)
 	if err != nil {
 		return nil, err
 	}
 	if request.ThumbnailRequest != nil {
 		return loadThumbnailPreviewWithTrace(request.ThumbnailRequest, trace)
 	}
-	return loadBestImageInfoWithOptionsAndTrace(request.TargetID, true, trace)
+	return LoadBestImageInfoWithOptionsAndTrace(request.TargetID, true, trace)
 }
 
-func buildSingleAssetLoadRequestFromAssetID(assetID int64) singleAssetLoadRequest {
-	return singleAssetLoadRequest{TargetID: assetID}
+func BuildSingleAssetLoadRequestFromAssetID(assetID int64) SingleAssetLoadRequest {
+	return SingleAssetLoadRequest{TargetID: assetID}
 }
 
-func buildSingleAssetLoadRequest(assetID int64, assetInput string) (singleAssetLoadRequest, error) {
+func BuildSingleAssetLoadRequest(assetID int64, assetInput string) (SingleAssetLoadRequest, error) {
 	trimmedInput := strings.TrimSpace(assetInput)
 	if trimmedInput != "" {
-		return parseSingleAssetLoadRequest(trimmedInput)
+		return ParseSingleAssetLoadRequest(trimmedInput)
 	}
 	if assetID <= 0 {
-		return singleAssetLoadRequest{}, fmt.Errorf("Asset ID is invalid")
+		return SingleAssetLoadRequest{}, fmt.Errorf("Asset ID is invalid")
 	}
-	return buildSingleAssetLoadRequestFromAssetID(assetID), nil
+	return BuildSingleAssetLoadRequestFromAssetID(assetID), nil
 }
 
-func (request singleAssetLoadRequest) requiresAuth() bool {
+func (request SingleAssetLoadRequest) RequiresAuth() bool {
 	return request.ThumbnailRequest == nil
 }
 
-func (request singleAssetLoadRequest) logDescription() string {
+func (request SingleAssetLoadRequest) LogDescription() string {
 	if request.ThumbnailRequest == nil {
 		return fmt.Sprintf("asset %d", request.TargetID)
 	}
@@ -424,7 +445,7 @@ func (request singleAssetLoadRequest) logDescription() string {
 	)
 }
 
-func scanAssetReferenceDisplayInput(assetID int64, assetInput string) string {
+func ScanAssetReferenceDisplayInput(assetID int64, assetInput string) string {
 	trimmedInput := strings.TrimSpace(assetInput)
 	if trimmedInput != "" {
 		return trimmedInput
@@ -432,7 +453,7 @@ func scanAssetReferenceDisplayInput(assetID int64, assetInput string) string {
 	return strconv.FormatInt(assetID, 10)
 }
 
-func buildThumbnailRequestContentCacheKey(request *rbxThumbRequest, version string) string {
+func buildThumbnailRequestContentCacheKey(request *RbxThumbRequest, version string) string {
 	if request == nil {
 		return ""
 	}
@@ -451,7 +472,7 @@ func buildAssetThumbnailContentCacheKey(assetID int64, version string) string {
 	return fmt.Sprintf("thumbnail:asset=%d:version=%s", assetID, strings.TrimSpace(version))
 }
 
-func buildAssetFileContentCacheKey(assetID int64, assetTypeID int) string {
+func BuildAssetFileContentCacheKey(assetID int64, assetTypeID int) string {
 	return fmt.Sprintf("asset-file:id=%d:type=%d", assetID, assetTypeID)
 }
 
@@ -463,7 +484,7 @@ func buildAssetThumbnailMetadataCacheKey(assetID int64) string {
 	return fmt.Sprintf("thumbnail-meta:asset=%d", assetID)
 }
 
-func buildThumbnailRequestMetadataCacheKey(request *rbxThumbRequest) string {
+func buildThumbnailRequestMetadataCacheKey(request *RbxThumbRequest) string {
 	if request == nil {
 		return ""
 	}
@@ -477,11 +498,11 @@ func buildThumbnailRequestMetadataCacheKey(request *rbxThumbRequest) string {
 	)
 }
 
-func loadThumbnailPreview(request *rbxThumbRequest) (*assetPreviewResult, error) {
+func loadThumbnailPreview(request *RbxThumbRequest) (*AssetPreviewResult, error) {
 	return loadThumbnailPreviewWithTrace(request, nil)
 }
 
-func loadThumbnailPreviewWithTrace(request *rbxThumbRequest, trace *assetRequestTrace) (*assetPreviewResult, error) {
+func loadThumbnailPreviewWithTrace(request *RbxThumbRequest, trace *AssetRequestTrace) (*AssetPreviewResult, error) {
 	thumbnailDetails, thumbnailRawJSON, err := fetchThumbnailInfoForRequestWithTrace(request, trace)
 	if err != nil {
 		return nil, err
@@ -501,11 +522,11 @@ func loadThumbnailPreviewWithTrace(request *rbxThumbRequest, trace *assetRequest
 		return nil, fmt.Errorf("Thumbnail download failed (%s)", thumbnailImageErr.Error())
 	}
 
-	return &assetPreviewResult{
+	return &AssetPreviewResult{
 		Image:              thumbnailImageInfo,
 		Stats:              thumbnailImageInfo,
 		ReferencedAssetIDs: []int64{},
-		ChildAssets:        []childAssetInfo{},
+		ChildAssets:        []ChildAssetInfo{},
 		TotalBytesSize:     thumbnailImageInfo.BytesSize,
 		Source:             roblox.SourceThumbnailsDirect,
 		State:              thumbnailDetails.State,
@@ -522,16 +543,16 @@ func loadThumbnailPreviewWithTrace(request *rbxThumbRequest, trace *assetRequest
 	}, nil
 }
 
-func loadBestImageInfo(assetID int64) (*assetPreviewResult, error) {
-	return loadBestImageInfoWithOptions(assetID, false)
+func LoadBestImageInfo(assetID int64) (*AssetPreviewResult, error) {
+	return LoadBestImageInfoWithOptions(assetID, false)
 }
 
-func loadBestImageInfoWithOptions(assetID int64, skipThumbnail bool) (*assetPreviewResult, error) {
-	return loadBestImageInfoWithOptionsAndTrace(assetID, skipThumbnail, nil)
+func LoadBestImageInfoWithOptions(assetID int64, skipThumbnail bool) (*AssetPreviewResult, error) {
+	return LoadBestImageInfoWithOptionsAndTrace(assetID, skipThumbnail, nil)
 }
 
-func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, trace *assetRequestTrace) (*assetPreviewResult, error) {
-	deliveryInfo, assetDeliveryErr := fetchAssetDeliveryInfoWithTrace(assetID, trace)
+func LoadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, trace *AssetRequestTrace) (*AssetPreviewResult, error) {
+	deliveryInfo, assetDeliveryErr := FetchAssetDeliveryInfoWithTrace(assetID, trace)
 	assetDeliveryRawJSON := ""
 	assetTypeID := 0
 	assetTypeName := "Unknown"
@@ -553,7 +574,7 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 		}
 	}
 
-	var statsInfo *imageInfo
+	var statsInfo *ImageInfo
 	referencedAssetIDs := []int64{}
 	rustyAssetToolRawJSON := ""
 	downloadBytes := []byte(nil)
@@ -562,7 +583,7 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 	if assetDeliveryErr == nil && deliveryInfo != nil {
 		deliveryFileInfo, deliveryFileErr := fetchAssetFileInfoWithCacheKeyAndTrace(
 			deliveryInfo.Location,
-			buildAssetFileContentCacheKey(assetID, assetTypeID),
+			BuildAssetFileContentCacheKey(assetID, assetTypeID),
 			assetID,
 			assetTypeID,
 			true,
@@ -587,7 +608,7 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 					deliveryFileInfo.RustyAssetToolReferences,
 					trace,
 				)
-				return &assetPreviewResult{
+				return &AssetPreviewResult{
 					Image:              deliveryFileInfo.Info,
 					Stats:              deliveryFileInfo.Info,
 					ReferencedAssetIDs: referencedAssetIDs,
@@ -716,7 +737,7 @@ func loadBestImageInfoWithOptionsAndTrace(assetID int64, skipThumbnail bool, tra
 		referencedAssetIDs,
 		nil,
 	)
-	return &assetPreviewResult{
+	return &AssetPreviewResult{
 		Image:              thumbnailImageInfo,
 		Stats:              chooseStatsInfo(statsInfo, thumbnailImageInfo),
 		ReferencedAssetIDs: referencedAssetIDs,
@@ -746,7 +767,7 @@ func isRustyAssetToolFailure(err error) bool {
 }
 
 func buildNoThumbnailPreviewResult(
-	statsInfo *imageInfo,
+	statsInfo *ImageInfo,
 	referencedAssetIDs []int64,
 	assetDeliveryRawJSON string,
 	thumbnailRawJSON string,
@@ -758,11 +779,11 @@ func buildNoThumbnailPreviewResult(
 	downloadBytes []byte,
 	downloadFileName string,
 	downloadIsOriginal bool,
-) *assetPreviewResult {
+) *AssetPreviewResult {
 	safeStatsInfo := ensureImageInfo(statsInfo)
 	totalBytesSize, childAssets := computeChildAssetsAndTotal(safeStatsInfo.BytesSize, referencedAssetIDs, nil)
-	return &assetPreviewResult{
-		Image:              &imageInfo{},
+	return &AssetPreviewResult{
+		Image:              &ImageInfo{},
 		Stats:              safeStatsInfo,
 		ReferencedAssetIDs: referencedAssetIDs,
 		ChildAssets:        childAssets,
@@ -782,26 +803,26 @@ func buildNoThumbnailPreviewResult(
 	}
 }
 
-func fetchThumbnailInfo(assetID int64) (*thumbnailInfo, string, error) {
+func fetchThumbnailInfo(assetID int64) (*ThumbnailInfo, string, error) {
 	return fetchThumbnailInfoWithTrace(assetID, nil)
 }
 
-func fetchThumbnailInfoWithTrace(assetID int64, trace *assetRequestTrace) (*thumbnailInfo, string, error) {
-	cacheSettings := loadAssetDownloadCacheSettings()
+func fetchThumbnailInfoWithTrace(assetID int64, trace *AssetRequestTrace) (*ThumbnailInfo, string, error) {
+	cacheSettings := LoadCacheSettings()
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildAssetThumbnailMetadataCacheKey(assetID)
-		var cachedEntry cachedThumbnailInfo
+		var cachedEntry CachedThumbnailInfo
 		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, thumbnailMetadataCacheMaxAge, &cachedEntry)
 		if err != nil {
 			debug.Logf("Thumbnail metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
-			trace.markDisk()
+			trace.MarkDisk()
 			debug.Logf("Thumbnail metadata cache hit for %s", cacheKey)
 			return &cachedEntry.Info, cachedEntry.RawJSON, nil
 		}
 	}
 
-	trace.markNetwork()
+	trace.MarkNetwork()
 	response, err := roblox.DoThumbnailGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, "", err
@@ -826,14 +847,14 @@ func fetchThumbnailInfoWithTrace(assetID int64, trace *assetRequestTrace) (*thum
 	}
 
 	firstResult := apiResponse.Data[0]
-	info := &thumbnailInfo{
+	info := &ThumbnailInfo{
 		ImageURL: firstResult.ImageURL,
 		State:    firstResult.State,
 		Version:  firstResult.Version,
 	}
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildAssetThumbnailMetadataCacheKey(assetID)
-		if err := writeAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, cachedThumbnailInfo{
+		if err := writeAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, CachedThumbnailInfo{
 			Info:    *info,
 			RawJSON: rawResponse,
 		}); err != nil {
@@ -843,26 +864,26 @@ func fetchThumbnailInfoWithTrace(assetID int64, trace *assetRequestTrace) (*thum
 	return info, rawResponse, nil
 }
 
-func fetchThumbnailInfoForRequest(request *rbxThumbRequest) (*thumbnailInfo, string, error) {
+func fetchThumbnailInfoForRequest(request *RbxThumbRequest) (*ThumbnailInfo, string, error) {
 	return fetchThumbnailInfoForRequestWithTrace(request, nil)
 }
 
-func fetchThumbnailInfoForRequestWithTrace(request *rbxThumbRequest, trace *assetRequestTrace) (*thumbnailInfo, string, error) {
-	cacheSettings := loadAssetDownloadCacheSettings()
+func fetchThumbnailInfoForRequestWithTrace(request *RbxThumbRequest, trace *AssetRequestTrace) (*ThumbnailInfo, string, error) {
+	cacheSettings := LoadCacheSettings()
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildThumbnailRequestMetadataCacheKey(request)
-		var cachedEntry cachedThumbnailInfo
+		var cachedEntry CachedThumbnailInfo
 		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, thumbnailMetadataCacheMaxAge, &cachedEntry)
 		if err != nil {
 			debug.Logf("Thumbnail request metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
-			trace.markDisk()
+			trace.MarkDisk()
 			debug.Logf("Thumbnail request metadata cache hit for %s", cacheKey)
 			return &cachedEntry.Info, cachedEntry.RawJSON, nil
 		}
 	}
 
-	requestBody := []thumbnailsBatchRequest{{
+	requestBody := []ThumbnailsBatchRequest{{
 		Type:       request.Type,
 		TargetID:   request.TargetID,
 		Size:       request.Size,
@@ -874,7 +895,7 @@ func fetchThumbnailInfoForRequestWithTrace(request *rbxThumbRequest, trace *asse
 		return nil, "", err
 	}
 
-	trace.markNetwork()
+	trace.MarkNetwork()
 	response, err := roblox.DoThumbnailBatchPost(bytes.NewReader(requestJSON), requestTimeout)
 	if err != nil {
 		return nil, "", err
@@ -899,14 +920,14 @@ func fetchThumbnailInfoForRequestWithTrace(request *rbxThumbRequest, trace *asse
 	}
 
 	firstResult := apiResponse.Data[0]
-	info := &thumbnailInfo{
+	info := &ThumbnailInfo{
 		ImageURL: firstResult.ImageURL,
 		State:    firstResult.State,
 		Version:  firstResult.Version,
 	}
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildThumbnailRequestMetadataCacheKey(request)
-		if err := writeAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, cachedThumbnailInfo{
+		if err := writeAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, CachedThumbnailInfo{
 			Info:    *info,
 			RawJSON: rawResponse,
 		}); err != nil {
@@ -916,9 +937,9 @@ func fetchThumbnailInfoForRequestWithTrace(request *rbxThumbRequest, trace *asse
 	return info, rawResponse, nil
 }
 
-func buildThumbnailBatchDebugJSON(request thumbnailsBatchRequest, rawResponse []byte) string {
+func buildThumbnailBatchDebugJSON(request ThumbnailsBatchRequest, rawResponse []byte) string {
 	debugPayload := struct {
-		Request  thumbnailsBatchRequest `json:"request"`
+		Request  ThumbnailsBatchRequest `json:"request"`
 		Response json.RawMessage        `json:"response"`
 	}{
 		Request:  request,
@@ -931,26 +952,26 @@ func buildThumbnailBatchDebugJSON(request thumbnailsBatchRequest, rawResponse []
 	return string(debugJSON)
 }
 
-func fetchAssetDeliveryInfo(assetID int64) (*assetDeliveryInfo, error) {
-	return fetchAssetDeliveryInfoWithTrace(assetID, nil)
+func FetchAssetDeliveryInfo(assetID int64) (*AssetDeliveryInfo, error) {
+	return FetchAssetDeliveryInfoWithTrace(assetID, nil)
 }
 
-func fetchAssetDeliveryInfoWithTrace(assetID int64, trace *assetRequestTrace) (*assetDeliveryInfo, error) {
-	cacheSettings := loadAssetDownloadCacheSettings()
+func FetchAssetDeliveryInfoWithTrace(assetID int64, trace *AssetRequestTrace) (*AssetDeliveryInfo, error) {
+	cacheSettings := LoadCacheSettings()
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildAssetDeliveryMetadataCacheKey(assetID)
-		var cachedEntry assetDeliveryInfo
+		var cachedEntry AssetDeliveryInfo
 		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, assetDeliveryMetadataMaxAge, &cachedEntry)
 		if err != nil {
 			debug.Logf("AssetDelivery metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
-			trace.markDisk()
+			trace.MarkDisk()
 			debug.Logf("AssetDelivery metadata cache hit for %s", cacheKey)
 			return &cachedEntry, nil
 		}
 	}
 
-	trace.markNetwork()
+	trace.MarkNetwork()
 	response, err := roblox.DoAssetDeliveryGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, err
@@ -962,7 +983,7 @@ func fetchAssetDeliveryInfoWithTrace(assetID int64, trace *assetRequestTrace) (*
 		return nil, err
 	}
 	rawResponse := string(responseBytes)
-	info := &assetDeliveryInfo{
+	info := &AssetDeliveryInfo{
 		RawJSON:       rawResponse,
 		AssetTypeID:   0,
 		AssetTypeName: "Unknown",
@@ -1020,15 +1041,15 @@ func extractAssetDeliveryFailureReason(rawResponse string) string {
 	return ""
 }
 
-func fetchImageInfo(imageURL string, assetID int64, includeHash bool) (*imageInfo, error) {
+func fetchImageInfo(imageURL string, assetID int64, includeHash bool) (*ImageInfo, error) {
 	return fetchImageInfoWithCacheKey(imageURL, "", assetID, includeHash)
 }
 
-func fetchImageInfoWithCacheKey(imageURL string, cacheKey string, assetID int64, includeHash bool) (*imageInfo, error) {
+func fetchImageInfoWithCacheKey(imageURL string, cacheKey string, assetID int64, includeHash bool) (*ImageInfo, error) {
 	return fetchImageInfoWithCacheKeyAndTrace(imageURL, cacheKey, assetID, includeHash, nil)
 }
 
-func fetchImageInfoWithCacheKeyAndTrace(imageURL string, cacheKey string, assetID int64, includeHash bool, trace *assetRequestTrace) (*imageInfo, error) {
+func fetchImageInfoWithCacheKeyAndTrace(imageURL string, cacheKey string, assetID int64, includeHash bool, trace *AssetRequestTrace) (*ImageInfo, error) {
 	imageBytes, contentType, err := downloadRobloxContentBytesWithCacheKeyAndTrace(imageURL, cacheKey, requestTimeout, trace)
 	if err != nil {
 		return nil, err
@@ -1042,14 +1063,14 @@ func fetchImageInfoWithCacheKeyAndTrace(imageURL string, cacheKey string, assetI
 
 	sha256Value := ""
 	if includeHash {
-		sha256Value = computeSHA256Hex(imageBytes)
+		sha256Value = ComputeSHA256Hex(imageBytes)
 	}
 	recompressedPNGByteSize, recompressedJPEGByteSize, recompressErr := computeBestCompressedImageSizes(imageBytes)
 	if recompressErr != nil {
 		recompressedPNGByteSize = 0
 		recompressedJPEGByteSize = 0
 	}
-	return &imageInfo{
+	return &ImageInfo{
 		Resource:                 fyne.NewStaticResource(resourceName, imageBytes),
 		Width:                    imageConfig.Width,
 		Height:                   imageConfig.Height,
@@ -1062,25 +1083,25 @@ func fetchImageInfoWithCacheKeyAndTrace(imageURL string, cacheKey string, assetI
 	}, nil
 }
 
-func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeHash bool) (*assetFileInfo, error) {
+func fetchAssetFileInfo(fileURL string, assetID int64, assetTypeID int, includeHash bool) (*AssetFileInfo, error) {
 	return fetchAssetFileInfoWithCacheKey(fileURL, "", assetID, assetTypeID, includeHash)
 }
 
-func fetchAssetFileInfoWithCacheKey(fileURL string, cacheKey string, assetID int64, assetTypeID int, includeHash bool) (*assetFileInfo, error) {
+func fetchAssetFileInfoWithCacheKey(fileURL string, cacheKey string, assetID int64, assetTypeID int, includeHash bool) (*AssetFileInfo, error) {
 	return fetchAssetFileInfoWithCacheKeyAndTrace(fileURL, cacheKey, assetID, assetTypeID, includeHash, nil)
 }
 
-func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, assetID int64, assetTypeID int, includeHash bool, trace *assetRequestTrace) (*assetFileInfo, error) {
+func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, assetID int64, assetTypeID int, includeHash bool, trace *AssetRequestTrace) (*AssetFileInfo, error) {
 	fileBytes, contentType, err := downloadRobloxContentBytesWithCacheKeyAndTrace(fileURL, cacheKey, requestTimeout, trace)
 	if err != nil {
 		return nil, err
 	}
 	sha256Value := ""
 	if includeHash {
-		sha256Value = computeSHA256Hex(fileBytes)
+		sha256Value = ComputeSHA256Hex(fileBytes)
 	}
 	fileName := buildAssetDownloadFileName(assetID, assetTypeID, contentType, "", false)
-	info := &imageInfo{
+	info := &ImageInfo{
 		Resource:                 nil,
 		Width:                    0,
 		Height:                   0,
@@ -1094,12 +1115,14 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 
 	imageConfig, imageFormat, decodeErr := image.DecodeConfig(bytes.NewReader(fileBytes))
 	if decodeErr != nil {
-		if isAudioAssetContent(assetTypeID, contentType) {
-			audioMetadata, audioErr := extractAudioMetadata(fileName, contentType, fileBytes)
-			if audioErr == nil && audioMetadata != nil {
-				info.Duration = audioMetadata.Duration
-				if strings.TrimSpace(audioMetadata.Format) != "" {
-					info.Format = audioMetadata.Format
+		if IsAudioContent != nil && IsAudioContent(assetTypeID, contentType) {
+			if ExtractAudio != nil {
+				audioMetadata, audioErr := ExtractAudio(fileName, contentType, fileBytes)
+				if audioErr == nil && audioMetadata != nil {
+					info.Duration = audioMetadata.Duration
+					if strings.TrimSpace(audioMetadata.Format) != "" {
+						info.Format = audioMetadata.Format
+					}
 				}
 			}
 		}
@@ -1113,7 +1136,7 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 		if extractErr != nil {
 			return nil, extractErr
 		}
-		return &assetFileInfo{
+		return &AssetFileInfo{
 			Info:                     info,
 			IsImage:                  false,
 			ReferencedAssetIDs:       referencedAssetIDs,
@@ -1145,7 +1168,7 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 	if extractErr != nil {
 		return nil, extractErr
 	}
-	return &assetFileInfo{
+	return &AssetFileInfo{
 		Info:                     info,
 		IsImage:                  true,
 		ReferencedAssetIDs:       referencedAssetIDs,
@@ -1170,7 +1193,7 @@ func buildAssetDownloadFileName(assetID int64, assetTypeID int, contentType stri
 	return fmt.Sprintf("asset_%d.%s", assetID, fileExtension)
 }
 
-func buildFallbackWarningText(warningReason string) string {
+func BuildFallbackWarningText(warningReason string) string {
 	if warningReason == "" {
 		return "failed to get in-game version, showing a thumbnail instead, note that this is not representitive of the actual asset size, dimentions etc"
 	}
@@ -1181,7 +1204,7 @@ func buildFallbackWarningText(warningReason string) string {
 	)
 }
 
-func fetchAssetDetailsFromEconomy(assetID int64) (*economyAssetDetailsInfo, error) {
+func fetchAssetDetailsFromEconomy(assetID int64) (*EconomyAssetDetailsInfo, error) {
 	response, err := roblox.DoEconomyDetailsGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, err
@@ -1199,7 +1222,7 @@ func fetchAssetDetailsFromEconomy(assetID int64) (*economyAssetDetailsInfo, erro
 	if err := json.Unmarshal(responseBytes, &detailsResponse); err != nil {
 		return nil, err
 	}
-	return &economyAssetDetailsInfo{
+	return &EconomyAssetDetailsInfo{
 		AssetTypeID: detailsResponse.AssetTypeID,
 		RawJSON:     string(responseBytes),
 	}, nil
@@ -1218,21 +1241,21 @@ func inferFormatFromContentType(contentType string) string {
 	return strings.ToUpper(contentTypeParts[1])
 }
 
-func chooseStatsInfo(preferredStats *imageInfo, fallbackStats *imageInfo) *imageInfo {
+func chooseStatsInfo(preferredStats *ImageInfo, fallbackStats *ImageInfo) *ImageInfo {
 	if preferredStats != nil {
 		return preferredStats
 	}
 	return fallbackStats
 }
 
-func ensureImageInfo(info *imageInfo) *imageInfo {
+func ensureImageInfo(info *ImageInfo) *ImageInfo {
 	if info != nil {
 		return info
 	}
-	return &imageInfo{}
+	return &ImageInfo{}
 }
 
-func computeSHA256Hex(payload []byte) string {
+func ComputeSHA256Hex(payload []byte) string {
 	hashBytes := sha256.Sum256(payload)
 	return hex.EncodeToString(hashBytes[:])
 }
@@ -1254,13 +1277,13 @@ func computeBestCompressedImageSizes(imageBytes []byte) (int, int, error) {
 	return recompressedBuffer.Len(), recompressedJPEGBuffer.Len(), nil
 }
 
-func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []extractor.Result) (int, []childAssetInfo) {
+func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []extractor.Result) (int, []ChildAssetInfo) {
 	return computeChildAssetsAndTotalWithTrace(selfBytesSize, referencedAssetIDs, rustyAssetToolReferences, nil)
 }
 
-func computeChildAssetsAndTotalWithTrace(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []extractor.Result, trace *assetRequestTrace) (int, []childAssetInfo) {
+func computeChildAssetsAndTotalWithTrace(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []extractor.Result, trace *AssetRequestTrace) (int, []ChildAssetInfo) {
 	totalBytesSize := selfBytesSize
-	childAssets := make([]childAssetInfo, 0, len(referencedAssetIDs))
+	childAssets := make([]ChildAssetInfo, 0, len(referencedAssetIDs))
 	referenceByAssetID := map[int64]extractor.Result{}
 	for _, reference := range rustyAssetToolReferences {
 		if reference.ID <= 0 {
@@ -1275,7 +1298,7 @@ func computeChildAssetsAndTotalWithTrace(selfBytesSize int, referencedAssetIDs [
 		referenceContext := referenceByAssetID[referencedAssetID]
 		referencedAssetInfo, infoErr := getAssetSelfInfoWithTrace(referencedAssetID, trace)
 		if infoErr != nil || referencedAssetInfo.BytesSize <= 0 {
-			childAssets = append(childAssets, childAssetInfo{
+			childAssets = append(childAssets, ChildAssetInfo{
 				AssetID:      referencedAssetID,
 				BytesSize:    0,
 				AssetTypeID:  referencedAssetInfo.AssetTypeID,
@@ -1288,7 +1311,7 @@ func computeChildAssetsAndTotalWithTrace(selfBytesSize int, referencedAssetIDs [
 			continue
 		}
 		totalBytesSize += referencedAssetInfo.BytesSize
-		childAssets = append(childAssets, childAssetInfo{
+		childAssets = append(childAssets, ChildAssetInfo{
 			AssetID:      referencedAssetID,
 			BytesSize:    referencedAssetInfo.BytesSize,
 			AssetTypeID:  referencedAssetInfo.AssetTypeID,
@@ -1302,11 +1325,11 @@ func computeChildAssetsAndTotalWithTrace(selfBytesSize int, referencedAssetIDs [
 	return totalBytesSize, childAssets
 }
 
-func getAssetSelfInfo(assetID int64) (assetSelfInfo, error) {
+func getAssetSelfInfo(assetID int64) (AssetSelfInfo, error) {
 	return getAssetSelfInfoWithTrace(assetID, nil)
 }
 
-func getAssetSelfInfoWithTrace(assetID int64, trace *assetRequestTrace) (assetSelfInfo, error) {
+func getAssetSelfInfoWithTrace(assetID int64, trace *AssetRequestTrace) (AssetSelfInfo, error) {
 	assetSizeCache.mutex.RLock()
 	cachedAssetInfo, found := assetSizeCache.infoByAssetID[assetID]
 	assetSizeCache.mutex.RUnlock()
@@ -1314,8 +1337,8 @@ func getAssetSelfInfoWithTrace(assetID int64, trace *assetRequestTrace) (assetSe
 		return cachedAssetInfo, nil
 	}
 
-	assetDeliveryInfo, deliveryErr := fetchAssetDeliveryInfoWithTrace(assetID, trace)
-	selfInfo := assetSelfInfo{}
+	assetDeliveryInfo, deliveryErr := FetchAssetDeliveryInfoWithTrace(assetID, trace)
+	selfInfo := AssetSelfInfo{}
 	if assetDeliveryInfo != nil {
 		selfInfo.AssetTypeID = assetDeliveryInfo.AssetTypeID
 	}
@@ -1328,7 +1351,7 @@ func getAssetSelfInfoWithTrace(assetID int64, trace *assetRequestTrace) (assetSe
 
 	fileInfo, fileErr := fetchAssetFileInfoWithCacheKeyAndTrace(
 		assetDeliveryInfo.Location,
-		buildAssetFileContentCacheKey(assetID, selfInfo.AssetTypeID),
+		BuildAssetFileContentCacheKey(assetID, selfInfo.AssetTypeID),
 		assetID,
 		selfInfo.AssetTypeID,
 		false,

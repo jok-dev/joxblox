@@ -25,6 +25,7 @@ import (
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -121,7 +122,7 @@ type optimizeAssetResult struct {
 
 const verifyMaxRetries = 3
 
-func verifyAssetWithRetry(id int64, stopChannel <-chan struct{}) (*assetDeliveryInfo, error) {
+func verifyAssetWithRetry(id int64, stopChannel <-chan struct{}) (*loader.AssetDeliveryInfo, error) {
 	backoff := 2 * time.Second
 	for attempt := 0; attempt <= verifyMaxRetries; attempt++ {
 		select {
@@ -129,7 +130,7 @@ func verifyAssetWithRetry(id int64, stopChannel <-chan struct{}) (*assetDelivery
 			return nil, errScanStopped
 		default:
 		}
-		deliveryInfo, err := fetchAssetDeliveryInfo(id)
+		deliveryInfo, err := loader.FetchAssetDeliveryInfo(id)
 		if err == nil {
 			return deliveryInfo, nil
 		}
@@ -1098,9 +1099,9 @@ func processOptimizeAsset(
 	}
 
 	downloadFromURL := func(url string) ([]byte, error) {
-		bodyBytes, _, err := downloadRobloxContentBytesWithCacheKey(
+		bodyBytes, _, err := loader.DownloadRobloxContentBytesWithCacheKey(
 			url,
-			buildAssetFileContentCacheKey(asset.ID, roblox.AssetTypeImage),
+			loader.BuildAssetFileContentCacheKey(asset.ID, roblox.AssetTypeImage),
 			30*time.Second,
 		)
 		if err != nil {
@@ -1124,8 +1125,8 @@ func processOptimizeAsset(
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * time.Second)
 		}
-		var deliveryInfo *assetDeliveryInfo
-		deliveryInfo, deliveryErr = fetchAssetDeliveryInfo(asset.ID)
+		var deliveryInfo *loader.AssetDeliveryInfo
+		deliveryInfo, deliveryErr = loader.FetchAssetDeliveryInfo(asset.ID)
 		if deliveryErr != nil || deliveryInfo == nil || deliveryInfo.Location == "" {
 			if deliveryErr == nil {
 				deliveryErr = fmt.Errorf("no delivery URL")

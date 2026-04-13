@@ -1,4 +1,4 @@
-package app
+package ui
 
 import (
 	"bytes"
@@ -21,14 +21,14 @@ import (
 	"github.com/faiface/beep/wav"
 )
 
-type audioMetadata struct {
+type AudioMetadata struct {
 	Duration time.Duration
 	Format   string
 }
 
-const defaultAudioVolume = 0.4
+const DefaultAudioVolume = 0.4
 
-type audioPlayerStatus struct {
+type AudioPlayerStatus struct {
 	Available bool
 	Playing   bool
 	Paused    bool
@@ -38,7 +38,7 @@ type audioPlayerStatus struct {
 	Volume    float64
 }
 
-type assetAudioPlayer struct {
+type AssetAudioPlayer struct {
 	mutex              sync.Mutex
 	buffer             *beep.Buffer
 	duration           time.Duration
@@ -50,7 +50,7 @@ type assetAudioPlayer struct {
 	playbackToken      uint64
 	speakerInitialized bool
 	speakerSampleRate  beep.SampleRate
-	onStatusChanged    func(audioPlayerStatus)
+	onStatusChanged    func(AudioPlayerStatus)
 }
 
 type audioDecoderCandidate struct {
@@ -59,22 +59,22 @@ type audioDecoderCandidate struct {
 	open   func([]byte) (beep.StreamSeekCloser, beep.Format, error)
 }
 
-func newAssetAudioPlayer(onStatusChanged func(audioPlayerStatus)) *assetAudioPlayer {
-	return &assetAudioPlayer{
+func NewAssetAudioPlayer(onStatusChanged func(AudioPlayerStatus)) *AssetAudioPlayer {
+	return &AssetAudioPlayer{
 		onStatusChanged: onStatusChanged,
-		volumeValue:     defaultAudioVolume,
+		volumeValue:     DefaultAudioVolume,
 	}
 }
 
-func (player *assetAudioPlayer) Load(fileName string, contentType string, fileBytes []byte) error {
+func (player *AssetAudioPlayer) Load(fileName string, contentType string, fileBytes []byte) error {
 	player.Reset()
 	if len(fileBytes) == 0 {
 		return fmt.Errorf("no audio bytes are available")
 	}
 
-	decodedAudio, err := decodeAudioBuffer(fileName, contentType, fileBytes)
+	decodedAudio, err := DecodeAudioBuffer(fileName, contentType, fileBytes)
 	if err != nil {
-		player.emitStatus(audioPlayerStatus{
+		player.emitStatus(AudioPlayerStatus{
 			Available: false,
 			Message:   fmt.Sprintf("Playback unavailable: %s", err.Error()),
 		})
@@ -84,7 +84,7 @@ func (player *assetAudioPlayer) Load(fileName string, contentType string, fileBy
 	return player.LoadDecoded(decodedAudio)
 }
 
-func (player *assetAudioPlayer) LoadDecoded(decodedAudio *decodedAudioBuffer) error {
+func (player *AssetAudioPlayer) LoadDecoded(decodedAudio *DecodedAudioBuffer) error {
 	if decodedAudio == nil || decodedAudio.Buffer == nil {
 		return fmt.Errorf("no decoded audio is available")
 	}
@@ -93,7 +93,7 @@ func (player *assetAudioPlayer) LoadDecoded(decodedAudio *decodedAudioBuffer) er
 	initErr := player.ensureSpeakerLocked(decodedAudio.Format.SampleRate)
 	if initErr != nil {
 		player.mutex.Unlock()
-		player.emitStatus(audioPlayerStatus{
+		player.emitStatus(AudioPlayerStatus{
 			Available: false,
 			Message:   fmt.Sprintf("Playback unavailable: %s", initErr.Error()),
 		})
@@ -102,7 +102,7 @@ func (player *assetAudioPlayer) LoadDecoded(decodedAudio *decodedAudioBuffer) er
 	player.buffer = decodedAudio.Buffer
 	player.duration = decodedAudio.Metadata.Duration
 	player.positionSamples = 0
-	player.volumeValue = defaultAudioVolume
+	player.volumeValue = DefaultAudioVolume
 	snapshot := player.snapshotLocked("Ready")
 	player.mutex.Unlock()
 
@@ -110,7 +110,7 @@ func (player *assetAudioPlayer) LoadDecoded(decodedAudio *decodedAudioBuffer) er
 	return nil
 }
 
-func (player *assetAudioPlayer) TogglePlayPause() error {
+func (player *AssetAudioPlayer) TogglePlayPause() error {
 	player.mutex.Lock()
 	if player.buffer == nil {
 		player.mutex.Unlock()
@@ -163,7 +163,7 @@ func (player *assetAudioPlayer) TogglePlayPause() error {
 	return nil
 }
 
-func (player *assetAudioPlayer) Stop() {
+func (player *AssetAudioPlayer) Stop() {
 	player.mutex.Lock()
 	hasAudio := player.buffer != nil
 	player.playbackToken++
@@ -180,7 +180,7 @@ func (player *assetAudioPlayer) Stop() {
 	}
 }
 
-func (player *assetAudioPlayer) Reset() {
+func (player *AssetAudioPlayer) Reset() {
 	player.mutex.Lock()
 	hasAudio := player.buffer != nil
 	player.playbackToken++
@@ -190,16 +190,16 @@ func (player *assetAudioPlayer) Reset() {
 	player.buffer = nil
 	player.duration = 0
 	player.positionSamples = 0
-	player.volumeValue = defaultAudioVolume
+	player.volumeValue = DefaultAudioVolume
 	player.mutex.Unlock()
 
 	if hasAudio {
 		speaker.Clear()
 	}
-	player.emitStatus(audioPlayerStatus{})
+	player.emitStatus(AudioPlayerStatus{})
 }
 
-func (player *assetAudioPlayer) SetVolume(volume float64) error {
+func (player *AssetAudioPlayer) SetVolume(volume float64) error {
 	player.mutex.Lock()
 	if player.buffer == nil {
 		player.mutex.Unlock()
@@ -218,7 +218,7 @@ func (player *assetAudioPlayer) SetVolume(volume float64) error {
 	return nil
 }
 
-func (player *assetAudioPlayer) SeekToFraction(fraction float64) error {
+func (player *AssetAudioPlayer) SeekToFraction(fraction float64) error {
 	player.mutex.Lock()
 	if player.buffer == nil {
 		player.mutex.Unlock()
@@ -258,7 +258,7 @@ func (player *assetAudioPlayer) SeekToFraction(fraction float64) error {
 	return nil
 }
 
-func (player *assetAudioPlayer) handlePlaybackFinished(token uint64) {
+func (player *AssetAudioPlayer) handlePlaybackFinished(token uint64) {
 	player.mutex.Lock()
 	if token != player.playbackToken {
 		player.mutex.Unlock()
@@ -278,7 +278,7 @@ func (player *assetAudioPlayer) handlePlaybackFinished(token uint64) {
 	player.emitStatus(snapshot)
 }
 
-func (player *assetAudioPlayer) ensureSpeakerLocked(sampleRate beep.SampleRate) error {
+func (player *AssetAudioPlayer) ensureSpeakerLocked(sampleRate beep.SampleRate) error {
 	if sampleRate <= 0 {
 		return fmt.Errorf("unsupported audio sample rate")
 	}
@@ -298,13 +298,13 @@ func (player *assetAudioPlayer) ensureSpeakerLocked(sampleRate beep.SampleRate) 
 	return nil
 }
 
-func (player *assetAudioPlayer) emitStatus(status audioPlayerStatus) {
+func (player *AssetAudioPlayer) emitStatus(status AudioPlayerStatus) {
 	if player.onStatusChanged != nil {
 		player.onStatusChanged(status)
 	}
 }
 
-func (player *assetAudioPlayer) monitorPlayback(token uint64) {
+func (player *AssetAudioPlayer) monitorPlayback(token uint64) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -319,8 +319,8 @@ func (player *assetAudioPlayer) monitorPlayback(token uint64) {
 	}
 }
 
-func (player *assetAudioPlayer) snapshotLocked(message string) audioPlayerStatus {
-	status := audioPlayerStatus{
+func (player *AssetAudioPlayer) snapshotLocked(message string) AudioPlayerStatus {
+	status := AudioPlayerStatus{
 		Available: player.buffer != nil,
 		Duration:  player.duration,
 		Volume:    player.volumeValue,
@@ -356,13 +356,13 @@ func (player *assetAudioPlayer) snapshotLocked(message string) audioPlayerStatus
 	return status
 }
 
-type decodedAudioBuffer struct {
+type DecodedAudioBuffer struct {
 	Buffer   *beep.Buffer
 	Format   beep.Format
-	Metadata audioMetadata
+	Metadata AudioMetadata
 }
 
-func extractAudioMetadata(fileName string, contentType string, fileBytes []byte) (*audioMetadata, error) {
+func ExtractAudioMetadata(fileName string, contentType string, fileBytes []byte) (*AudioMetadata, error) {
 	streamer, format, formatName, err := openAudioDecoder(fileName, contentType, fileBytes)
 	if err != nil {
 		return nil, err
@@ -373,13 +373,13 @@ func extractAudioMetadata(fileName string, contentType string, fileBytes []byte)
 	if streamer.Len() > 0 {
 		duration = format.SampleRate.D(streamer.Len())
 	}
-	return &audioMetadata{
+	return &AudioMetadata{
 		Duration: duration,
 		Format:   formatName,
 	}, nil
 }
 
-func decodeAudioBuffer(fileName string, contentType string, fileBytes []byte) (*decodedAudioBuffer, error) {
+func DecodeAudioBuffer(fileName string, contentType string, fileBytes []byte) (*DecodedAudioBuffer, error) {
 	streamer, format, formatName, err := openAudioDecoder(fileName, contentType, fileBytes)
 	if err != nil {
 		return nil, err
@@ -392,10 +392,10 @@ func decodeAudioBuffer(fileName string, contentType string, fileBytes []byte) (*
 	if audioBuffer.Len() > 0 {
 		duration = format.SampleRate.D(audioBuffer.Len())
 	}
-	return &decodedAudioBuffer{
+	return &DecodedAudioBuffer{
 		Buffer: audioBuffer,
 		Format: format,
-		Metadata: audioMetadata{
+		Metadata: AudioMetadata{
 			Duration: duration,
 			Format:   formatName,
 		},
@@ -490,14 +490,14 @@ func orderedAudioDecoders(fileName string, contentType string) []audioDecoderCan
 	return candidates
 }
 
-func isAudioAssetContent(assetTypeID int, contentType string) bool {
+func IsAudioContent(assetTypeID int, contentType string) bool {
 	if assetTypeID == roblox.AssetTypeAudio {
 		return true
 	}
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "audio/")
 }
 
-func formatDurationCompact(duration time.Duration) string {
+func FormatDurationCompact(duration time.Duration) string {
 	if duration <= 0 {
 		return "-"
 	}

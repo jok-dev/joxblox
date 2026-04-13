@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/heatmap"
 )
 
@@ -22,16 +23,16 @@ type assetExplorerState struct {
 	rootAssetID int64
 	selectedID  int64
 	rows        []assetExplorerRow
-	knownByID   map[int64]*assetPreviewResult
+	knownByID   map[int64]*loader.AssetPreviewResult
 	indexByID   map[int64]int
 }
 
-func newAssetExplorerState(rootAssetID int64, rootPreview *assetPreviewResult) *assetExplorerState {
+func newAssetExplorerState(rootAssetID int64, rootPreview *loader.AssetPreviewResult) *assetExplorerState {
 	state := &assetExplorerState{
 		rootAssetID: rootAssetID,
 		selectedID:  rootAssetID,
 		rows:        []assetExplorerRow{},
-		knownByID:   map[int64]*assetPreviewResult{},
+		knownByID:   map[int64]*loader.AssetPreviewResult{},
 		indexByID:   map[int64]int{},
 	}
 	state.knownByID[rootAssetID] = rootPreview
@@ -55,7 +56,7 @@ func (state *assetExplorerState) addRow(row assetExplorerRow) {
 	state.indexByID[row.AssetID] = len(state.rows) - 1
 }
 
-func (state *assetExplorerState) addChildren(parentAssetID int64, childDepth int, childAssets []childAssetInfo) {
+func (state *assetExplorerState) addChildren(parentAssetID int64, childDepth int, childAssets []loader.ChildAssetInfo) {
 	for _, childAsset := range childAssets {
 		state.addRow(assetExplorerRow{
 			AssetID:       childAsset.AssetID,
@@ -120,21 +121,21 @@ func (state *assetExplorerState) getInstancePath(assetID int64) string {
 	return strings.Join(pathSegments, ".")
 }
 
-func (state *assetExplorerState) selectAsset(assetID int64) (*assetPreviewResult, error) {
+func (state *assetExplorerState) selectAsset(assetID int64) (*loader.AssetPreviewResult, error) {
 	preview, err, _ := state.selectAssetWithRequestSource(assetID)
 	return preview, err
 }
 
-func (state *assetExplorerState) selectAssetWithRequestSource(assetID int64) (*assetPreviewResult, error, heatmap.RequestSource) {
+func (state *assetExplorerState) selectAssetWithRequestSource(assetID int64) (*loader.AssetPreviewResult, error, heatmap.RequestSource) {
 	state.selectedID = assetID
 	if knownPreview, exists := state.knownByID[assetID]; exists {
 		return knownPreview, nil, heatmap.SourceMemory
 	}
 
-	trace := &assetRequestTrace{}
+	trace := &loader.AssetRequestTrace{}
 	loadedPreview, loadErr := loadAssetPreviewWithTrace(assetID, trace)
 	if loadErr != nil {
-		return nil, loadErr, trace.classifyRequestSource()
+		return nil, loadErr, trace.ClassifyRequestSource()
 	}
 	state.knownByID[assetID] = loadedPreview
 	if rowIndex, exists := state.indexByID[assetID]; exists {
@@ -147,5 +148,5 @@ func (state *assetExplorerState) selectAssetWithRequestSource(assetID int64) (*a
 		parentDepth = state.rows[rowIndex].Depth
 	}
 	state.addChildren(assetID, parentDepth+1, loadedPreview.ChildAssets)
-	return loadedPreview, nil, trace.classifyRequestSource()
+	return loadedPreview, nil, trace.ClassifyRequestSource()
 }

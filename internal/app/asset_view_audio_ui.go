@@ -3,13 +3,15 @@ package app
 import (
 	"fmt"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/format"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/theme"
 )
 
-func (view *assetView) configureAudioPlayback(statsInfo *imageInfo, assetTypeID int) {
+func (view *assetView) configureAudioPlayback(statsInfo *loader.ImageInfo, assetTypeID int) {
 	if view.audioPlayer == nil {
 		return
 	}
@@ -17,46 +19,46 @@ func (view *assetView) configureAudioPlayback(statsInfo *imageInfo, assetTypeID 
 	view.audioPlayer.Reset()
 	view.resetAudioControls()
 	view.audioControls.Hide()
-	if statsInfo == nil || !isAudioAssetContent(assetTypeID, statsInfo.ContentType) {
+	if statsInfo == nil || !ui.IsAudioContent(assetTypeID, statsInfo.ContentType) {
 		return
 	}
 	view.audioControls.Show()
 	if len(view.assetDownloadBytes) == 0 {
-		view.updateAudioPlaybackState(audioPlayerStatus{
+		view.updateAudioPlaybackState(ui.AudioPlayerStatus{
 			Available: false,
 			Message:   "No audio bytes are available for playback.",
 		})
 		return
 	}
-	view.updateAudioPlaybackState(audioPlayerStatus{
+	view.updateAudioPlaybackState(ui.AudioPlayerStatus{
 		Available: false,
 		Duration:  statsInfo.Duration,
-		Volume:    defaultAudioVolume,
+		Volume:    ui.DefaultAudioVolume,
 		Message:   "Loading audio...",
 	})
 	fileName := view.assetDownloadFileName
 	contentType := statsInfo.ContentType
 	audioBytes := append([]byte(nil), view.assetDownloadBytes...)
 	go func(expectedLoadToken uint64, currentAssetID int64) {
-		decodedAudio, decodeErr := decodeAudioBuffer(fileName, contentType, audioBytes)
+		decodedAudio, decodeErr := ui.DecodeAudioBuffer(fileName, contentType, audioBytes)
 		fyne.Do(func() {
 			if view.audioLoadToken.Load() != expectedLoadToken || view.currentAssetID != currentAssetID {
 				return
 			}
 			if decodeErr != nil {
-				view.updateAudioPlaybackState(audioPlayerStatus{
+				view.updateAudioPlaybackState(ui.AudioPlayerStatus{
 					Available: false,
 					Duration:  statsInfo.Duration,
-					Volume:    defaultAudioVolume,
+					Volume:    ui.DefaultAudioVolume,
 					Message:   fmt.Sprintf("Playback unavailable: %s", decodeErr.Error()),
 				})
 				return
 			}
 			if loadErr := view.audioPlayer.LoadDecoded(decodedAudio); loadErr != nil {
-				view.updateAudioPlaybackState(audioPlayerStatus{
+				view.updateAudioPlaybackState(ui.AudioPlayerStatus{
 					Available: false,
 					Duration:  statsInfo.Duration,
-					Volume:    defaultAudioVolume,
+					Volume:    ui.DefaultAudioVolume,
 					Message:   fmt.Sprintf("Playback unavailable: %s", loadErr.Error()),
 				})
 			}
@@ -64,7 +66,7 @@ func (view *assetView) configureAudioPlayback(statsInfo *imageInfo, assetTypeID 
 	}(loadToken, view.currentAssetID)
 }
 
-func (view *assetView) updateAudioPlaybackState(status audioPlayerStatus) {
+func (view *assetView) updateAudioPlaybackState(status ui.AudioPlayerStatus) {
 	apply := func() {
 		if view.playAudioButton == nil || view.stopAudioButton == nil || view.audioProgressSlider == nil || view.audioVolumeSlider == nil {
 			return
@@ -93,9 +95,9 @@ func (view *assetView) updateAudioPlaybackState(status audioPlayerStatus) {
 		}
 		view.audioDuration = status.Duration
 		if !view.audioSeekDragging {
-			view.audioCurrentTimeLabel.SetText(formatDurationCompact(status.Position))
+			view.audioCurrentTimeLabel.SetText(ui.FormatDurationCompact(status.Position))
 		}
-		view.audioTotalTimeLabel.SetText(formatDurationCompact(status.Duration))
+		view.audioTotalTimeLabel.SetText(ui.FormatDurationCompact(status.Duration))
 		if !view.audioSeekDragging {
 			view.suppressAudioSeekChange = true
 			if status.Duration > 0 {
@@ -139,7 +141,7 @@ func (view *assetView) resetAudioControls() {
 	}
 	if view.audioVolumeSlider != nil {
 		view.suppressAudioVolumeChange = true
-		view.audioVolumeSlider.SetValue(defaultAudioVolume)
+		view.audioVolumeSlider.SetValue(ui.DefaultAudioVolume)
 		view.suppressAudioVolumeChange = false
 		view.audioVolumeSlider.Disable()
 	}

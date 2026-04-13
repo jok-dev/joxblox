@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
 
@@ -90,13 +91,13 @@ func validateAssetDownloadCacheSettings(settings assetDownloadCacheSettings) (as
 func loadMeshPreviewMouseLookSensitivity() float64 {
 	currentApp := fyne.CurrentApp()
 	if currentApp == nil {
-		return meshPreviewDefaultMouseLookSensitivity
+		return ui.MeshPreviewDefaultMouseLookSensitivity
 	}
 	stored := currentApp.Preferences().Float(preferenceKeyMeshPreviewLookSensitivity)
 	if stored <= 0 {
-		return meshPreviewDefaultMouseLookSensitivity
+		return ui.MeshPreviewDefaultMouseLookSensitivity
 	}
-	return format.Clamp(stored, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
+	return format.Clamp(stored, ui.MeshPreviewMinimumMouseLookSensitivity, ui.MeshPreviewMaximumMouseLookSensitivity)
 }
 
 func saveMeshPreviewMouseLookSensitivity(value float64) error {
@@ -104,7 +105,7 @@ func saveMeshPreviewMouseLookSensitivity(value float64) error {
 	if currentApp == nil {
 		return fmt.Errorf("application preferences are unavailable")
 	}
-	normalized := format.Clamp(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
+	normalized := format.Clamp(value, ui.MeshPreviewMinimumMouseLookSensitivity, ui.MeshPreviewMaximumMouseLookSensitivity)
 	currentApp.Preferences().SetFloat(preferenceKeyMeshPreviewLookSensitivity, normalized)
 	debug.Logf("Settings saved (mesh_preview_look_sensitivity=%f)", normalized)
 	return nil
@@ -164,11 +165,11 @@ func showSettingsDialog(window fyne.Window) {
 	cacheFolderSizeLabel.Wrapping = fyne.TextWrapWord
 
 	lookSensitivityValueLabel := widget.NewLabel(fmt.Sprintf("%.4f", currentLookSensitivity))
-	lookSensitivitySlider := widget.NewSlider(meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)
-	lookSensitivitySlider.Step = meshPreviewMouseLookSensitivityStep
+	lookSensitivitySlider := widget.NewSlider(ui.MeshPreviewMinimumMouseLookSensitivity, ui.MeshPreviewMaximumMouseLookSensitivity)
+	lookSensitivitySlider.Step = ui.MeshPreviewMouseLookSensitivityStep
 	lookSensitivitySlider.SetValue(currentLookSensitivity)
 	lookSensitivitySlider.OnChanged = func(value float64) {
-		lookSensitivityValueLabel.SetText(fmt.Sprintf("%.4f", format.Clamp(value, meshPreviewMinimumMouseLookSensitivity, meshPreviewMaximumMouseLookSensitivity)))
+		lookSensitivityValueLabel.SetText(fmt.Sprintf("%.4f", format.Clamp(value, ui.MeshPreviewMinimumMouseLookSensitivity, ui.MeshPreviewMaximumMouseLookSensitivity)))
 	}
 
 	statusLabel := widget.NewLabel("")

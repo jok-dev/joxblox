@@ -1,4 +1,4 @@
-package app
+package ui
 
 import (
 	"strings"
@@ -13,7 +13,7 @@ import (
 
 const progressDialogWidth = 420
 
-type progressDialog struct {
+type ProgressDialog struct {
 	dialog   dialog.Dialog
 	label    *widget.Label
 	progress *widget.ProgressBar
@@ -21,13 +21,13 @@ type progressDialog struct {
 	lastStep int
 }
 
-func newProgressDialog(window fyne.Window, title string, message string) *progressDialog {
+func NewProgressDialog(window fyne.Window, title string, message string) *ProgressDialog {
 	progressBar := widget.NewProgressBar()
 	progressBar.SetValue(0)
 	messageLabel := widget.NewLabel(strings.TrimSpace(message))
 	messageLabel.Wrapping = fyne.TextWrapWord
 	content := container.NewVBox(messageLabel, progressBar)
-	progress := &progressDialog{
+	progress := &ProgressDialog{
 		dialog:   dialog.NewCustomWithoutButtons(title, content, window),
 		label:    messageLabel,
 		progress: progressBar,
@@ -39,7 +39,7 @@ func newProgressDialog(window fyne.Window, title string, message string) *progre
 	return progress
 }
 
-func (progress *progressDialog) Update(value float64, message string) {
+func (progress *ProgressDialog) Update(value float64, message string) {
 	if progress == nil {
 		return
 	}
@@ -60,7 +60,7 @@ func (progress *progressDialog) Update(value float64, message string) {
 	})
 }
 
-func (progress *progressDialog) Hide() {
+func (progress *ProgressDialog) Hide() {
 	if progress == nil {
 		return
 	}
@@ -69,7 +69,7 @@ func (progress *progressDialog) Hide() {
 	})
 }
 
-func progressRangeReporter(progress *progressDialog, start float64, end float64, message string) func(float64) {
+func ProgressRangeReporter(progress *ProgressDialog, start float64, end float64, message string) func(float64) {
 	return func(value float64) {
 		if progress == nil {
 			return

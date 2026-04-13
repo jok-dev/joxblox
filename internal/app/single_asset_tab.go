@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/debug"
 	"joxblox/internal/heatmap"
 	"joxblox/internal/roblox"
@@ -29,8 +30,8 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 		container.NewVBox(loadingSpinner),
 	)
 	var explorerState *assetExplorerState
-	var renderPreview func(selectedAssetID int64, previewResult *assetPreviewResult)
-	renderPreview = func(selectedAssetID int64, previewResult *assetPreviewResult) {
+	var renderPreview func(selectedAssetID int64, previewResult *loader.AssetPreviewResult)
+	renderPreview = func(selectedAssetID int64, previewResult *loader.AssetPreviewResult) {
 		context := buildExplorerSelectionReferenceContext(explorerState, selectedAssetID)
 		assetDetailsView.SetData(buildAssetViewDataFromPreview(selectedAssetID, previewResult, context))
 		assetDetailsView.SetHierarchy(explorerState.getRows(), selectedAssetID, func(assetID int64) {
@@ -67,13 +68,13 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 			return
 		}
 
-		loadRequest, err := parseSingleAssetLoadRequest(assetInput.Text)
+		loadRequest, err := loader.ParseSingleAssetLoadRequest(assetInput.Text)
 		if err != nil {
 			statusLabel.SetText(err.Error())
 			return
 		}
 		selectedTargetID := loadRequest.TargetID
-		debug.Logf("Single asset load started for %s", loadRequest.logDescription())
+		debug.Logf("Single asset load started for %s", loadRequest.LogDescription())
 
 		statusLabel.SetText("Loading image...")
 		goButton.Disable()
@@ -85,8 +86,8 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 		assetDetailsView.PreviewPlaceholder.Show()
 		previewBox.Refresh()
 
-		go func(selectedAssetID int64, request singleAssetLoadRequest) {
-			if request.requiresAuth() {
+		go func(selectedAssetID int64, request loader.SingleAssetLoadRequest) {
+			if request.RequiresAuth() {
 				authErr := roblox.ValidateCurrentAuthCookie()
 				if authErr != nil {
 					fyne.Do(func() {
@@ -100,15 +101,15 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 				}
 			}
 
-			trace := &assetRequestTrace{}
-			previewResult, loadErr := loadSingleAssetPreviewWithTrace(request, trace)
+			trace := &loader.AssetRequestTrace{}
+			previewResult, loadErr := loader.LoadSingleAssetPreviewWithTrace(request, trace)
 			fyne.Do(func() {
 				loadingSpinner.Stop()
 				loadingSpinner.Hide()
 				goButton.Enable()
 				if loadErr != nil {
 					statusLabel.SetText(loadErr.Error())
-					debug.Logf("Single asset load failed for %s: %s", request.logDescription(), loadErr.Error())
+					debug.Logf("Single asset load failed for %s: %s", request.LogDescription(), loadErr.Error())
 					fyneDialog.ShowError(loadErr, window)
 					return
 				}
@@ -116,7 +117,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 				explorerState = newAssetExplorerState(selectedAssetID, previewResult)
 				renderPreview(selectedAssetID, previewResult)
 				previewBox.Refresh()
-				requestSourceBreakdown := heatmap.FormatSingleRequestSourceBreakdown(trace.classifyRequestSource())
+				requestSourceBreakdown := heatmap.FormatSingleRequestSourceBreakdown(trace.ClassifyRequestSource())
 				if mesh.IsMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
 					if strings.EqualFold(previewResult.Source, roblox.SourceAssetDeliveryInGame) {
 						statusLabel.SetText(fmt.Sprintf("Mesh loaded. %s", requestSourceBreakdown))

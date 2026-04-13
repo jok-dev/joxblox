@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/heatmap"
 
 	"fyne.io/fyne/v2"
@@ -49,7 +50,7 @@ type scanResult struct {
 	EconomyJSON          string
 	RustyAssetToolJSON   string
 	ReferencedAssetIDs   []int64
-	ChildAssets          []childAssetInfo
+	ChildAssets          []loader.ChildAssetInfo
 	TotalBytesSize       int
 	MeshNumFaces         uint32
 	MeshNumVerts         uint32
@@ -59,24 +60,24 @@ type scanResult struct {
 	DownloadIsOriginal   bool
 }
 
-func loadAssetPreview(assetID int64) (*assetPreviewResult, error) {
+func loadAssetPreview(assetID int64) (*loader.AssetPreviewResult, error) {
 	return loadAssetPreviewWithTrace(assetID, nil)
 }
 
-func loadAssetPreviewWithTrace(assetID int64, trace *assetRequestTrace) (*assetPreviewResult, error) {
-	return loadBestImageInfoWithOptionsAndTrace(assetID, false, trace)
+func loadAssetPreviewWithTrace(assetID int64, trace *loader.AssetRequestTrace) (*loader.AssetPreviewResult, error) {
+	return loader.LoadBestImageInfoWithOptionsAndTrace(assetID, false, trace)
 }
 
-func loadScanPreview(hit scanHit) (*assetPreviewResult, error) {
-	return loadAssetStatsPreviewForReference(hit.AssetID, hit.AssetInput)
+func loadScanPreview(hit scanHit) (*loader.AssetPreviewResult, error) {
+	return loader.LoadAssetStatsPreviewForReference(hit.AssetID, hit.AssetInput)
 }
 
-func loadScanPreviewWithTrace(hit scanHit, trace *assetRequestTrace) (*assetPreviewResult, error) {
-	return loadAssetStatsPreviewForReferenceWithTrace(hit.AssetID, hit.AssetInput, trace)
+func loadScanPreviewWithTrace(hit scanHit, trace *loader.AssetRequestTrace) (*loader.AssetPreviewResult, error) {
+	return loader.LoadAssetStatsPreviewForReferenceWithTrace(hit.AssetID, hit.AssetInput, trace)
 }
 
-func loadAssetStatsOnly(assetID int64) (*assetPreviewResult, error) {
-	return loadBestImageInfoWithOptions(assetID, true)
+func loadAssetStatsOnly(assetID int64) (*loader.AssetPreviewResult, error) {
+	return loader.LoadBestImageInfoWithOptions(assetID, true)
 }
 
 func loadScanResult(hit scanHit) (scanResult, error) {
@@ -89,17 +90,17 @@ func loadScanResult(hit scanHit) (scanResult, error) {
 }
 
 func loadScanResultWithRequestSource(hit scanHit) (scanResult, error, heatmap.RequestSource) {
-	trace := &assetRequestTrace{}
+	trace := &loader.AssetRequestTrace{}
 	previewResult, err := loadScanPreviewWithTrace(hit, trace)
 	if err != nil {
-		return scanResult{}, err, trace.classifyRequestSource()
+		return scanResult{}, err, trace.ClassifyRequestSource()
 	}
 	result := buildBaseScanResultFromHit(hit)
-	return applyPreviewToScanResult(result, previewResult), nil, trace.classifyRequestSource()
+	return applyPreviewToScanResult(result, previewResult), nil, trace.ClassifyRequestSource()
 }
 
 func thumbnailTypeNameFromScanInput(assetID int64, assetInput string) string {
-	loadRequest, err := buildSingleAssetLoadRequest(assetID, assetInput)
+	loadRequest, err := loader.BuildSingleAssetLoadRequest(assetID, assetInput)
 	if err != nil || loadRequest.ThumbnailRequest == nil {
 		return ""
 	}

@@ -5,6 +5,7 @@ import (
 	"math"
 	"testing"
 
+	"joxblox/internal/app/ui"
 	"joxblox/internal/extractor"
 	"joxblox/internal/heatmap"
 )
@@ -117,7 +118,7 @@ func TestBuildModelHeatmapInstancesCollectsSurfaceAppearanceTextures(t *testing.
 }
 
 func TestBuildModelHeatmapPreviewDataTextureModeColorsByTextureBytes(t *testing.T) {
-	meshPreview, err := buildMeshPreviewData(
+	meshPreview, err := ui.BuildMeshPreviewData(
 		[]float32{
 			-1, -1, 0,
 			1, -1, 0,
@@ -285,7 +286,7 @@ func TestBuildModelHeatmapInstancesMatchesMeshContentRefs(t *testing.T) {
 }
 
 func TestBuildModelHeatmapPreviewDataBuildsColoredScene(t *testing.T) {
-	meshPreview, err := buildMeshPreviewData(
+	meshPreview, err := ui.BuildMeshPreviewData(
 		[]float32{
 			-1, -1, 0,
 			1, -1, 0,
@@ -376,7 +377,7 @@ func TestApplyModelHeatmapRotationMatchesYawFallbackConvention(t *testing.T) {
 }
 
 func TestAppendModelHeatmapMeshInstancePreservesMeshOrigin(t *testing.T) {
-	meshPreview, err := buildMeshPreviewData(
+	meshPreview, err := ui.BuildMeshPreviewData(
 		[]float32{
 			-1, -1, 0,
 			1, -1, 0,
@@ -390,7 +391,7 @@ func TestAppendModelHeatmapMeshInstancePreservesMeshOrigin(t *testing.T) {
 		t.Fatalf("buildMeshPreviewData returned error: %v", err)
 	}
 
-	batch := meshPreviewBatchData{}
+	batch := ui.MeshPreviewBatchData{}
 	appendModelHeatmapMeshInstance(&batch, modelHeatmapMeshInstance{
 		CenterX:    5,
 		CenterY:    0,
@@ -448,7 +449,7 @@ func TestModelHeatmapValueUsesSelectedMode(t *testing.T) {
 }
 
 func TestBuildModelHeatmapPreviewDataTriangleModeColorsEqualTriangleCounts(t *testing.T) {
-	meshPreview, err := buildMeshPreviewData(
+	meshPreview, err := ui.BuildMeshPreviewData(
 		[]float32{
 			-1, -1, 0,
 			1, -1, 0,

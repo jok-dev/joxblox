@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
 	"joxblox/internal/roblox"
@@ -36,7 +38,7 @@ const (
 
 type assetView struct {
 	PreviewImage       *canvas.Image
-	MeshPreview        *meshPreviewWidget
+	MeshPreview        *ui.MeshPreviewWidget
 	PreviewPlaceholder *widget.Label
 	PreviewContainer   fyne.CanvasObject
 	PreviewBox         fyne.CanvasObject
@@ -82,7 +84,7 @@ type assetView struct {
 	audioVolumeSlider         *widget.Slider
 	audioVolumeValueLabel     *widget.Label
 	audioControls             *fyne.Container
-	audioPlayer               *assetAudioPlayer
+	audioPlayer               *ui.AssetAudioPlayer
 	audioDuration             time.Duration
 	suppressAudioSeekChange   bool
 	audioSeekDragging         bool
@@ -109,7 +111,7 @@ type assetView struct {
 	interpolationSelect       *widget.Select
 	currentPreviewResource    fyne.Resource
 	meshPreviewLoadToken      atomic.Uint64
-	currentMeshPreviewData    meshPreviewData
+	currentMeshPreviewData    ui.MeshPreviewData
 }
 
 type assetJSONExport struct {
@@ -147,7 +149,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 	previewImage.FillMode = canvas.ImageFillContain
 	previewImage.ScaleMode = canvas.ImageScaleFastest
 	previewImage.SetMinSize(fyne.NewSize(previewWidth, previewHeight))
-	meshPreview := newMeshPreviewWidget()
+	meshPreview := ui.NewMeshPreviewWidget()
 	meshPreview.Hide()
 	previewPlaceholder := widget.NewLabel(placeholderText)
 	previewContainer := container.NewMax(
@@ -194,7 +196,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 	audioProgressSlider.Disable()
 	audioVolumeSlider := widget.NewSlider(0, 1)
 	audioVolumeSlider.Step = 0.01
-	audioVolumeSlider.SetValue(defaultAudioVolume)
+	audioVolumeSlider.SetValue(ui.DefaultAudioVolume)
 	audioVolumeSlider.Disable()
 
 	view := &assetView{
@@ -261,7 +263,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		assetDownloadBytes:         []byte{},
 		assetDownloadFileName:      "",
 		downloadOriginalAsset:      false,
-		currentMeshPreviewData:     meshPreviewData{},
+		currentMeshPreviewData:     ui.MeshPreviewData{},
 	}
 	saveJSONButton.OnTapped = func() {
 		view.saveJSONExportToFile()
@@ -287,7 +289,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 			return
 		}
 		if err := view.audioPlayer.TogglePlayPause(); err != nil {
-			view.updateAudioPlaybackState(audioPlayerStatus{
+			view.updateAudioPlaybackState(ui.AudioPlayerStatus{
 				Available: false,
 				Message:   err.Error(),
 			})
@@ -306,7 +308,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 			return
 		}
 		view.audioSeekDragging = true
-		view.audioCurrentTimeLabel.SetText(formatDurationCompact(time.Duration(value * float64(view.audioDuration))))
+		view.audioCurrentTimeLabel.SetText(ui.FormatDurationCompact(time.Duration(value * float64(view.audioDuration))))
 	}
 	view.audioProgressSlider.OnChangeEnded = func(value float64) {
 		if view.suppressAudioSeekChange || view.audioPlayer == nil {
@@ -315,7 +317,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 		}
 		if err := view.audioPlayer.SeekToFraction(value); err != nil {
 			view.audioSeekDragging = false
-			view.updateAudioPlaybackState(audioPlayerStatus{
+			view.updateAudioPlaybackState(ui.AudioPlayerStatus{
 				Available: false,
 				Message:   err.Error(),
 			})
@@ -332,7 +334,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 			return
 		}
 		if err := view.audioPlayer.SetVolume(value); err != nil {
-			view.updateAudioPlaybackState(audioPlayerStatus{
+			view.updateAudioPlaybackState(ui.AudioPlayerStatus{
 				Available: false,
 				Message:   err.Error(),
 			})
@@ -346,7 +348,7 @@ func newAssetView(placeholderText string, includeFileRow bool) *assetView {
 	volumeControls := container.NewHBox(widget.NewLabel("Volume"), volumeSliderWrap, view.audioVolumeValueLabel)
 	view.audioControls = container.NewVBox(container.NewBorder(nil, nil, buttonRow, volumeControls, progressRow))
 	view.audioControls.Hide()
-	view.audioPlayer = newAssetAudioPlayer(view.updateAudioPlaybackState)
+	view.audioPlayer = ui.NewAssetAudioPlayer(view.updateAudioPlaybackState)
 	view.previewVariantSelect = widget.NewSelect([]string{}, func(selectedLabel string) {
 		if view.suppressPreviewVariant {
 			return
@@ -415,7 +417,7 @@ func (view *assetView) Clear() {
 	view.PreviewImage.Hide()
 	view.MeshPreview.Clear()
 	view.MeshPreview.Hide()
-	view.currentMeshPreviewData = meshPreviewData{}
+	view.currentMeshPreviewData = ui.MeshPreviewData{}
 	view.PreviewPlaceholder.Show()
 	view.PreviewContainer.Refresh()
 	view.AssetIDValue.SetText("-")
@@ -450,7 +452,7 @@ func (view *assetView) Clear() {
 	view.assetDownloadFileName = ""
 	view.downloadOriginalAsset = false
 	view.currentPreviewResource = nil
-	view.currentMeshPreviewData = meshPreviewData{}
+	view.currentMeshPreviewData = ui.MeshPreviewData{}
 	view.meshPreviewLoadToken.Add(1)
 	view.interpolationSelect.Disable()
 	view.selectedHierarchyAssetID = 0
@@ -551,7 +553,7 @@ func (view *assetView) SetData(data assetViewData) {
 		statsInfo = previewImageInfo
 	}
 	if statsInfo == nil {
-		statsInfo = &imageInfo{}
+		statsInfo = &loader.ImageInfo{}
 	}
 
 	view.currentAssetID = assetID
@@ -568,7 +570,7 @@ func (view *assetView) SetData(data assetViewData) {
 		} else {
 			view.DimensionsValue.SetText("-")
 		}
-	} else if isAudioAssetContent(assetTypeID, statsInfo.ContentType) {
+	} else if ui.IsAudioContent(assetTypeID, statsInfo.ContentType) {
 		view.DimensionsLabel.SetText("Dimensions:")
 		view.DimensionsValue.SetText("-")
 	} else {
@@ -650,10 +652,10 @@ func (view *assetView) SetData(data assetViewData) {
 		view.SourceValue.Importance = widget.DangerImportance
 	}
 	if warningMessage != "" {
-		view.NoteLabel.SetText(buildFallbackWarningText(warningMessage))
+		view.NoteLabel.SetText(loader.BuildFallbackWarningText(warningMessage))
 		view.NoteLabel.Show()
 	} else if thumbnailStateNotCompleted {
-		view.NoteLabel.SetText(buildFallbackWarningText(fmt.Sprintf("thumbnail state was %s", stateDescription)))
+		view.NoteLabel.SetText(loader.BuildFallbackWarningText(fmt.Sprintf("thumbnail state was %s", stateDescription)))
 		view.NoteLabel.Show()
 	}
 	view.SourceValue.Refresh()
@@ -663,7 +665,7 @@ func (view *assetView) SetData(data assetViewData) {
 	if previewImageInfo != nil && previewImageInfo.Resource != nil {
 		previewResource = previewImageInfo.Resource
 	}
-	view.currentMeshPreviewData = meshPreviewData{}
+	view.currentMeshPreviewData = ui.MeshPreviewData{}
 	view.MeshPreview.Clear()
 	view.MeshPreview.Hide()
 	if mesh.IsMeshAssetType(assetTypeID) && len(downloadBytes) > 0 {
@@ -718,7 +720,7 @@ func (view *assetView) SetData(data assetViewData) {
 
 func (view *assetView) showMeshPreview(downloadBytes []byte) {
 	view.currentPreviewResource = nil
-	view.currentMeshPreviewData = meshPreviewData{}
+	view.currentMeshPreviewData = ui.MeshPreviewData{}
 	view.interpolationSelect.Disable()
 	view.PreviewImage.Hide()
 	view.MeshPreview.Clear()
@@ -744,7 +746,7 @@ func (view *assetView) showMeshPreview(downloadBytes []byte) {
 	loadToken := view.meshPreviewLoadToken.Add(1)
 	meshBytes := append([]byte(nil), downloadBytes...)
 	go func() {
-		meshData, previewErr := extractMeshPreviewFromBytes(meshBytes)
+		meshData, previewErr := ui.ExtractMeshPreviewFromBytes(meshBytes)
 		fyne.Do(func() {
 			if view.currentAssetID != selectedAssetID || view.meshPreviewLoadToken.Load() != loadToken {
 				return
@@ -771,7 +773,7 @@ func (view *assetView) showMeshPreview(downloadBytes []byte) {
 
 func (view *assetView) showImagePreviewFallback(previewResource fyne.Resource) {
 	view.currentPreviewResource = previewResource
-	view.currentMeshPreviewData = meshPreviewData{}
+	view.currentMeshPreviewData = ui.MeshPreviewData{}
 	originalPreviewOption := buildOriginalPreviewOption(previewResource, view.currentAssetID)
 	originalPreviewOption.labelText = formatPreviewOptionLabel(originalPreviewOption.labelText, len(originalPreviewOption.bytes), len(originalPreviewOption.bytes))
 	view.previewDownloadOptions = []previewDownloadOption{originalPreviewOption}

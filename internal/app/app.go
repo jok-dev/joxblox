@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/roblox"
@@ -23,18 +25,33 @@ import (
 )
 
 const (
-	previewWidth  = 440
-	previewHeight = 300
+	previewWidth  = ui.PreviewWidth
+	previewHeight = ui.PreviewHeight
 )
 
 //go:embed app_icon.svg
 var appIconSVG []byte
 
 func Run() {
-	debug.Logf = logDebugf
+	debug.Logf = ui.LogDebugf
 	extractor.BinaryProvider = bundledRustyAssetToolBinary
 	mesh.CoreMeshFallback = extractor.ExtractMeshStatsFromBytes
-	initializeDebugLogFile()
+	loader.LoadCacheSettings = func() loader.CacheSettings {
+		settings := loadAssetDownloadCacheSettings()
+		return loader.CacheSettings{Enabled: settings.Enabled, Folder: settings.Folder}
+	}
+	loader.IsAudioContent = ui.IsAudioContent
+	loader.ExtractAudio = func(fileName, contentType string, data []byte) (*loader.AudioMetadata, error) {
+		meta, err := ui.ExtractAudioMetadata(fileName, contentType, data)
+		if err != nil {
+			return nil, err
+		}
+		return &loader.AudioMetadata{Duration: meta.Duration, Format: meta.Format}, nil
+	}
+	ui.GetPrimaryWindow = getPrimaryWindow
+	ui.LoadMouseLookSensitivity = loadMeshPreviewMouseLookSensitivity
+	ui.GetRepositoryRootPath = getRepositoryRootPath
+	ui.InitializeDebugLogFile()
 	guiApp := app.NewWithID("dev.jok.joxblox")
 	appIcon := fyne.NewStaticResource("app_icon.svg", appIconSVG)
 	guiApp.SetIcon(appIcon)
@@ -150,7 +167,7 @@ func Run() {
 	authPanel := newAuthPanel(window)
 	mainContent := container.NewBorder(nil, authPanel, nil, nil, tabs)
 	var setLayoutMode func(showConsole bool)
-	debugConsolePanel := newDebugConsolePanel(func(showConsole bool) {
+	debugConsolePanel := ui.NewDebugConsolePanel(func(showConsole bool) {
 		if setLayoutMode != nil {
 			setLayoutMode(showConsole)
 		}

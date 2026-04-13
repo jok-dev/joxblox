@@ -1,4 +1,4 @@
-package app
+package ui
 
 import (
 	"math"
@@ -9,12 +9,12 @@ import (
 )
 
 func TestBuildMeshPreviewDataValidatesInput(t *testing.T) {
-	_, err := buildMeshPreviewData([]float32{0, 0, 0}, []uint32{0, 1, 2}, 1, 1)
+	_, err := BuildMeshPreviewData([]float32{0, 0, 0}, []uint32{0, 1, 2}, 1, 1)
 	if err == nil {
 		t.Fatal("expected error for too few positions")
 	}
 
-	_, err = buildMeshPreviewData(
+	_, err = BuildMeshPreviewData(
 		[]float32{-1, -1, 0, 1, -1, 0, 0, 1, 0},
 		[]uint32{0, 1, 5},
 		1, 1,
@@ -23,7 +23,7 @@ func TestBuildMeshPreviewDataValidatesInput(t *testing.T) {
 		t.Fatal("expected error for out-of-range index")
 	}
 
-	_, err = buildMeshPreviewData(
+	_, err = BuildMeshPreviewData(
 		[]float32{float32(math.NaN()), 0, 0, 1, -1, 0, 0, 1, 0},
 		[]uint32{0, 1, 2},
 		1, 1,
@@ -36,9 +36,9 @@ func TestBuildMeshPreviewDataValidatesInput(t *testing.T) {
 func TestBuildMeshPreviewDataPreservesRawData(t *testing.T) {
 	rawPos := []float32{-1, -1, 0, 1, -1, 0, 0, 1, 0}
 	rawIdx := []uint32{0, 1, 2}
-	data, err := buildMeshPreviewData(rawPos, rawIdx, 1, 1)
+	data, err := BuildMeshPreviewData(rawPos, rawIdx, 1, 1)
 	if err != nil {
-		t.Fatalf("buildMeshPreviewData returned error: %v", err)
+		t.Fatalf("BuildMeshPreviewData returned error: %v", err)
 	}
 	if len(data.RawPositions) != len(rawPos) {
 		t.Fatalf("expected %d raw positions, got %d", len(rawPos), len(data.RawPositions))
@@ -54,13 +54,13 @@ func TestBuildMeshPreviewDataPreservesRawData(t *testing.T) {
 }
 
 func TestBuildMeshPreviewDataStoresTriangleCounts(t *testing.T) {
-	data, err := buildMeshPreviewData(
+	data, err := BuildMeshPreviewData(
 		[]float32{-1, -1, 0, 1, -1, 0, 0, 1, 0},
 		[]uint32{0, 1, 2},
 		100, 1,
 	)
 	if err != nil {
-		t.Fatalf("buildMeshPreviewData returned error: %v", err)
+		t.Fatalf("BuildMeshPreviewData returned error: %v", err)
 	}
 	if data.TriangleCount != 100 {
 		t.Fatalf("expected TriangleCount 100, got %d", data.TriangleCount)
@@ -71,7 +71,7 @@ func TestBuildMeshPreviewDataStoresTriangleCounts(t *testing.T) {
 }
 
 func TestBuildMeshPreviewDataWithColorsValidatesColorCount(t *testing.T) {
-	_, err := buildMeshPreviewDataWithColors(
+	_, err := BuildMeshPreviewDataWithColors(
 		[]float32{-1, -1, 0, 1, -1, 0, 0, 1, 0},
 		[]uint32{0, 1, 2},
 		[]uint8{255, 0, 0, 255},
@@ -84,7 +84,7 @@ func TestBuildMeshPreviewDataWithColorsValidatesColorCount(t *testing.T) {
 }
 
 func TestBuildMeshPreviewSceneDataPreservesBatches(t *testing.T) {
-	scene, err := buildMeshPreviewSceneData([]meshPreviewBatchData{
+	scene, err := BuildMeshPreviewSceneData([]MeshPreviewBatchData{
 		{
 			RawPositions: []float32{-1, -1, 0, 1, -1, 0, 0, 1, 0},
 			RawIndices:   []uint32{0, 1, 2},
@@ -96,7 +96,7 @@ func TestBuildMeshPreviewSceneDataPreservesBatches(t *testing.T) {
 		},
 	}, 10, 1)
 	if err != nil {
-		t.Fatalf("buildMeshPreviewSceneData returned error: %v", err)
+		t.Fatalf("BuildMeshPreviewSceneData returned error: %v", err)
 	}
 	if len(scene.Batches) != 1 {
 		t.Fatalf("expected 1 batch, got %d", len(scene.Batches))
@@ -188,7 +188,7 @@ func TestMeshPreviewInitialCameraPositionMatchesDefaultOrbitStart(t *testing.T) 
 }
 
 func TestMeshPreviewMoveAlongViewUsesForwardVector(t *testing.T) {
-	viewer := newMeshPreviewWidget()
+	viewer := NewMeshPreviewWidget()
 	viewer.cameraX = 10
 	viewer.cameraY = 5
 	viewer.cameraZ = -2
@@ -203,9 +203,9 @@ func TestMeshPreviewMoveAlongViewUsesForwardVector(t *testing.T) {
 }
 
 func TestMeshPreviewSetSelectedBatchClampsInvalidSelection(t *testing.T) {
-	viewer := newMeshPreviewWidget()
-	viewer.data = meshPreviewData{
-		Batches: []meshPreviewBatchData{
+	viewer := NewMeshPreviewWidget()
+	viewer.data = MeshPreviewData{
+		Batches: []MeshPreviewBatchData{
 			{RawPositions: []float32{-1, -1, 0, 1, -1, 0, 0, 1, 0}, RawIndices: []uint32{0, 1, 2}},
 			{RawPositions: []float32{-1, -1, 1, 1, -1, 1, 0, 1, 1}, RawIndices: []uint32{0, 1, 2}},
 		},
@@ -223,11 +223,11 @@ func TestMeshPreviewSetSelectedBatchClampsInvalidSelection(t *testing.T) {
 }
 
 func TestMeshPreviewRenderableBatchesNormalizesSingleMesh(t *testing.T) {
-	data := meshPreviewData{
+	data := MeshPreviewData{
 		RawPositions: []float32{10, 0, 0, 12, 0, 0, 10, 2, 0},
 		RawIndices:   []uint32{0, 1, 2},
 	}
-	batches := data.renderableBatches()
+	batches := data.RenderableBatches()
 	if len(batches) != 1 {
 		t.Fatalf("expected 1 renderable batch, got %d", len(batches))
 	}
@@ -243,7 +243,7 @@ func TestMeshPreviewRenderableBatchesNormalizesSingleMesh(t *testing.T) {
 }
 
 func TestMeshPreviewSetOpacityClampsValues(t *testing.T) {
-	viewer := newMeshPreviewWidget()
+	viewer := NewMeshPreviewWidget()
 
 	viewer.SetOpacity(0.01)
 	if math.Abs(viewer.opacity-0.1) > 1e-9 {
@@ -257,20 +257,20 @@ func TestMeshPreviewSetOpacityClampsValues(t *testing.T) {
 }
 
 func TestCloneMeshPreviewDataDeepCopiesSlices(t *testing.T) {
-	original := meshPreviewData{
+	original := MeshPreviewData{
 		RawPositions:         []float32{1, 2, 3},
 		RawIndices:           []uint32{0, 1, 2},
 		RawColors:            []uint8{1, 2, 3, 4},
 		TriangleCount:        3,
 		PreviewTriangleCount: 1,
-		Batches: []meshPreviewBatchData{{
+		Batches: []MeshPreviewBatchData{{
 			RawPositions: []float32{4, 5, 6},
 			RawIndices:   []uint32{0, 1, 2},
 			RawColors:    []uint8{5, 6, 7, 8},
 		}},
 	}
 
-	cloned := cloneMeshPreviewData(original)
+	cloned := CloneMeshPreviewData(original)
 	cloned.RawPositions[0] = 99
 	cloned.RawIndices[0] = 99
 	cloned.RawColors[0] = 99
@@ -287,7 +287,7 @@ func TestCloneMeshPreviewDataDeepCopiesSlices(t *testing.T) {
 }
 
 func TestMeshPreviewBatchBaseColorsUsesFirstVertexColor(t *testing.T) {
-	colors, err := meshPreviewBatchBaseColors([]meshPreviewBatchData{
+	colors, err := MeshPreviewBatchBaseColors([]MeshPreviewBatchData{
 		{
 			RawPositions: []float32{-1, -1, 0, 1, -1, 0, 0, 1, 0},
 			RawIndices:   []uint32{0, 1, 2},
@@ -299,7 +299,7 @@ func TestMeshPreviewBatchBaseColorsUsesFirstVertexColor(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("meshPreviewBatchBaseColors returned error: %v", err)
+		t.Fatalf("MeshPreviewBatchBaseColors returned error: %v", err)
 	}
 	if len(colors) != 1 {
 		t.Fatalf("expected 1 batch color, got %d", len(colors))

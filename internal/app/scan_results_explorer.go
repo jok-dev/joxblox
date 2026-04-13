@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/heatmap"
@@ -516,7 +517,7 @@ func (explorer *scanResultsExplorer) buildTable() {
 			if explorer.selectedAssetID <= 0 || explorer.window == nil {
 				return
 			}
-			clipboardValue := scanAssetReferenceDisplayInput(explorer.selectedAssetID, explorer.selectedResultAssetInput)
+			clipboardValue := loader.ScanAssetReferenceDisplayInput(explorer.selectedAssetID, explorer.selectedResultAssetInput)
 			explorer.window.Clipboard().SetContent(clipboardValue)
 			if strings.TrimSpace(explorer.selectedResultAssetInput) != "" {
 				explorer.statusLabel.SetText("Copied asset reference to clipboard.")
@@ -817,7 +818,7 @@ func (explorer *scanResultsExplorer) clearPreview() {
 	explorer.assetDetailsView.Clear()
 }
 
-func (explorer *scanResultsExplorer) renderSelectedAsset(selectedAssetID int64, selectedFilePath string, previewResult *assetPreviewResult) {
+func (explorer *scanResultsExplorer) renderSelectedAsset(selectedAssetID int64, selectedFilePath string, previewResult *loader.AssetPreviewResult) {
 	context := assetReferenceContext{}
 	if explorer.explorerState != nil && selectedAssetID == explorer.explorerState.rootAssetID {
 		context = buildRootScanReferenceContext(
@@ -879,12 +880,12 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 	assetInputToLoad := selectedResult.AssetInput
 	explorer.statusLabel.SetText(fmt.Sprintf("Loading asset %d...", assetToLoad))
 	go func() {
-		loadRequest, requestErr := buildSingleAssetLoadRequest(assetToLoad, assetInputToLoad)
+		loadRequest, requestErr := loader.BuildSingleAssetLoadRequest(assetToLoad, assetInputToLoad)
 		if requestErr != nil {
 			return
 		}
-		trace := &assetRequestTrace{}
-		fullPreview, loadErr := loadSingleAssetPreviewWithTrace(loadRequest, trace)
+		trace := &loader.AssetRequestTrace{}
+		fullPreview, loadErr := loader.LoadSingleAssetPreviewWithTrace(loadRequest, trace)
 		fyne.Do(func() {
 			if explorer.selectedAssetID != assetToLoad ||
 				extractor.AssetReferenceKey(explorer.selectedAssetID, explorer.selectedResultAssetInput) != extractor.AssetReferenceKey(assetToLoad, assetInputToLoad) {
@@ -900,7 +901,7 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 			explorer.statusLabel.SetText(fmt.Sprintf(
 				"Showing asset %d. %s",
 				assetToLoad,
-				heatmap.FormatSingleRequestSourceBreakdown(trace.classifyRequestSource()),
+				heatmap.FormatSingleRequestSourceBreakdown(trace.ClassifyRequestSource()),
 			))
 		})
 	}()

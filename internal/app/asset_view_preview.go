@@ -21,6 +21,7 @@ import (
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
 
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
 	"joxblox/internal/roblox"
@@ -330,7 +331,7 @@ func (view *assetView) showExpandedMeshWindow() {
 	}
 
 	meshWindow := guiApp.NewWindow(fmt.Sprintf("Asset %d Model", view.currentAssetID))
-	meshViewer := newMeshPreviewWidget()
+	meshViewer := ui.NewMeshPreviewWidget()
 	meshViewer.SetFocusCanvas(meshWindow.Canvas())
 	meshViewer.SetData(view.currentMeshPreviewData)
 	backgroundSelect := widget.NewSelect([]string{expandedBackgroundBlack, expandedBackgroundWhite}, nil)
@@ -356,7 +357,7 @@ func (view *assetView) showExpandedMeshWindow() {
 		widget.NewLabel("View Background:"),
 		container.NewGridWrap(fyne.NewSize(120, 36), backgroundSelect),
 		layout.NewSpacer(),
-		widget.NewLabel(meshPreviewControlsText()),
+		widget.NewLabel(ui.MeshPreviewControlsText()),
 	)
 	meshWindow.SetContent(container.NewBorder(topBar, nil, nil, nil, meshViewer))
 	meshWindow.Resize(fyne.NewSize(980, 760))
@@ -370,10 +371,10 @@ func (view *assetView) showExpandedMeshWindow() {
 			rendered := false
 			fyne.Do(func() {
 				size := meshViewer.Size()
-				if size.Width < minMeshPreviewRenderDimension || size.Height < minMeshPreviewRenderDimension {
+				if size.Width < ui.MinMeshPreviewRenderDimension || size.Height < ui.MinMeshPreviewRenderDimension {
 					return
 				}
-				meshViewer.render()
+				meshViewer.Render()
 				rendered = true
 			})
 			if rendered {

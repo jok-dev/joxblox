@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/app/report"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
@@ -413,8 +414,8 @@ func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgre
 					return
 				}
 				referenceKey := extractor.AssetReferenceKey(reference.AssetID, reference.AssetInput)
-				trace := &assetRequestTrace{}
-				previewResult, previewErr := loadAssetStatsPreviewForReferenceWithTrace(reference.AssetID, reference.AssetInput, trace)
+				trace := &loader.AssetRequestTrace{}
+				previewResult, previewErr := loader.LoadAssetStatsPreviewForReferenceWithTrace(reference.AssetID, reference.AssetInput, trace)
 				if shouldCancel != nil && shouldCancel() {
 					return
 				}
@@ -431,7 +432,7 @@ func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgre
 				resolvedByReferenceKey[referenceKey] = resolvedAsset
 				resolvedMutex.Unlock()
 				if onProgress != nil && (shouldCancel == nil || !shouldCancel()) {
-					switch trace.classifyRequestSource() {
+					switch trace.ClassifyRequestSource() {
 					case heatmap.SourceNetwork:
 						networkRequestCount.Add(1)
 					case heatmap.SourceDisk:
@@ -563,7 +564,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 	return cells
 }
 
-func buildReportGenerationStatsFromPreview(assetID int64, previewResult *assetPreviewResult) heatmap.AssetStats {
+func buildReportGenerationStatsFromPreview(assetID int64, previewResult *loader.AssetPreviewResult) heatmap.AssetStats {
 	return buildAssetStatsFromPreview(assetID, previewResult)
 }
 

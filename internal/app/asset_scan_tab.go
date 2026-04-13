@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/heatmap"
 
@@ -78,7 +80,7 @@ func buildScanLoadingStatus(completedCount int, totalCount int, elapsed time.Dur
 	}
 	remainingCount := totalCount - completedCount
 	estimatedRemaining := time.Duration(float64(elapsed) * float64(remainingCount) / float64(completedCount))
-	return fmt.Sprintf("%s ETA %s", statusText, formatDurationCompact(estimatedRemaining))
+	return fmt.Sprintf("%s ETA %s", statusText, ui.FormatDurationCompact(estimatedRemaining))
 }
 
 func (table *secondaryTappableTable) TappedSecondary(_ *fyne.PointEvent) {
@@ -235,7 +237,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			explorer.SetStatus(fmt.Sprintf("Failed to decode image: %s", hashErr.Error()))
 			return
 		}
-		querySHA := computeSHA256Hex(queryBytes)
+		querySHA := loader.ComputeSHA256Hex(queryBytes)
 		explorer.SetStatus("Computing similarity scores...")
 		similarityFileLabel.SetText(filepath.Base(selectedPath))
 		similarityFileLabel.Show()
@@ -338,9 +340,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	}
 	importResultsFromPath := func(importPath string) {
 		explorer.SetStatus("Importing results...")
-		progress := newProgressDialog(window, "Load JSON", "Reading scan results...")
-		readProgress := progressRangeReporter(progress, 0, 0.3, "Reading scan results...")
-		parseProgress := progressRangeReporter(progress, 0.3, 0.9, "Parsing scan results...")
+		progress := ui.NewProgressDialog(window, "Load JSON", "Reading scan results...")
+		readProgress := ui.ProgressRangeReporter(progress, 0, 0.3, "Reading scan results...")
+		parseProgress := ui.ProgressRangeReporter(progress, 0.3, 0.9, "Parsing scan results...")
 		go func() {
 			importBytes, readErr := readFileWithProgress(importPath, readProgress)
 			if readErr != nil {
@@ -423,9 +425,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			selectedExportPath += ".json"
 		}
 		explorer.SetStatus("Exporting results...")
-		progress := newProgressDialog(window, "Save JSON", "Serializing scan results...")
-		serializeProgress := progressRangeReporter(progress, 0.05, 0.8, "Serializing scan results...")
-		writeProgress := progressRangeReporter(progress, 0.8, 1, "Writing JSON file...")
+		progress := ui.NewProgressDialog(window, "Save JSON", "Serializing scan results...")
+		serializeProgress := ui.ProgressRangeReporter(progress, 0.05, 0.8, "Serializing scan results...")
+		writeProgress := ui.ProgressRangeReporter(progress, 0.8, 1, "Writing JSON file...")
 		go func() {
 			exportBytes, marshalErr := marshalScanTable(resultsToExport, serializeProgress)
 			if marshalErr != nil {

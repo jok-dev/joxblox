@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/format"
 
 	"fyne.io/fyne/v2"
@@ -72,7 +73,7 @@ type scanTableExportRow struct {
 	EconomyJSON          string           `json:"economyJson"`
 	RustyAssetToolJSON   string           `json:"rustExtractorJson"`
 	ReferencedAssetIDs   []int64          `json:"referencedAssetIds"`
-	ChildAssets          []childAssetInfo `json:"childAssets"`
+	ChildAssets          []loader.ChildAssetInfo `json:"childAssets"`
 	TotalBytesSize       int              `json:"totalBytesSize"`
 	MeshNumFaces         uint32           `json:"meshNumFaces,omitempty"`
 	MeshNumVerts         uint32           `json:"meshNumVerts,omitempty"`

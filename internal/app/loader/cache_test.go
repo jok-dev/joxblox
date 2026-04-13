@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"encoding/json"
@@ -28,8 +28,8 @@ func TestAssetDownloadCachePathsStableAndDistinct(t *testing.T) {
 func TestAssetDownloadJSONCacheEntryRoundTrip(t *testing.T) {
 	cacheFolder := t.TempDir()
 	cacheKey := "thumbnail-meta:asset=123"
-	expected := cachedThumbnailInfo{
-		Info: thumbnailInfo{
+	expected := CachedThumbnailInfo{
+		Info: ThumbnailInfo{
 			ImageURL: "https://example.com/thumb.png",
 			State:    roblox.StateCompleted,
 			Version:  "TN3",
@@ -41,7 +41,7 @@ func TestAssetDownloadJSONCacheEntryRoundTrip(t *testing.T) {
 		t.Fatalf("writeAssetDownloadJSONCacheEntry returned error: %v", err)
 	}
 
-	var decoded cachedThumbnailInfo
+	var decoded CachedThumbnailInfo
 	cacheHit, err := readAssetDownloadJSONCacheEntry(cacheFolder, cacheKey, time.Hour, &decoded)
 	if err != nil {
 		t.Fatalf("readAssetDownloadJSONCacheEntry returned error: %v", err)
@@ -74,7 +74,7 @@ func TestAssetDownloadJSONCacheEntryExpiresAfterMaxAge(t *testing.T) {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
-	var decoded assetDeliveryInfo
+	var decoded AssetDeliveryInfo
 	cacheHit, readErr := readAssetDownloadJSONCacheEntry(cacheFolder, cacheKey, time.Minute, &decoded)
 	if readErr != nil {
 		t.Fatalf("readAssetDownloadJSONCacheEntry returned error: %v", readErr)

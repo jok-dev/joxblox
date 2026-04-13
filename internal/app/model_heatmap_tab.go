@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -25,7 +27,7 @@ import (
 )
 
 const (
-	modelHeatmapMaxTrianglesPerMesh = maxMeshPreviewTriangles
+	modelHeatmapMaxTrianglesPerMesh = ui.MaxMeshPreviewTriangles
 )
 
 type modelHeatmapMode string
@@ -65,7 +67,7 @@ type modelHeatmapMeshBounds struct {
 
 type modelHeatmapResolvedMesh struct {
 	Reference     heatmap.AssetReference
-	Preview       meshPreviewData
+	Preview       ui.MeshPreviewData
 	Bounds        modelHeatmapMeshBounds
 	TriangleCount uint32
 }
@@ -114,7 +116,7 @@ type modelHeatmapBatchInfo struct {
 }
 
 type modelHeatmapRenderState struct {
-	Preview    meshPreviewData
+	Preview    ui.MeshPreviewData
 	BatchInfos []modelHeatmapBatchInfo
 	Summary    modelHeatmapSceneSummary
 }
@@ -127,7 +129,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	currentHeatSpread := rbxlHeatmapDefaultSpread
 	currentHeatMode := modelHeatmapModeTriangles
 	var currentRenderState *modelHeatmapRenderState
-	viewer := newMeshPreviewWidget()
+	viewer := ui.NewMeshPreviewWidget()
 	viewer.SetFocusCanvas(window.Canvas())
 	viewer.Hide()
 
@@ -173,7 +175,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		partInfoLabel.SetText(formatModelHeatmapPartInfo(batchInfos[batchIndex], currentHeatMode))
 	}
 
-	setPreviewReady := func(previewData meshPreviewData, infos []modelHeatmapBatchInfo, summary modelHeatmapSceneSummary) {
+	setPreviewReady := func(previewData ui.MeshPreviewData, infos []modelHeatmapBatchInfo, summary modelHeatmapSceneSummary) {
 		batchInfos = infos
 		viewer.SetData(previewData)
 		viewer.Show()
@@ -211,7 +213,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 			partInfoLabel.SetText("Click a part to view its info.")
 		}
 		summaryLabel.SetText(formatModelHeatmapSummary(summary))
-		statusLabel.SetText(meshPreviewControlsText())
+		statusLabel.SetText(ui.MeshPreviewControlsText())
 	}
 
 	var cancelLoadButton *widget.Button
@@ -413,7 +415,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 				currentRenderState = renderState
 				setPreviewReady(previewData, infos, summary)
 				setBusy(false)
-				statusLabel.SetText(meshPreviewControlsText())
+				statusLabel.SetText(ui.MeshPreviewControlsText())
 			})
 		}(token, trimmedPath, pathPrefixes, heatSpread, heatMode)
 	}
@@ -454,7 +456,7 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 				spreadValueLabel,
 				layout.NewSpacer(),
 			),
-			widget.NewLabel(meshPreviewControlsText()),
+			widget.NewLabel(ui.MeshPreviewControlsText()),
 		),
 		nil,
 		nil,
@@ -620,12 +622,12 @@ func resolveModelHeatmapMeshes(references []heatmap.AssetReference, onProgress f
 		},
 		func(reference heatmap.AssetReference) modelHeatmapResolvedMesh {
 			resolvedMesh := modelHeatmapResolvedMesh{Reference: reference}
-			previewResult, previewErr := loadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
+			previewResult, previewErr := loader.LoadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
 			if previewErr == nil && previewResult != nil && len(previewResult.DownloadBytes) > 0 {
 				if meshInfo, meshErr := mesh.ParseHeader(previewResult.DownloadBytes); meshErr == nil {
 					resolvedMesh.TriangleCount = meshInfo.NumFaces
 				}
-				if previewData, meshPreviewErr := extractMeshPreviewFromBytesWithLimit(previewResult.DownloadBytes, modelHeatmapMaxTrianglesPerMesh); meshPreviewErr == nil {
+				if previewData, meshPreviewErr := ui.ExtractMeshPreviewFromBytesWithLimit(previewResult.DownloadBytes, modelHeatmapMaxTrianglesPerMesh); meshPreviewErr == nil {
 					resolvedMesh.Preview = previewData
 					resolvedMesh.Bounds = computeModelHeatmapMeshBounds(previewData.RawPositions)
 					if resolvedMesh.TriangleCount == 0 {
@@ -649,7 +651,7 @@ func resolveModelHeatmapTextures(references []heatmap.AssetReference, onProgress
 		},
 		func(reference heatmap.AssetReference) modelHeatmapResolvedTexture {
 			resolvedTexture := modelHeatmapResolvedTexture{Reference: reference}
-			previewResult, previewErr := loadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
+			previewResult, previewErr := loader.LoadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
 			if previewErr == nil && previewResult != nil {
 				imageSource := previewResult.Image
 				if imageSource == nil || imageSource.Width <= 0 || imageSource.Height <= 0 || imageSource.BytesSize <= 0 {
@@ -669,18 +671,18 @@ func resolveModelHeatmapTextures(references []heatmap.AssetReference, onProgress
 	)
 }
 
-func buildModelHeatmapPreviewData(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
+func buildModelHeatmapPreviewData(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh) (ui.MeshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
 	return buildModelHeatmapPreviewDataWithMode(instances, resolved, nil, rbxlHeatmapDefaultSpread, modelHeatmapModeSizeScaledTriangles)
 }
 
-func buildModelHeatmapPreviewDataWithSpread(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, heatSpread float64) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
+func buildModelHeatmapPreviewDataWithSpread(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, heatSpread float64) (ui.MeshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
 	return buildModelHeatmapPreviewDataWithMode(instances, resolved, nil, heatSpread, modelHeatmapModeSizeScaledTriangles)
 }
 
-func buildModelHeatmapPreviewDataWithMode(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, textures map[string]modelHeatmapResolvedTexture, heatSpread float64, heatMode modelHeatmapMode) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
+func buildModelHeatmapPreviewDataWithMode(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh, textures map[string]modelHeatmapResolvedTexture, heatSpread float64, heatMode modelHeatmapMode) (ui.MeshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
 	renderState, err := buildModelHeatmapRenderState(instances, resolved, textures)
 	if err != nil {
-		return meshPreviewData{}, nil, modelHeatmapSceneSummary{}, err
+		return ui.MeshPreviewData{}, nil, modelHeatmapSceneSummary{}, err
 	}
 	return buildModelHeatmapPreviewDataFromState(renderState, heatSpread, heatMode)
 }
@@ -712,7 +714,7 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 			summary.FailedMeshCount++
 			continue
 		}
-		if !mesh.Preview.hasRenderableGeometry() {
+		if !mesh.Preview.HasRenderableGeometry() {
 			summary.FailedMeshCount++
 			continue
 		}
@@ -758,11 +760,11 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 		return nil, fmt.Errorf("no MeshParts could be rendered")
 	}
 
-	batches := make([]meshPreviewBatchData, 0, len(prepared))
+	batches := make([]ui.MeshPreviewBatchData, 0, len(prepared))
 	debugInfos := make([]debugBatchInfo, 0, len(prepared))
 	resultInfos := make([]modelHeatmapBatchInfo, 0, len(prepared))
 	for _, preparedInstance := range prepared {
-		batch := meshPreviewBatchData{}
+		batch := ui.MeshPreviewBatchData{}
 		appendModelHeatmapMeshInstanceGeometry(&batch, preparedInstance.Instance, preparedInstance.Mesh)
 		if len(batch.RawPositions) == 0 {
 			continue
@@ -798,7 +800,7 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 
 	debugExportModelHeatmapOBJ(batches, debugInfos)
 	normalizeMeshPreviewSceneBatches(batches)
-	previewData, buildErr := buildMeshPreviewSceneData(batches, summary.TriangleCount, summary.PreviewTriangleCount)
+	previewData, buildErr := ui.BuildMeshPreviewSceneData(batches, summary.TriangleCount, summary.PreviewTriangleCount)
 	if buildErr != nil {
 		return nil, buildErr
 	}
@@ -809,15 +811,15 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 	}, nil
 }
 
-func buildModelHeatmapPreviewDataFromState(renderState *modelHeatmapRenderState, heatSpread float64, heatMode modelHeatmapMode) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
+func buildModelHeatmapPreviewDataFromState(renderState *modelHeatmapRenderState, heatSpread float64, heatMode modelHeatmapMode) (ui.MeshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
 	if renderState == nil {
-		return meshPreviewData{}, nil, modelHeatmapSceneSummary{}, fmt.Errorf("model heatmap state is empty")
+		return ui.MeshPreviewData{}, nil, modelHeatmapSceneSummary{}, fmt.Errorf("model heatmap state is empty")
 	}
 	if len(renderState.Preview.Batches) == 0 || len(renderState.BatchInfos) == 0 {
-		return meshPreviewData{}, nil, renderState.Summary, fmt.Errorf("model heatmap preview is empty")
+		return ui.MeshPreviewData{}, nil, renderState.Summary, fmt.Errorf("model heatmap preview is empty")
 	}
 	if len(renderState.Preview.Batches) != len(renderState.BatchInfos) {
-		return meshPreviewData{}, nil, renderState.Summary, fmt.Errorf("model heatmap preview batch count mismatch")
+		return ui.MeshPreviewData{}, nil, renderState.Summary, fmt.Errorf("model heatmap preview batch count mismatch")
 	}
 
 	summary := renderState.Summary
@@ -829,7 +831,7 @@ func buildModelHeatmapPreviewDataFromState(renderState *modelHeatmapRenderState,
 		summary.MaxHeatValue = maxModelHeatmapFloat(summary.MaxHeatValue, heatValues[i])
 	}
 
-	previewData := cloneMeshPreviewDataWithSharedGeometry(renderState.Preview)
+	previewData := ui.CloneMeshPreviewDataWithSharedGeometry(renderState.Preview)
 	for i, batch := range previewData.Batches {
 		heatColor := modelHeatmapColor(heatValues[i], summary.MaxHeatValue, heatSpread)
 		applyModelHeatmapBatchColor(&batch, heatColor)
@@ -838,12 +840,12 @@ func buildModelHeatmapPreviewDataFromState(renderState *modelHeatmapRenderState,
 	return previewData, renderState.BatchInfos, summary, nil
 }
 
-func appendModelHeatmapMeshInstance(batch *meshPreviewBatchData, instance modelHeatmapMeshInstance, mesh modelHeatmapResolvedMesh, heatColor color.NRGBA) {
+func appendModelHeatmapMeshInstance(batch *ui.MeshPreviewBatchData, instance modelHeatmapMeshInstance, mesh modelHeatmapResolvedMesh, heatColor color.NRGBA) {
 	appendModelHeatmapMeshInstanceGeometry(batch, instance, mesh)
 	applyModelHeatmapBatchColor(batch, heatColor)
 }
 
-func appendModelHeatmapMeshInstanceGeometry(batch *meshPreviewBatchData, instance modelHeatmapMeshInstance, mesh modelHeatmapResolvedMesh) {
+func appendModelHeatmapMeshInstanceGeometry(batch *ui.MeshPreviewBatchData, instance modelHeatmapMeshInstance, mesh modelHeatmapResolvedMesh) {
 	if batch == nil {
 		return
 	}
@@ -870,7 +872,7 @@ func appendModelHeatmapMeshInstanceGeometry(batch *meshPreviewBatchData, instanc
 	}
 }
 
-func applyModelHeatmapBatchColor(batch *meshPreviewBatchData, heatColor color.NRGBA) {
+func applyModelHeatmapBatchColor(batch *ui.MeshPreviewBatchData, heatColor color.NRGBA) {
 	if batch == nil {
 		return
 	}
@@ -983,7 +985,7 @@ func computeModelHeatmapMeshBounds(positions []float32) modelHeatmapMeshBounds {
 	}
 }
 
-func normalizeMeshPreviewSceneBatches(batches []meshPreviewBatchData) {
+func normalizeMeshPreviewSceneBatches(batches []ui.MeshPreviewBatchData) {
 	if len(batches) == 0 {
 		return
 	}
@@ -1153,7 +1155,7 @@ func cloneModelHeatmapResolvedMeshes(source map[string]modelHeatmapResolvedMesh)
 	}
 	cloned := make(map[string]modelHeatmapResolvedMesh, len(source))
 	for key, mesh := range source {
-		mesh.Preview = cloneMeshPreviewData(mesh.Preview)
+		mesh.Preview = ui.CloneMeshPreviewData(mesh.Preview)
 		cloned[key] = mesh
 	}
 	return cloned
@@ -1246,7 +1248,7 @@ type debugBatchInfo struct {
 	Bounds   modelHeatmapMeshBounds
 }
 
-func debugExportModelHeatmapOBJ(batches []meshPreviewBatchData, infos []debugBatchInfo) {
+func debugExportModelHeatmapOBJ(batches []ui.MeshPreviewBatchData, infos []debugBatchInfo) {
 	tempPath := filepath.Join(os.TempDir(), "joxblox-heatmap-debug.obj")
 	f, err := os.Create(tempPath)
 	if err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/mesh"
@@ -30,8 +31,8 @@ type assetViewData struct {
 	SceneSurfaceArea      float64
 	LargestSurfacePath    string
 	LargeTextureScore     float64
-	PreviewImageInfo      *imageInfo
-	StatsInfo             *imageInfo
+	PreviewImageInfo      *loader.ImageInfo
+	StatsInfo             *loader.ImageInfo
 	TotalBytesSize        int
 	SourceDescription     string
 	StateDescription      string
@@ -51,7 +52,7 @@ type assetViewData struct {
 	DownloadIsOriginal    bool
 }
 
-func previewSHA256(previewResult *assetPreviewResult) string {
+func previewSHA256(previewResult *loader.AssetPreviewResult) string {
 	if previewResult == nil {
 		return ""
 	}
@@ -96,13 +97,13 @@ func buildFailedScanResultFromHit(hit scanHit, loadErr error) scanResult {
 	return result
 }
 
-func applyPreviewToScanResult(result scanResult, previewResult *assetPreviewResult) scanResult {
+func applyPreviewToScanResult(result scanResult, previewResult *loader.AssetPreviewResult) scanResult {
 	statsInfo := previewResult.Stats
 	if statsInfo == nil {
 		statsInfo = previewResult.Image
 	}
 	if statsInfo == nil {
-		statsInfo = &imageInfo{}
+		statsInfo = &loader.ImageInfo{}
 	}
 	resource := (*fyne.StaticResource)(nil)
 	if previewResult.Image != nil {
@@ -161,10 +162,10 @@ func applyPreviewToScanResult(result scanResult, previewResult *assetPreviewResu
 	return refreshLargeTextureMetrics(result)
 }
 
-func scanResultToPreviewResult(result scanResult) *assetPreviewResult {
-	return &assetPreviewResult{
-		Image: &imageInfo{Resource: result.Resource, SHA256: result.FileSHA256},
-		Stats: &imageInfo{
+func scanResultToPreviewResult(result scanResult) *loader.AssetPreviewResult {
+	return &loader.AssetPreviewResult{
+		Image: &loader.ImageInfo{Resource: result.Resource, SHA256: result.FileSHA256},
+		Stats: &loader.ImageInfo{
 			Width:                    result.Width,
 			Height:                   result.Height,
 			Duration:                 result.Duration,
@@ -193,9 +194,9 @@ func scanResultToPreviewResult(result scanResult) *assetPreviewResult {
 	}
 }
 
-func buildAssetViewDataFromPreview(assetID int64, previewResult *assetPreviewResult, context assetReferenceContext) assetViewData {
+func buildAssetViewDataFromPreview(assetID int64, previewResult *loader.AssetPreviewResult, context assetReferenceContext) assetViewData {
 	if previewResult == nil {
-		previewResult = &assetPreviewResult{}
+		previewResult = &loader.AssetPreviewResult{}
 	}
 	fileSHA256 := strings.TrimSpace(context.FileSHA256)
 	if fileSHA256 == "" {
@@ -271,7 +272,7 @@ func buildRootScanReferenceContext(rows []scanResult, selectedAssetID int64, sel
 		context.LargeTextureScore = row.LargeTextureScore
 		context.ReferenceInstanceType = row.InstanceType
 		context.ReferencePropertyName = row.PropertyName
-		context.ReferenceInstancePath = firstNonEmptyString(row.InstancePath, row.InstanceName)
+		context.ReferenceInstancePath = loader.FirstNonEmptyString(row.InstancePath, row.InstanceName)
 		if strings.TrimSpace(row.FileSHA256) != "" {
 			context.FileSHA256 = strings.TrimSpace(row.FileSHA256)
 		}

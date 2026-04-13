@@ -25,6 +25,7 @@ import (
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -1173,13 +1174,13 @@ func getHeatmapAssetStats(assetID int64, assetInput string) (heatmap.AssetStats,
 	}
 
 	stats := heatmap.AssetStats{AssetID: assetID}
-	trace := &assetRequestTrace{}
-	previewResult, previewErr := loadAssetStatsPreviewForReferenceWithTrace(assetID, assetInput, trace)
+	trace := &loader.AssetRequestTrace{}
+	previewResult, previewErr := loader.LoadAssetStatsPreviewForReferenceWithTrace(assetID, assetInput, trace)
 	if previewErr != nil || previewResult == nil {
 		heatmapAssetStatsCache.mutex.Lock()
 		heatmapAssetStatsCache.statsByAsset[cacheKey] = stats
 		heatmapAssetStatsCache.mutex.Unlock()
-		return stats, trace.classifyRequestSource()
+		return stats, trace.ClassifyRequestSource()
 	}
 
 	stats = buildAssetStatsFromPreview(assetID, previewResult)
@@ -1187,7 +1188,7 @@ func getHeatmapAssetStats(assetID int64, assetInput string) (heatmap.AssetStats,
 	heatmapAssetStatsCache.mutex.Lock()
 	heatmapAssetStatsCache.statsByAsset[cacheKey] = stats
 	heatmapAssetStatsCache.mutex.Unlock()
-	return stats, trace.classifyRequestSource()
+	return stats, trace.ClassifyRequestSource()
 }
 
 func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]heatmap.Cell, float64, int, int, int64) {

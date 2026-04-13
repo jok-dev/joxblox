@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"crypto/sha256"
@@ -56,25 +56,25 @@ func downloadRobloxContentBytes(urlString string, timeout time.Duration) ([]byte
 	return downloadRobloxContentBytesWithCacheKeyAndTrace(urlString, "", timeout, nil)
 }
 
-func downloadRobloxContentBytesWithCacheKey(urlString string, cacheKey string, timeout time.Duration) ([]byte, string, error) {
+func DownloadRobloxContentBytesWithCacheKey(urlString string, cacheKey string, timeout time.Duration) ([]byte, string, error) {
 	return downloadRobloxContentBytesWithCacheKeyAndTrace(urlString, cacheKey, timeout, nil)
 }
 
-func downloadRobloxContentBytesWithCacheKeyAndTrace(urlString string, cacheKey string, timeout time.Duration, trace *assetRequestTrace) ([]byte, string, error) {
+func downloadRobloxContentBytesWithCacheKeyAndTrace(urlString string, cacheKey string, timeout time.Duration, trace *AssetRequestTrace) ([]byte, string, error) {
 	trimmedURL := strings.TrimSpace(urlString)
 	if trimmedURL == "" {
 		return nil, "", fmt.Errorf("download URL is empty")
 	}
 	normalizedCacheKey := normalizeAssetDownloadCacheKey(cacheKey, trimmedURL)
 
-	cacheSettings := loadAssetDownloadCacheSettings()
+	cacheSettings := LoadCacheSettings()
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cachedBytes, cachedContentType, cacheHit, err := readAssetDownloadCacheEntry(cacheSettings.Folder, normalizedCacheKey)
 		if err != nil {
 			debug.Logf("Asset cache read failed for %s: %s", normalizedCacheKey, err.Error())
 		} else if cacheHit {
 			assetDownloadCacheMetricState.diskHits.Add(1)
-			trace.markDisk()
+			trace.MarkDisk()
 			debug.Logf("Asset cache hit for %s", normalizedCacheKey)
 			return cachedBytes, cachedContentType, nil
 		}
@@ -96,7 +96,7 @@ func downloadRobloxContentBytesWithCacheKeyAndTrace(urlString string, cacheKey s
 		return nil, "", err
 	}
 	assetDownloadCacheMetricState.netFetches.Add(1)
-	trace.markNetwork()
+	trace.MarkNetwork()
 
 	contentType := normalizeDownloadedContentType(response.Header.Get("Content-Type"), bodyBytes)
 	if cacheSettings.Enabled && cacheSettings.Folder != "" && len(bodyBytes) > 0 {
