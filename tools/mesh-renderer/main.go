@@ -555,6 +555,7 @@ func handleRender(parts []string) {
 	rl.BeginTextureMode(renderTarget)
 	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
 	rl.BeginMode3D(camera)
+	rl.DisableDepthTest()
 	for _, batchIndex := range drawOrder {
 		meshModel := loadedScene[batchIndex]
 		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, modelTint(meshModel.baseColor, opacity))
@@ -562,6 +563,7 @@ func handleRender(parts []string) {
 			drawSelectedMeshHighlight(meshModel, bgR, bgG, bgB)
 		}
 	}
+	rl.EnableDepthTest()
 	rl.EndMode3D()
 	rl.EndTextureMode()
 

@@ -26,7 +26,9 @@ import (
 	xdraw "golang.org/x/image/draw"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
+	"joxblox/internal/heatmap"
 	"joxblox/internal/roblox"
 )
 
@@ -48,22 +50,6 @@ const (
 	rbxlHeatmapGridDivisionStep     = 4
 )
 
-type rbxlHeatmapAssetStats struct {
-	AssetID       int64
-	AssetTypeID   int
-	AssetTypeName string
-	TotalBytes    int
-	TextureBytes  int
-	MeshBytes     int
-	TriangleCount uint32
-	PixelCount    int64
-}
-
-type heatmapAssetReference struct {
-	AssetID    int64
-	AssetInput string
-}
-
 type rbxlHeatmapPoint struct {
 	AssetID      int64
 	AssetInput   string
@@ -71,7 +57,7 @@ type rbxlHeatmapPoint struct {
 	InstanceName string
 	InstancePath string
 	PropertyName string
-	Stats        rbxlHeatmapAssetStats
+	Stats        heatmap.AssetStats
 	X            float64
 	Y            float64
 	Z            float64
@@ -91,6 +77,12 @@ type rbxlHeatmapMapPart struct {
 	YawDegrees   float64
 	Color        color.NRGBA
 	Transparency float64
+}
+
+func (p rbxlHeatmapMapPart) GetInstancePath() string { return p.InstancePath }
+
+func (p rbxlHeatmapMapPart) GetDimensions() (float64, float64, float64) {
+	return p.SizeX, p.SizeY, p.SizeZ
 }
 
 type rbxlHeatmapScene struct {
@@ -219,9 +211,9 @@ type heatmapSquareAssetRow struct {
 
 var heatmapAssetStatsCache = struct {
 	mutex        sync.RWMutex
-	statsByAsset map[string]rbxlHeatmapAssetStats
+	statsByAsset map[string]heatmap.AssetStats
 }{
-	statsByAsset: map[string]rbxlHeatmapAssetStats{},
+	statsByAsset: map[string]heatmap.AssetStats{},
 }
 
 func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
@@ -633,14 +625,14 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 
 		backgroundBytes := append([]byte(nil), mapImageBytes...)
 		go func(filePath string, comparePath string, prefixes []string, underlayBytes []byte, diffEnabled bool) {
-			refs, extractErr := extractPositionedRefsWithRustyAssetTool(filePath, prefixes, nil)
+			refs, extractErr := extractor.ExtractPositionedRefs(filePath, prefixes, nil)
 			if extractErr != nil {
 				fyne.Do(func() {
 					showHeatmapFailure(fmt.Sprintf("Heatmap extraction failed: %s", extractErr.Error()))
 				})
 				return
 			}
-			mapParts, mapErr := extractMapRenderPartsWithRustyAssetTool(filePath, prefixes, nil)
+			mapParts, mapErr := extractor.ExtractMapRenderParts(filePath, prefixes, nil)
 			if mapErr != nil {
 				fyne.Do(func() {
 					showHeatmapFailure(fmt.Sprintf("Map extraction failed: %s", mapErr.Error()))
@@ -652,21 +644,21 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 				debug.Logf("Heatmap material warning extraction failed for %s: %s", filePath, warningErr.Error())
 			}
 
-			compareRefs := []positionedRustyAssetToolResult(nil)
-			compareMapParts := []mapRenderPartRustyAssetToolResult(nil)
+			compareRefs := []extractor.PositionedResult(nil)
+			compareMapParts := []extractor.MapRenderPartResult(nil)
 			compareWarningText := materialVariantWarningData{}
 			if diffEnabled {
 				fyne.Do(func() {
 					statusLabel.SetText("Extracting comparison RBXL/RBXM...")
 				})
-				compareRefs, extractErr = extractPositionedRefsWithRustyAssetTool(comparePath, prefixes, nil)
+				compareRefs, extractErr = extractor.ExtractPositionedRefs(comparePath, prefixes, nil)
 				if extractErr != nil {
 					fyne.Do(func() {
 						showHeatmapFailure(fmt.Sprintf("Comparison heatmap extraction failed: %s", extractErr.Error()))
 					})
 					return
 				}
-				compareMapParts, mapErr = extractMapRenderPartsWithRustyAssetTool(comparePath, prefixes, nil)
+				compareMapParts, mapErr = extractor.ExtractMapRenderParts(comparePath, prefixes, nil)
 				if mapErr != nil {
 					fyne.Do(func() {
 						showHeatmapFailure(fmt.Sprintf("Comparison map extraction failed: %s", mapErr.Error()))
@@ -850,8 +842,8 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 }
 
 func buildRBXLHeatmapScene(
-	references []positionedRustyAssetToolResult,
-	mapPartsRaw []mapRenderPartRustyAssetToolResult,
+	references []extractor.PositionedResult,
+	mapPartsRaw []extractor.MapRenderPartResult,
 	onSizeProgress func(done int, total int, memoryCacheHits int, diskCacheHits int, networkFetches int),
 ) (rbxlHeatmapBuildResult, error) {
 	type pendingPoint struct {
@@ -867,7 +859,7 @@ func buildRBXLHeatmapScene(
 	}
 
 	pendingPoints := make([]pendingPoint, 0, len(references))
-	uniqueReferencesByKey := map[string]heatmapAssetReference{}
+	uniqueReferencesByKey := map[string]heatmap.AssetReference{}
 	missingPositionCount := 0
 	minY := 0.0
 	maxY := 0.0
@@ -892,8 +884,8 @@ func buildRBXLHeatmapScene(
 			Y:            *reference.WorldY,
 			Z:            *reference.WorldZ,
 		})
-		referenceKey := scanAssetReferenceKey(reference.ID, reference.RawContent)
-		uniqueReferencesByKey[referenceKey] = heatmapAssetReference{
+		referenceKey := extractor.AssetReferenceKey(reference.ID, reference.RawContent)
+		uniqueReferencesByKey[referenceKey] = heatmap.AssetReference{
 			AssetID:    reference.ID,
 			AssetInput: strings.TrimSpace(reference.RawContent),
 		}
@@ -917,7 +909,7 @@ func buildRBXLHeatmapScene(
 	}
 	sort.Strings(referenceKeys)
 
-	referencesToResolve := make([]heatmapAssetReference, 0, len(referenceKeys))
+	referencesToResolve := make([]heatmap.AssetReference, 0, len(referenceKeys))
 	for _, referenceKey := range referenceKeys {
 		referencesToResolve = append(referencesToResolve, uniqueReferencesByKey[referenceKey])
 	}
@@ -929,7 +921,7 @@ func buildRBXLHeatmapScene(
 	resolvedUniqueAssetIDs := map[int64]struct{}{}
 
 	for _, point := range pendingPoints {
-		assetStats := statsByReferenceKey[scanAssetReferenceKey(point.AssetID, point.AssetInput)]
+		assetStats := statsByReferenceKey[extractor.AssetReferenceKey(point.AssetID, point.AssetInput)]
 		if assetStats.TotalBytes <= 0 {
 			missingSizeCount++
 			continue
@@ -1027,18 +1019,18 @@ func buildRBXLDiffHeatmapResult(baseResult rbxlHeatmapBuildResult, compareResult
 	}
 }
 
-func resolveHeatmapAssetStats(references []heatmapAssetReference, onProgress func(done int, total int, memoryRequestCount int, diskRequestCount int, networkRequestCount int)) map[string]rbxlHeatmapAssetStats {
+func resolveHeatmapAssetStats(references []heatmap.AssetReference, onProgress func(done int, total int, memoryRequestCount int, diskRequestCount int, networkRequestCount int)) map[string]heatmap.AssetStats {
 	if len(references) == 0 {
-		return map[string]rbxlHeatmapAssetStats{}
+		return map[string]heatmap.AssetStats{}
 	}
 
-	jobs := make(chan heatmapAssetReference, len(references))
+	jobs := make(chan heatmap.AssetReference, len(references))
 	for _, reference := range references {
 		jobs <- reference
 	}
 	close(jobs)
 
-	statsByReferenceKey := make(map[string]rbxlHeatmapAssetStats, len(references))
+	statsByReferenceKey := make(map[string]heatmap.AssetStats, len(references))
 	var statsMutex sync.Mutex
 	var completed atomic.Int64
 	var memoryRequestCount atomic.Int64
@@ -1055,16 +1047,16 @@ func resolveHeatmapAssetStats(references []heatmapAssetReference, onProgress fun
 		go func() {
 			defer waitGroup.Done()
 			for reference := range jobs {
-				referenceKey := scanAssetReferenceKey(reference.AssetID, reference.AssetInput)
+				referenceKey := extractor.AssetReferenceKey(reference.AssetID, reference.AssetInput)
 				stats, requestSource := getHeatmapAssetStats(reference.AssetID, reference.AssetInput)
 				statsMutex.Lock()
 				statsByReferenceKey[referenceKey] = stats
 				statsMutex.Unlock()
 				if onProgress != nil {
 					switch requestSource {
-					case heatmapAssetRequestSourceNetwork:
+					case heatmap.SourceNetwork:
 						networkRequestCount.Add(1)
-					case heatmapAssetRequestSourceDisk:
+					case heatmap.SourceDisk:
 						diskRequestCount.Add(1)
 					default:
 						memoryRequestCount.Add(1)
@@ -1198,16 +1190,16 @@ func buildHeatmapBaseImage(width int, height int, scene *rbxlHeatmapScene, backg
 	return outputImage, nil
 }
 
-func getHeatmapAssetStats(assetID int64, assetInput string) (rbxlHeatmapAssetStats, heatmapAssetRequestSource) {
-	cacheKey := scanAssetReferenceKey(assetID, assetInput)
+func getHeatmapAssetStats(assetID int64, assetInput string) (heatmap.AssetStats, heatmap.RequestSource) {
+	cacheKey := extractor.AssetReferenceKey(assetID, assetInput)
 	heatmapAssetStatsCache.mutex.RLock()
 	cachedStats, found := heatmapAssetStatsCache.statsByAsset[cacheKey]
 	heatmapAssetStatsCache.mutex.RUnlock()
 	if found {
-		return cachedStats, heatmapAssetRequestSourceMemory
+		return cachedStats, heatmap.SourceMemory
 	}
 
-	stats := rbxlHeatmapAssetStats{AssetID: assetID}
+	stats := heatmap.AssetStats{AssetID: assetID}
 	trace := &assetRequestTrace{}
 	previewResult, previewErr := loadAssetStatsPreviewForReferenceWithTrace(assetID, assetInput, trace)
 	if previewErr != nil || previewResult == nil {
@@ -1217,25 +1209,7 @@ func getHeatmapAssetStats(assetID int64, assetInput string) (rbxlHeatmapAssetSta
 		return stats, trace.classifyRequestSource()
 	}
 
-	stats.AssetTypeID = previewResult.AssetTypeID
-	stats.AssetTypeName = strings.TrimSpace(previewResult.AssetTypeName)
-	statsInfo := previewResult.Stats
-	if statsInfo == nil {
-		statsInfo = previewResult.Image
-	}
-	if statsInfo != nil {
-		stats.TotalBytes = statsInfo.BytesSize
-	}
-	if previewResult.Image != nil && previewResult.Image.Width > 0 && previewResult.Image.Height > 0 {
-		stats.TextureBytes = previewResult.Image.BytesSize
-		stats.PixelCount = int64(previewResult.Image.Width * previewResult.Image.Height)
-	}
-	if isMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
-		stats.MeshBytes = stats.TotalBytes
-		if meshInfo, meshErr := parseMeshHeader(previewResult.DownloadBytes); meshErr == nil {
-			stats.TriangleCount = meshInfo.NumFaces
-		}
-	}
+	stats = buildAssetStatsFromPreview(assetID, previewResult)
 
 	heatmapAssetStatsCache.mutex.Lock()
 	heatmapAssetStatsCache.statsByAsset[cacheKey] = stats
@@ -1463,7 +1437,7 @@ func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, bas
 	}
 	rows := make([]heatmapSquareAssetRow, 0)
 	rowIndexByKey := map[string]int{}
-	sceneSurfaceAreasByPath := buildSceneSurfaceAreaIndexFromHeatmapParts(scene.MapParts)
+	sceneSurfaceAreasByPath := buildSceneSurfaceAreaIndex(scene.MapParts)
 	appendRows := func(points []rbxlHeatmapPoint, side string, filePath string) {
 		for _, point := range points {
 			if !heatmapPointCellMatches(scene, point, cell.Row, cell.Column) {
@@ -2049,7 +2023,7 @@ func formatHeatmapSquareWindowSummary(scene *rbxlHeatmapScene, cell rbxlHeatmapC
 	)
 }
 
-func convertRustMapParts(parts []mapRenderPartRustyAssetToolResult) []rbxlHeatmapMapPart {
+func convertRustMapParts(parts []extractor.MapRenderPartResult) []rbxlHeatmapMapPart {
 	converted := make([]rbxlHeatmapMapPart, 0, len(parts))
 	for _, part := range parts {
 		if part.CenterX == nil || part.CenterY == nil || part.CenterZ == nil {

@@ -1,4 +1,4 @@
-package app
+package opencloud
 
 import (
 	"bytes"
@@ -16,61 +16,62 @@ import (
 )
 
 const (
-	robloxOpenCloudAssetsAPIBaseURL  = "https://apis.roblox.com/assets/v1"
-	robloxOpenCloudCreateAssetURL    = robloxOpenCloudAssetsAPIBaseURL + "/assets"
-	robloxOpenCloudUploadTimeout     = 60 * time.Second
-	robloxOpenCloudOperationTimeout  = 2 * time.Minute
-	robloxOpenCloudOperationPollWait = 2 * time.Second
+	assetsAPIBaseURL  = "https://apis.roblox.com/assets/v1"
+	createAssetURL    = assetsAPIBaseURL + "/assets"
+	uploadTimeout     = 60 * time.Second
+	operationTimeout  = 2 * time.Minute
+	operationPollWait = 2 * time.Second
 )
 
-var errRateLimited = errors.New("rate limited by Roblox (HTTP 429)")
-var errUploadForbidden = errors.New("forbidden (HTTP 403)")
+var ErrRateLimited = errors.New("rate limited by Roblox (HTTP 429)")
+var ErrUploadForbidden = errors.New("forbidden (HTTP 403)")
+var ErrUploadCancelled = errors.New("upload cancelled")
 
-var robloxOpenCloudUploadRateLimitPolicy = roblox.HttpRateLimitPolicy{
+var uploadRateLimitPolicy = roblox.HttpRateLimitPolicy{
 	InitialBackoff: 5 * time.Second,
 	MaxBackoff:     30 * time.Second,
 	MaxRetries:     0,
 }
 
-type robloxOpenCloudCreator struct {
+type Creator struct {
 	IsGroup bool
 	ID      int64
 }
 
-type robloxOpenCloudCreateAssetRequest struct {
-	AssetType       string                              `json:"assetType"`
-	CreationContext robloxOpenCloudAssetCreationContext `json:"creationContext"`
-	Description     string                              `json:"description,omitempty"`
-	DisplayName     string                              `json:"displayName"`
+type createAssetRequest struct {
+	AssetType       string               `json:"assetType"`
+	CreationContext assetCreationContext  `json:"creationContext"`
+	Description     string               `json:"description,omitempty"`
+	DisplayName     string               `json:"displayName"`
 }
 
-type robloxOpenCloudAssetCreationContext struct {
-	Creator robloxOpenCloudAssetCreator `json:"creator"`
+type assetCreationContext struct {
+	Creator assetCreator `json:"creator"`
 }
 
-type robloxOpenCloudAssetCreator struct {
+type assetCreator struct {
 	GroupID int64 `json:"groupId,omitempty"`
 	UserID  int64 `json:"userId,omitempty"`
 }
 
-type robloxOpenCloudOperation struct {
-	Path     string                              `json:"path"`
-	Done     bool                                `json:"done"`
-	Error    *robloxOpenCloudOperationError      `json:"error"`
-	Response *robloxOpenCloudCreateAssetResponse `json:"response"`
+type operation struct {
+	Path     string               `json:"path"`
+	Done     bool                 `json:"done"`
+	Error    *operationError      `json:"error"`
+	Response *createAssetResponse `json:"response"`
 }
 
-type robloxOpenCloudCreateAssetResponse struct {
+type createAssetResponse struct {
 	AssetID int64 `json:"assetId"`
 }
 
-type robloxOpenCloudOperationError struct {
+type operationError struct {
 	Code    int64           `json:"code"`
 	Message string          `json:"message"`
 	Details json.RawMessage `json:"details"`
 }
 
-func (response *robloxOpenCloudCreateAssetResponse) UnmarshalJSON(data []byte) error {
+func (response *createAssetResponse) UnmarshalJSON(data []byte) error {
 	type rawCreateAssetResponse struct {
 		AssetID json.RawMessage `json:"assetId"`
 	}
@@ -101,9 +102,9 @@ func (response *robloxOpenCloudCreateAssetResponse) UnmarshalJSON(data []byte) e
 	return nil
 }
 
-func uploadDecalToRobloxOpenCloud(
+func UploadDecal(
 	apiKey string,
-	creator robloxOpenCloudCreator,
+	creator Creator,
 	displayName string,
 	description string,
 	fileName string,
@@ -124,32 +125,32 @@ func uploadDecalToRobloxOpenCloud(
 		return 0, fmt.Errorf("file content is empty")
 	}
 
-	operation, err := createRobloxOpenCloudDecal(trimmedAPIKey, creator, displayName, description, fileName, fileBytes)
+	op, err := createDecal(trimmedAPIKey, creator, displayName, description, fileName, fileBytes)
 	if err != nil {
 		return 0, err
 	}
-	if operation.Error != nil {
-		return 0, fmt.Errorf("upload failed: %s", formatRobloxOpenCloudOperationError(operation.Error))
+	if op.Error != nil {
+		return 0, fmt.Errorf("upload failed: %s", formatOperationError(op.Error))
 	}
-	if operation.Response != nil && operation.Response.AssetID > 0 {
-		return operation.Response.AssetID, nil
+	if op.Response != nil && op.Response.AssetID > 0 {
+		return op.Response.AssetID, nil
 	}
-	if strings.TrimSpace(operation.Path) == "" {
+	if strings.TrimSpace(op.Path) == "" {
 		return 0, fmt.Errorf("upload failed: Roblox did not return an operation path")
 	}
 
-	return pollRobloxOpenCloudAssetID(trimmedAPIKey, operation.Path, stopChannel)
+	return pollAssetID(trimmedAPIKey, op.Path, stopChannel)
 }
 
-func createRobloxOpenCloudDecal(
+func createDecal(
 	apiKey string,
-	creator robloxOpenCloudCreator,
+	creator Creator,
 	displayName string,
 	description string,
 	fileName string,
 	fileBytes []byte,
-) (*robloxOpenCloudOperation, error) {
-	requestPayload := robloxOpenCloudCreateAssetRequest{
+) (*operation, error) {
+	requestPayload := createAssetRequest{
 		AssetType:   "Image",
 		Description: strings.TrimSpace(description),
 		DisplayName: strings.TrimSpace(displayName),
@@ -183,15 +184,15 @@ func createRobloxOpenCloudDecal(
 
 	response, err := roblox.DoRequestWithRateLimitPolicy(
 		http.MethodPost,
-		robloxOpenCloudCreateAssetURL,
+		createAssetURL,
 		&requestBody,
 		"",
-		robloxOpenCloudUploadTimeout,
+		uploadTimeout,
 		map[string]string{
 			"Content-Type": writer.FormDataContentType(),
 			"x-api-key":    apiKey,
 		},
-		robloxOpenCloudUploadRateLimitPolicy,
+		uploadRateLimitPolicy,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upload request failed: %w", err)
@@ -203,43 +204,43 @@ func createRobloxOpenCloudDecal(
 		return nil, fmt.Errorf("failed to read upload response: %w", err)
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
-		return nil, errRateLimited
+		return nil, ErrRateLimited
 	}
 	if response.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("%w: %s", errUploadForbidden, compactRobloxOpenCloudBody(responseBody))
+		return nil, fmt.Errorf("%w: %s", ErrUploadForbidden, compactBody(responseBody))
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("upload request returned HTTP %d: %s", response.StatusCode, compactRobloxOpenCloudBody(responseBody))
+		return nil, fmt.Errorf("upload request returned HTTP %d: %s", response.StatusCode, compactBody(responseBody))
 	}
 
-	var operation robloxOpenCloudOperation
-	if err := json.Unmarshal(responseBody, &operation); err != nil {
+	var op operation
+	if err := json.Unmarshal(responseBody, &op); err != nil {
 		return nil, fmt.Errorf("failed to decode upload response: %w", err)
 	}
-	return &operation, nil
+	return &op, nil
 }
 
-func pollRobloxOpenCloudAssetID(apiKey string, operationPath string, stopChannel <-chan struct{}) (int64, error) {
-	deadline := time.Now().Add(robloxOpenCloudOperationTimeout)
+func pollAssetID(apiKey string, operationPath string, stopChannel <-chan struct{}) (int64, error) {
+	deadline := time.Now().Add(operationTimeout)
 	for {
 		select {
 		case <-stopChannel:
-			return 0, errScanStopped
+			return 0, ErrUploadCancelled
 		default:
 		}
 
-		operation, err := getRobloxOpenCloudOperation(apiKey, operationPath)
+		op, err := getOperation(apiKey, operationPath)
 		if err != nil {
 			return 0, err
 		}
-		if operation.Error != nil {
-			return 0, fmt.Errorf("upload failed: %s", formatRobloxOpenCloudOperationError(operation.Error))
+		if op.Error != nil {
+			return 0, fmt.Errorf("upload failed: %s", formatOperationError(op.Error))
 		}
-		if operation.Done {
-			if operation.Response == nil || operation.Response.AssetID <= 0 {
+		if op.Done {
+			if op.Response == nil || op.Response.AssetID <= 0 {
 				return 0, fmt.Errorf("upload finished without an asset ID")
 			}
-			return operation.Response.AssetID, nil
+			return op.Response.AssetID, nil
 		}
 		if time.Now().After(deadline) {
 			return 0, fmt.Errorf("upload operation timed out")
@@ -247,13 +248,13 @@ func pollRobloxOpenCloudAssetID(apiKey string, operationPath string, stopChannel
 
 		select {
 		case <-stopChannel:
-			return 0, errScanStopped
-		case <-time.After(robloxOpenCloudOperationPollWait):
+			return 0, ErrUploadCancelled
+		case <-time.After(operationPollWait):
 		}
 	}
 }
 
-func getRobloxOpenCloudOperation(apiKey string, operationPath string) (*robloxOpenCloudOperation, error) {
+func getOperation(apiKey string, operationPath string) (*operation, error) {
 	trimmedPath := strings.TrimLeft(strings.TrimSpace(operationPath), "/")
 	if trimmedPath == "" {
 		return nil, fmt.Errorf("operation path is empty")
@@ -261,10 +262,10 @@ func getRobloxOpenCloudOperation(apiKey string, operationPath string) (*robloxOp
 
 	response, err := roblox.DoRequest(
 		http.MethodGet,
-		robloxOpenCloudAssetsAPIBaseURL+"/"+trimmedPath,
+		assetsAPIBaseURL+"/"+trimmedPath,
 		nil,
 		"",
-		robloxOpenCloudUploadTimeout,
+		uploadTimeout,
 		map[string]string{
 			"x-api-key": apiKey,
 		},
@@ -279,17 +280,17 @@ func getRobloxOpenCloudOperation(apiKey string, operationPath string) (*robloxOp
 		return nil, fmt.Errorf("failed to read operation response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("operation poll returned HTTP %d: %s", response.StatusCode, compactRobloxOpenCloudBody(responseBody))
+		return nil, fmt.Errorf("operation poll returned HTTP %d: %s", response.StatusCode, compactBody(responseBody))
 	}
 
-	var operation robloxOpenCloudOperation
-	if err := json.Unmarshal(responseBody, &operation); err != nil {
+	var op operation
+	if err := json.Unmarshal(responseBody, &op); err != nil {
 		return nil, fmt.Errorf("failed to decode operation response: %w", err)
 	}
-	return &operation, nil
+	return &op, nil
 }
 
-func formatRobloxOpenCloudOperationError(operationErr *robloxOpenCloudOperationError) string {
+func formatOperationError(operationErr *operationError) string {
 	if operationErr == nil {
 		return "unknown upload error"
 	}
@@ -301,7 +302,7 @@ func formatRobloxOpenCloudOperationError(operationErr *robloxOpenCloudOperationE
 	if trimmedMessage := strings.TrimSpace(operationErr.Message); trimmedMessage != "" {
 		parts = append(parts, trimmedMessage)
 	}
-	if trimmedDetails := compactRobloxOpenCloudBody(operationErr.Details); trimmedDetails != "" && trimmedDetails != "null" {
+	if trimmedDetails := compactBody(operationErr.Details); trimmedDetails != "" && trimmedDetails != "null" {
 		parts = append(parts, trimmedDetails)
 	}
 	if len(parts) == 0 {
@@ -310,7 +311,7 @@ func formatRobloxOpenCloudOperationError(operationErr *robloxOpenCloudOperationE
 	return strings.Join(parts, ": ")
 }
 
-func compactRobloxOpenCloudBody(body []byte) string {
+func compactBody(body []byte) string {
 	trimmedBody := strings.TrimSpace(string(body))
 	if trimmedBody == "" {
 		return ""

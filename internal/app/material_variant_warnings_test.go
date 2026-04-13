@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 	"testing"
+
+	"joxblox/internal/extractor"
 )
 
 func TestMaterialVariantWarningPathPrefixesIncludesMaterialService(t *testing.T) {
@@ -16,7 +18,7 @@ func TestMaterialVariantWarningPathPrefixesIncludesMaterialService(t *testing.T)
 }
 
 func TestBuildMissingMaterialVariantWarning(t *testing.T) {
-	warningData := buildMissingMaterialVariantWarningData("test.rbxl", []missingMaterialVariantRustyAssetToolResult{
+	warningData := buildMissingMaterialVariantWarningData("test.rbxl", []extractor.MissingMaterialVariantResult{
 		{VariantName: "Mud"},
 		{VariantName: "Snow"},
 	})

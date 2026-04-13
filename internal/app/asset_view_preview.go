@@ -24,6 +24,7 @@ import (
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/opencloud"
 )
 
 var (
@@ -132,7 +133,7 @@ func (view *assetView) uploadSelectedPreviewVariant() {
 		lastUploadCreatorType = creatorTypeSelect.Selected
 		lastUploadCreatorID = strings.TrimSpace(creatorIDEntry.Text)
 
-		creator := robloxOpenCloudCreator{
+		creator := opencloud.Creator{
 			IsGroup: creatorTypeSelect.Selected == uploadCreatorModeGroup,
 			ID:      creatorID,
 		}
@@ -142,7 +143,7 @@ func (view *assetView) uploadSelectedPreviewVariant() {
 
 		go func() {
 			stopCh := make(chan struct{})
-			assetID, uploadErr := uploadDecalToRobloxOpenCloud(
+			assetID, uploadErr := opencloud.UploadDecal(
 				apiKey,
 				creator,
 				displayName,

@@ -6,13 +6,15 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
+	"joxblox/internal/heatmap"
+	"joxblox/internal/roblox/mesh"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -37,8 +39,8 @@ const (
 
 type modelHeatmapMeshInstance struct {
 	InstancePath string
-	MeshRef      heatmapAssetReference
-	TextureRefs  []heatmapAssetReference
+	MeshRef      heatmap.AssetReference
+	TextureRefs  []heatmap.AssetReference
 	CenterX      float64
 	CenterY      float64
 	CenterZ      float64
@@ -62,14 +64,14 @@ type modelHeatmapMeshBounds struct {
 }
 
 type modelHeatmapResolvedMesh struct {
-	Reference     heatmapAssetReference
+	Reference     heatmap.AssetReference
 	Preview       meshPreviewData
 	Bounds        modelHeatmapMeshBounds
 	TriangleCount uint32
 }
 
 type modelHeatmapResolvedTexture struct {
-	Reference heatmapAssetReference
+	Reference heatmap.AssetReference
 	Width     int
 	Height    int
 	BytesSize int64
@@ -288,8 +290,8 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 			}
 
 			var (
-				refs     []positionedRustyAssetToolResult
-				mapParts []mapRenderPartRustyAssetToolResult
+				refs     []extractor.PositionedResult
+				mapParts []extractor.MapRenderPartResult
 				refsErr  error
 				mapErr   error
 			)
@@ -297,11 +299,11 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 			waitGroup.Add(2)
 			go func() {
 				defer waitGroup.Done()
-				refs, refsErr = extractPositionedRefsWithRustyAssetTool(sourcePath, prefixes, nil)
+				refs, refsErr = extractor.ExtractPositionedRefs(sourcePath, prefixes, nil)
 			}()
 			go func() {
 				defer waitGroup.Done()
-				mapParts, mapErr = extractMapRenderPartsWithRustyAssetTool(sourcePath, prefixes, nil)
+				mapParts, mapErr = extractor.ExtractMapRenderParts(sourcePath, prefixes, nil)
 			}()
 			waitGroup.Wait()
 			if isCanceled() {
@@ -485,9 +487,9 @@ func newModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	)
 }
 
-func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, refs []positionedRustyAssetToolResult) []modelHeatmapMeshInstance {
-	meshRefsByPath := map[string][]heatmapAssetReference{}
-	textureRefsByPath := map[string][]heatmapAssetReference{}
+func buildModelHeatmapInstances(mapParts []extractor.MapRenderPartResult, refs []extractor.PositionedResult) []modelHeatmapMeshInstance {
+	meshRefsByPath := map[string][]heatmap.AssetReference{}
+	textureRefsByPath := map[string][]heatmap.AssetReference{}
 	textureSeenKeysByPath := map[string]map[string]struct{}{}
 	for _, ref := range refs {
 		propertyName := strings.ToLower(strings.TrimSpace(ref.PropertyName))
@@ -500,7 +502,7 @@ func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, re
 		if normalizeReportGenerationInstanceType(instanceType) != "meshpart" {
 			continue
 		}
-		reference := heatmapAssetReference{
+		reference := heatmap.AssetReference{
 			AssetID:    ref.ID,
 			AssetInput: strings.TrimSpace(ref.RawContent),
 		}
@@ -509,7 +511,7 @@ func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, re
 			meshRefsByPath[instancePath] = append(meshRefsByPath[instancePath], reference)
 		case isReportGenerationTextureContentProperty(propertyName),
 			isReportGenerationSurfaceAppearanceProperty(propertyName, originalInstanceType):
-			refKey := scanAssetReferenceKey(reference.AssetID, reference.AssetInput)
+			refKey := extractor.AssetReferenceKey(reference.AssetID, reference.AssetInput)
 			if refKey == "" || refKey == "0" {
 				continue
 			}
@@ -549,9 +551,9 @@ func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, re
 		if occurrenceIndex < len(refsForPath) {
 			meshReference = refsForPath[occurrenceIndex]
 		}
-		textureRefsForPart := []heatmapAssetReference(nil)
+		textureRefsForPart := []heatmap.AssetReference(nil)
 		if textureRefs := textureRefsByPath[instancePath]; len(textureRefs) > 0 {
-			textureRefsForPart = append([]heatmapAssetReference(nil), textureRefs...)
+			textureRefsForPart = append([]heatmap.AssetReference(nil), textureRefs...)
 		}
 		sizeX := math.Abs(*part.SizeX)
 		sizeY := math.Abs(*part.SizeY)
@@ -579,152 +581,92 @@ func buildModelHeatmapInstances(mapParts []mapRenderPartRustyAssetToolResult, re
 	return instances
 }
 
-func uniqueModelHeatmapReferences(instances []modelHeatmapMeshInstance) []heatmapAssetReference {
-	unique := map[string]heatmapAssetReference{}
+func uniqueModelHeatmapReferences(instances []modelHeatmapMeshInstance) []heatmap.AssetReference {
+	unique := map[string]heatmap.AssetReference{}
 	for _, instance := range instances {
-		key := scanAssetReferenceKey(instance.MeshRef.AssetID, instance.MeshRef.AssetInput)
+		key := extractor.AssetReferenceKey(instance.MeshRef.AssetID, instance.MeshRef.AssetInput)
 		unique[key] = instance.MeshRef
 	}
-	references := make([]heatmapAssetReference, 0, len(unique))
+	references := make([]heatmap.AssetReference, 0, len(unique))
 	for _, reference := range unique {
 		references = append(references, reference)
 	}
 	return references
 }
 
-func uniqueModelHeatmapTextureReferences(instances []modelHeatmapMeshInstance) []heatmapAssetReference {
-	unique := map[string]heatmapAssetReference{}
+func uniqueModelHeatmapTextureReferences(instances []modelHeatmapMeshInstance) []heatmap.AssetReference {
+	unique := map[string]heatmap.AssetReference{}
 	for _, instance := range instances {
 		for _, textureRef := range instance.TextureRefs {
 			if textureRef.AssetID == 0 && strings.TrimSpace(textureRef.AssetInput) == "" {
 				continue
 			}
-			key := scanAssetReferenceKey(textureRef.AssetID, textureRef.AssetInput)
+			key := extractor.AssetReferenceKey(textureRef.AssetID, textureRef.AssetInput)
 			unique[key] = textureRef
 		}
 	}
-	references := make([]heatmapAssetReference, 0, len(unique))
+	references := make([]heatmap.AssetReference, 0, len(unique))
 	for _, reference := range unique {
 		references = append(references, reference)
 	}
 	return references
 }
 
-func resolveModelHeatmapMeshes(references []heatmapAssetReference, onProgress func(done int, total int), shouldCancel func() bool) map[string]modelHeatmapResolvedMesh {
-	if len(references) == 0 {
-		return map[string]modelHeatmapResolvedMesh{}
-	}
-
-	jobs := make(chan heatmapAssetReference, len(references))
-	for _, reference := range references {
-		jobs <- reference
-	}
-	close(jobs)
-
-	resolved := make(map[string]modelHeatmapResolvedMesh, len(references))
-	var resolvedMutex sync.Mutex
-	var completed atomic.Int64
-	workerCount := min(runtime.NumCPU(), len(references))
-	if workerCount <= 0 {
-		workerCount = 1
-	}
-
-	var waitGroup sync.WaitGroup
-	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			for reference := range jobs {
-				if shouldCancel != nil && shouldCancel() {
-					return
+func resolveModelHeatmapMeshes(references []heatmap.AssetReference, onProgress func(done int, total int), shouldCancel func() bool) map[string]modelHeatmapResolvedMesh {
+	return runResolveWorkers(
+		references,
+		func(ref heatmap.AssetReference) string {
+			return extractor.AssetReferenceKey(ref.AssetID, ref.AssetInput)
+		},
+		func(reference heatmap.AssetReference) modelHeatmapResolvedMesh {
+			resolvedMesh := modelHeatmapResolvedMesh{Reference: reference}
+			previewResult, previewErr := loadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
+			if previewErr == nil && previewResult != nil && len(previewResult.DownloadBytes) > 0 {
+				if meshInfo, meshErr := mesh.ParseHeader(previewResult.DownloadBytes); meshErr == nil {
+					resolvedMesh.TriangleCount = meshInfo.NumFaces
 				}
-
-				key := scanAssetReferenceKey(reference.AssetID, reference.AssetInput)
-				resolvedMesh := modelHeatmapResolvedMesh{Reference: reference}
-				previewResult, previewErr := loadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
-				if previewErr == nil && previewResult != nil && len(previewResult.DownloadBytes) > 0 {
-					if meshInfo, meshErr := parseMeshHeader(previewResult.DownloadBytes); meshErr == nil {
-						resolvedMesh.TriangleCount = meshInfo.NumFaces
+				if previewData, meshPreviewErr := extractMeshPreviewFromBytesWithLimit(previewResult.DownloadBytes, modelHeatmapMaxTrianglesPerMesh); meshPreviewErr == nil {
+					resolvedMesh.Preview = previewData
+					resolvedMesh.Bounds = computeModelHeatmapMeshBounds(previewData.RawPositions)
+					if resolvedMesh.TriangleCount == 0 {
+						resolvedMesh.TriangleCount = previewData.TriangleCount
 					}
-					if previewData, meshPreviewErr := extractMeshPreviewWithRustyAssetToolFromBytesWithLimit(previewResult.DownloadBytes, modelHeatmapMaxTrianglesPerMesh); meshPreviewErr == nil {
-						resolvedMesh.Preview = previewData
-						resolvedMesh.Bounds = computeModelHeatmapMeshBounds(previewData.RawPositions)
-						if resolvedMesh.TriangleCount == 0 {
-							resolvedMesh.TriangleCount = previewData.TriangleCount
-						}
-					}
-				}
-
-				resolvedMutex.Lock()
-				resolved[key] = resolvedMesh
-				resolvedMutex.Unlock()
-
-				if onProgress != nil && (shouldCancel == nil || !shouldCancel()) {
-					onProgress(int(completed.Add(1)), len(references))
 				}
 			}
-		}()
-	}
-	waitGroup.Wait()
-	return resolved
+			return resolvedMesh
+		},
+		1,
+		onProgress,
+		shouldCancel,
+	)
 }
 
-func resolveModelHeatmapTextures(references []heatmapAssetReference, onProgress func(done int, total int), shouldCancel func() bool) map[string]modelHeatmapResolvedTexture {
-	if len(references) == 0 {
-		return map[string]modelHeatmapResolvedTexture{}
-	}
-
-	jobs := make(chan heatmapAssetReference, len(references))
-	for _, reference := range references {
-		jobs <- reference
-	}
-	close(jobs)
-
-	resolved := make(map[string]modelHeatmapResolvedTexture, len(references))
-	var resolvedMutex sync.Mutex
-	var completed atomic.Int64
-	workerCount := min(runtime.NumCPU(), len(references))
-	if workerCount <= 0 {
-		workerCount = 1
-	}
-
-	var waitGroup sync.WaitGroup
-	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
-		waitGroup.Add(1)
-		go func() {
-			defer waitGroup.Done()
-			for reference := range jobs {
-				if shouldCancel != nil && shouldCancel() {
-					return
+func resolveModelHeatmapTextures(references []heatmap.AssetReference, onProgress func(done int, total int), shouldCancel func() bool) map[string]modelHeatmapResolvedTexture {
+	return runResolveWorkers(
+		references,
+		func(ref heatmap.AssetReference) string {
+			return extractor.AssetReferenceKey(ref.AssetID, ref.AssetInput)
+		},
+		func(reference heatmap.AssetReference) modelHeatmapResolvedTexture {
+			resolvedTexture := modelHeatmapResolvedTexture{Reference: reference}
+			previewResult, previewErr := loadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
+			if previewErr == nil && previewResult != nil {
+				imageSource := previewResult.Image
+				if imageSource == nil || imageSource.Width <= 0 || imageSource.Height <= 0 || imageSource.BytesSize <= 0 {
+					imageSource = previewResult.Stats
 				}
-
-				key := scanAssetReferenceKey(reference.AssetID, reference.AssetInput)
-				resolvedTexture := modelHeatmapResolvedTexture{Reference: reference}
-				previewResult, previewErr := loadAssetStatsPreviewForReference(reference.AssetID, reference.AssetInput)
-				if previewErr == nil && previewResult != nil {
-					imageSource := previewResult.Image
-					if imageSource == nil || imageSource.Width <= 0 || imageSource.Height <= 0 || imageSource.BytesSize <= 0 {
-						imageSource = previewResult.Stats
-					}
-					if imageSource != nil && imageSource.Width > 0 && imageSource.Height > 0 {
-						resolvedTexture.Width = imageSource.Width
-						resolvedTexture.Height = imageSource.Height
-						resolvedTexture.BytesSize = int64(imageSource.BytesSize)
-					}
-				}
-
-				resolvedMutex.Lock()
-				resolved[key] = resolvedTexture
-				resolvedMutex.Unlock()
-
-				if onProgress != nil && (shouldCancel == nil || !shouldCancel()) {
-					onProgress(int(completed.Add(1)), len(references))
+				if imageSource != nil && imageSource.Width > 0 && imageSource.Height > 0 {
+					resolvedTexture.Width = imageSource.Width
+					resolvedTexture.Height = imageSource.Height
+					resolvedTexture.BytesSize = int64(imageSource.BytesSize)
 				}
 			}
-		}()
-	}
-	waitGroup.Wait()
-	return resolved
+			return resolvedTexture
+		},
+		1,
+		onProgress,
+		shouldCancel,
+	)
 }
 
 func buildModelHeatmapPreviewData(instances []modelHeatmapMeshInstance, resolved map[string]modelHeatmapResolvedMesh) (meshPreviewData, []modelHeatmapBatchInfo, modelHeatmapSceneSummary, error) {
@@ -764,7 +706,7 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 	uniqueRenderedMeshes := map[string]struct{}{}
 	uniqueRenderedTextures := map[string]struct{}{}
 	for _, instance := range instances {
-		key := scanAssetReferenceKey(instance.MeshRef.AssetID, instance.MeshRef.AssetInput)
+		key := extractor.AssetReferenceKey(instance.MeshRef.AssetID, instance.MeshRef.AssetInput)
 		mesh, found := resolved[key]
 		if !found || mesh.TriangleCount == 0 {
 			summary.FailedMeshCount++
@@ -783,7 +725,7 @@ func buildModelHeatmapRenderState(instances []modelHeatmapMeshInstance, resolved
 			if textureRef.AssetID == 0 && strings.TrimSpace(textureRef.AssetInput) == "" {
 				continue
 			}
-			textureKey := scanAssetReferenceKey(textureRef.AssetID, textureRef.AssetInput)
+			textureKey := extractor.AssetReferenceKey(textureRef.AssetID, textureRef.AssetInput)
 			textureData, textureFound := textures[textureKey]
 			if !textureFound || textureData.BytesSize <= 0 {
 				continue
@@ -947,7 +889,7 @@ func applyModelHeatmapBatchColor(batch *meshPreviewBatchData, heatColor color.NR
 	}
 }
 
-func modelHeatmapRotationFromPart(part mapRenderPartRustyAssetToolResult) [9]float64 {
+func modelHeatmapRotationFromPart(part extractor.MapRenderPartResult) [9]float64 {
 	if part.RotationXX == nil || part.RotationXY == nil || part.RotationXZ == nil ||
 		part.RotationYX == nil || part.RotationYY == nil || part.RotationYZ == nil ||
 		part.RotationZX == nil || part.RotationZY == nil || part.RotationZZ == nil {

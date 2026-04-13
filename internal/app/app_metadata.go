@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -38,6 +40,17 @@ func loadLicenseText() string {
 		return bundledText
 	}
 	return loadRepositoryDocument("LICENSE.md", "License text unavailable.")
+}
+
+func getRepositoryRootPath() (string, error) {
+	_, currentFilePath, _, callerOK := runtime.Caller(0)
+	if !callerOK || strings.TrimSpace(currentFilePath) == "" {
+		return "", fmt.Errorf("unable to resolve source path")
+	}
+	appDirectoryPath := filepath.Dir(currentFilePath)
+	internalDirectoryPath := filepath.Dir(appDirectoryPath)
+	repositoryRootPath := filepath.Dir(internalDirectoryPath)
+	return repositoryRootPath, nil
 }
 
 func loadRepositoryDocument(fileName string, fallback string) string {

@@ -1,11 +1,13 @@
 package app
 
 import (
+	"errors"
 	"image/color"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 
 	"fyne.io/fyne/v2"
@@ -14,13 +16,6 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
-
-type missingMaterialVariantRustyAssetToolResult struct {
-	VariantName  string `json:"variantName"`
-	InstanceType string `json:"instanceType"`
-	InstanceName string `json:"instanceName"`
-	InstancePath string `json:"instancePath"`
-}
 
 type materialVariantWarningData struct {
 	Summary     string
@@ -120,7 +115,7 @@ func materialVariantWarningPathPrefixes(pathPrefixes []string) []string {
 	return filtered
 }
 
-func buildMissingMaterialVariantWarningData(fileLabel string, missing []missingMaterialVariantRustyAssetToolResult) materialVariantWarningData {
+func buildMissingMaterialVariantWarningData(fileLabel string, missing []extractor.MissingMaterialVariantResult) materialVariantWarningData {
 	if len(missing) == 0 {
 		return materialVariantWarningData{}
 	}
@@ -176,7 +171,10 @@ func buildMissingMaterialVariantWarningData(fileLabel string, missing []missingM
 }
 
 func buildRBXLMissingMaterialVariantWarning(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error) {
-	missingVariants, extractErr := extractMissingMaterialVariantsWithRustyAssetTool(filePath, materialVariantWarningPathPrefixes(pathPrefixes), stopChannel)
+	missingVariants, extractErr := extractor.ExtractMissingMaterialVariants(filePath, materialVariantWarningPathPrefixes(pathPrefixes), stopChannel)
+	if errors.Is(extractErr, extractor.ErrCancelled) {
+		return materialVariantWarningData{}, errScanStopped
+	}
 	if extractErr != nil {
 		return materialVariantWarningData{}, extractErr
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/heatmap"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -584,7 +585,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			type scanLoadOutcome struct {
 				row           scanResult
 				loadErr       error
-				requestSource heatmapAssetRequestSource
+				requestSource heatmap.RequestSource
 			}
 			workerCount := determineScanLoadWorkerCount(len(hits))
 			hitJobs := make(chan scanHit)
@@ -661,9 +662,9 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			for loadOutcome := range loadOutcomes {
 				completedCount++
 				switch loadOutcome.requestSource {
-				case heatmapAssetRequestSourceNetwork:
+				case heatmap.SourceNetwork:
 					networkRequestCount++
-				case heatmapAssetRequestSourceDisk:
+				case heatmap.SourceDisk:
 					diskRequestCount++
 				default:
 					memoryRequestCount++

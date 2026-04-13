@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/heatmap"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/mesh"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -51,7 +53,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 					statusLabel.SetText(fmt.Sprintf(
 						"Showing asset %d. %s",
 						assetID,
-						formatSingleRequestSourceBreakdown(requestSource),
+						heatmap.FormatSingleRequestSourceBreakdown(requestSource),
 					))
 					previewBox.Refresh()
 				})
@@ -114,8 +116,8 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 				explorerState = newAssetExplorerState(selectedAssetID, previewResult)
 				renderPreview(selectedAssetID, previewResult)
 				previewBox.Refresh()
-				requestSourceBreakdown := formatSingleRequestSourceBreakdown(trace.classifyRequestSource())
-				if isMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
+				requestSourceBreakdown := heatmap.FormatSingleRequestSourceBreakdown(trace.classifyRequestSource())
+				if mesh.IsMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
 					if strings.EqualFold(previewResult.Source, roblox.SourceAssetDeliveryInGame) {
 						statusLabel.SetText(fmt.Sprintf("Mesh loaded. %s", requestSourceBreakdown))
 						debug.Logf("Single asset load complete for %d (mesh via AssetDelivery)", selectedAssetID)

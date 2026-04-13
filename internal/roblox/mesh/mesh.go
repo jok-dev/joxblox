@@ -1,4 +1,4 @@
-package app
+package mesh
 
 import (
 	"encoding/binary"
@@ -10,28 +10,32 @@ import (
 	"joxblox/internal/roblox"
 )
 
-type meshHeaderInfo struct {
+type HeaderInfo struct {
 	Version  string
 	NumVerts uint32
 	NumFaces uint32
 }
 
-const meshVersionPrefix = "version "
-const meshCoreMeshPrefix = "COREMESH"
+const VersionPrefix = "version "
+const CoreMeshPrefix = "COREMESH"
 
-func parseMeshHeader(data []byte) (meshHeaderInfo, error) {
+// CoreMeshFallback is injected at startup by the app package to break
+// the circular dependency between mesh parsing and the Rust extractor.
+var CoreMeshFallback func(data []byte) (HeaderInfo, error)
+
+func ParseHeader(data []byte) (HeaderInfo, error) {
 	if len(data) < 13 {
-		return meshHeaderInfo{}, fmt.Errorf("data too short for mesh header")
+		return HeaderInfo{}, fmt.Errorf("data too short for mesh header")
 	}
 	headerStr := string(data[:13])
-	if !strings.HasPrefix(headerStr, meshVersionPrefix) {
-		return meshHeaderInfo{}, fmt.Errorf("not a Roblox mesh file")
+	if !strings.HasPrefix(headerStr, VersionPrefix) {
+		return HeaderInfo{}, fmt.Errorf("not a Roblox mesh file")
 	}
 	newlineIdx := strings.IndexByte(headerStr, '\n')
 	if newlineIdx < 0 {
-		return meshHeaderInfo{}, fmt.Errorf("missing newline after version header")
+		return HeaderInfo{}, fmt.Errorf("missing newline after version header")
 	}
-	version := strings.TrimSpace(headerStr[len(meshVersionPrefix):newlineIdx])
+	version := strings.TrimSpace(headerStr[len(VersionPrefix):newlineIdx])
 	bodyStart := newlineIdx + 1
 
 	switch version {
@@ -44,43 +48,41 @@ func parseMeshHeader(data []byte) (meshHeaderInfo, error) {
 	case "4.00", "4.01", "5.00", "6.00", "7.00":
 		return parseMeshV4Plus(data, bodyStart, version)
 	default:
-		return meshHeaderInfo{}, fmt.Errorf("unsupported mesh version: %s", version)
+		return HeaderInfo{}, fmt.Errorf("unsupported mesh version: %s", version)
 	}
 }
 
-func parseMeshV1(data []byte, bodyStart int, version string) (meshHeaderInfo, error) {
+func parseMeshV1(data []byte, bodyStart int, version string) (HeaderInfo, error) {
 	rest := string(data[bodyStart:])
 	newlineIdx := strings.IndexByte(rest, '\n')
 	if newlineIdx < 0 {
-		return meshHeaderInfo{}, fmt.Errorf("v1 mesh missing face count line")
+		return HeaderInfo{}, fmt.Errorf("v1 mesh missing face count line")
 	}
 	numFaces, err := strconv.ParseUint(strings.TrimSpace(rest[:newlineIdx]), 10, 32)
 	if err != nil {
-		return meshHeaderInfo{}, fmt.Errorf("v1 mesh invalid face count: %w", err)
+		return HeaderInfo{}, fmt.Errorf("v1 mesh invalid face count: %w", err)
 	}
-	return meshHeaderInfo{
+	return HeaderInfo{
 		Version:  version,
 		NumVerts: uint32(numFaces) * 3,
 		NumFaces: uint32(numFaces),
 	}, nil
 }
 
-func parseMeshV2(data []byte, bodyStart int, version string) (meshHeaderInfo, error) {
-	// v2 sub-header: sizeof_header(u16) + sizeof_vertex(u8) + sizeof_face(u8) = 4 bytes, then numVerts(u32) + numFaces(u32)
+func parseMeshV2(data []byte, bodyStart int, version string) (HeaderInfo, error) {
 	offset := bodyStart + 4
 	if len(data) < offset+8 {
-		return meshHeaderInfo{}, fmt.Errorf("v2 mesh data too short for header")
+		return HeaderInfo{}, fmt.Errorf("v2 mesh data too short for header")
 	}
 	numVerts := binary.LittleEndian.Uint32(data[offset:])
 	numFaces := binary.LittleEndian.Uint32(data[offset+4:])
-	return meshHeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
+	return HeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
 }
 
-func parseMeshV3(data []byte, bodyStart int, version string) (meshHeaderInfo, error) {
-	// v3 sub-header: sizeof_header(u16) + sizeof_vertex(u8) + sizeof_face(u8) + sizeof_lodOffset(u16) + numLodOffsets(u16) = 8 bytes
+func parseMeshV3(data []byte, bodyStart int, version string) (HeaderInfo, error) {
 	offset := bodyStart + 8
 	if len(data) < offset+8 {
-		return meshHeaderInfo{}, fmt.Errorf("v3 mesh data too short for header")
+		return HeaderInfo{}, fmt.Errorf("v3 mesh data too short for header")
 	}
 	sizeofHeader := int(binary.LittleEndian.Uint16(data[bodyStart:]))
 	sizeofVertex := int(data[bodyStart+2])
@@ -92,27 +94,24 @@ func parseMeshV3(data []byte, bodyStart int, version string) (meshHeaderInfo, er
 
 	if numLodOffsets >= 2 && sizeofHeader > 0 && sizeofVertex > 0 && sizeofFace > 0 {
 		lodTableStart := bodyStart + sizeofHeader + int(numVerts)*sizeofVertex + int(numFaces)*sizeofFace
-		numFaces = readHighQualityFaceCount(data, lodTableStart, 1, numFaces)
+		numFaces = ReadHighQualityFaceCount(data, lodTableStart, 1, numFaces)
 	}
 
-	return meshHeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
+	return HeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
 }
 
-func parseMeshV4Plus(data []byte, bodyStart int, version string) (meshHeaderInfo, error) {
-	if version == "7.00" && len(data) >= bodyStart+len(meshCoreMeshPrefix) && string(data[bodyStart:bodyStart+len(meshCoreMeshPrefix)]) == meshCoreMeshPrefix {
+func parseMeshV4Plus(data []byte, bodyStart int, version string) (HeaderInfo, error) {
+	if version == "7.00" && len(data) >= bodyStart+len(CoreMeshPrefix) && string(data[bodyStart:bodyStart+len(CoreMeshPrefix)]) == CoreMeshPrefix {
 		return parseMeshV7CoreMesh(data, bodyStart, version)
 	}
 
-	// v4+ sub-header: sizeof_header(u16) + lodType(u16) = 4 bytes, then numVerts(u32) + numFaces(u32)
 	offset := bodyStart + 4
 	if len(data) < offset+8 {
-		return meshHeaderInfo{}, fmt.Errorf("v%s mesh data too short for header", version)
+		return HeaderInfo{}, fmt.Errorf("v%s mesh data too short for header", version)
 	}
 	numVerts := binary.LittleEndian.Uint32(data[offset:])
 	numFaces := binary.LittleEndian.Uint32(data[offset+4:])
 
-	// v4/v5 header: numLodOffsets(u16) at +12, numBones(u16) at +14.
-	// The header numFaces is the total across all LOD levels; extract LOD0 only.
 	if (version == "4.00" || version == "4.01" || version == "5.00") && len(data) >= bodyStart+16 {
 		sizeofHeader := int(binary.LittleEndian.Uint16(data[bodyStart:]))
 		numLodOffsets := int(binary.LittleEndian.Uint16(data[bodyStart+12:]))
@@ -126,20 +125,14 @@ func parseMeshV4Plus(data []byte, bodyStart int, version string) (meshHeaderInfo
 				skinningSize = int(numVerts) * skinningStride
 			}
 			lodTableStart := bodyStart + sizeofHeader + int(numVerts)*vertexStride + skinningSize + int(numFaces)*faceStride
-			numFaces = readHighQualityFaceCount(data, lodTableStart, 1, numFaces)
+			numFaces = ReadHighQualityFaceCount(data, lodTableStart, 1, numFaces)
 		}
 	}
 
-	return meshHeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
+	return HeaderInfo{Version: version, NumVerts: numVerts, NumFaces: numFaces}, nil
 }
 
-// readHighQualityFaceCount reads the LOD offset table and returns the
-// face count that spans the first numHighQualityLODs levels.  For v4/v5
-// meshes Roblox combines all "high quality" LOD levels into the reported
-// triangle count; the boundary index into the offset table equals
-// numHighQualityLODs (minimum 1).  Falls back to totalFaces when the
-// table cannot be read or the values look invalid.
-func readHighQualityFaceCount(data []byte, lodTableStart int, numHighQualityLODs int, totalFaces uint32) uint32 {
+func ReadHighQualityFaceCount(data []byte, lodTableStart int, numHighQualityLODs int, totalFaces uint32) uint32 {
 	lodIndex := numHighQualityLODs
 	if lodIndex < 1 {
 		lodIndex = 1
@@ -156,10 +149,13 @@ func readHighQualityFaceCount(data []byte, lodTableStart int, numHighQualityLODs
 	return totalFaces
 }
 
-func parseMeshV7CoreMesh(data []byte, bodyStart int, version string) (meshHeaderInfo, error) {
-	info, err := extractMeshStatsWithRustyAssetToolFromBytes(data)
+func parseMeshV7CoreMesh(data []byte, bodyStart int, version string) (HeaderInfo, error) {
+	if CoreMeshFallback == nil {
+		return HeaderInfo{}, fmt.Errorf("v%s COREMESH decode not available (no fallback registered)", version)
+	}
+	info, err := CoreMeshFallback(data)
 	if err != nil {
-		return meshHeaderInfo{}, fmt.Errorf("v%s COREMESH decode failed: %w", version, err)
+		return HeaderInfo{}, fmt.Errorf("v%s COREMESH decode failed: %w", version, err)
 	}
 	if strings.TrimSpace(info.Version) == "" {
 		info.Version = version
@@ -167,10 +163,10 @@ func parseMeshV7CoreMesh(data []byte, bodyStart int, version string) (meshHeader
 	return info, nil
 }
 
-func locateDracoPayloadStart(data []byte, bodyStart int) (int, error) {
+func LocateDracoPayloadStart(data []byte, bodyStart int) (int, error) {
 	searchStart := bodyStart
-	if len(data) >= bodyStart+len(meshCoreMeshPrefix) && string(data[bodyStart:bodyStart+len(meshCoreMeshPrefix)]) == meshCoreMeshPrefix {
-		searchStart = bodyStart + len(meshCoreMeshPrefix)
+	if len(data) >= bodyStart+len(CoreMeshPrefix) && string(data[bodyStart:bodyStart+len(CoreMeshPrefix)]) == CoreMeshPrefix {
+		searchStart = bodyStart + len(CoreMeshPrefix)
 	}
 	relativeIdx := strings.Index(string(data[searchStart:]), "DRACO")
 	if relativeIdx < 0 {
@@ -186,11 +182,11 @@ func locateDracoPayloadStart(data []byte, bodyStart int) (int, error) {
 	return absoluteIdx, nil
 }
 
-func isMeshAssetType(assetTypeID int) bool {
+func IsMeshAssetType(assetTypeID int) bool {
 	return assetTypeID == roblox.AssetTypeMesh || assetTypeID == 40
 }
 
-func formatMeshInfo(info meshHeaderInfo) string {
+func FormatInfo(info HeaderInfo) string {
 	version := info.Version
 	if version == "" {
 		version = "?"

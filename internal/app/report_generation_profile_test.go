@@ -3,7 +3,9 @@ package app
 import (
 	"testing"
 
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
+	"joxblox/internal/heatmap"
 )
 
 func TestGradeFromThresholds(t *testing.T) {
@@ -494,7 +496,7 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 }
 
 func TestCountReportGenerationOversizedTextures(t *testing.T) {
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           101,
 			RawContent:   "rbxassetid://101",
@@ -507,11 +509,11 @@ func TestCountReportGenerationOversizedTextures(t *testing.T) {
 		},
 	}
 	resolved := map[string]reportGenerationResolvedAsset{
-		scanAssetReferenceKey(101, "rbxassetid://101"): {
-			Stats: rbxlHeatmapAssetStats{TextureBytes: 200_000},
+		extractor.AssetReferenceKey(101, "rbxassetid://101"): {
+			Stats: heatmap.AssetStats{TextureBytes: 200_000},
 		},
-		scanAssetReferenceKey(202, "rbxassetid://202"): {
-			Stats: rbxlHeatmapAssetStats{TextureBytes: 10_000},
+		extractor.AssetReferenceKey(202, "rbxassetid://202"): {
+			Stats: heatmap.AssetStats{TextureBytes: 10_000},
 		},
 	}
 	mapParts := []rbxlHeatmapMapPart{

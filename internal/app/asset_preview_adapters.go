@@ -3,7 +3,9 @@ package app
 import (
 	"strings"
 
+	"joxblox/internal/extractor"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/mesh"
 
 	"fyne.io/fyne/v2"
 )
@@ -108,8 +110,8 @@ func applyPreviewToScanResult(result scanResult, previewResult *assetPreviewResu
 	}
 
 	var meshFaces, meshVerts uint32
-	if isMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
-		if meshInfo, meshErr := parseMeshHeader(previewResult.DownloadBytes); meshErr == nil {
+	if mesh.IsMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
+		if meshInfo, meshErr := mesh.ParseHeader(previewResult.DownloadBytes); meshErr == nil {
 			meshFaces = meshInfo.NumFaces
 			meshVerts = meshInfo.NumVerts
 		}
@@ -260,7 +262,7 @@ func buildRootScanReferenceContext(rows []scanResult, selectedAssetID int64, sel
 		if row.AssetID != selectedAssetID || row.FilePath != selectedFilePath {
 			continue
 		}
-		if scanAssetReferenceKey(row.AssetID, row.AssetInput) != scanAssetReferenceKey(selectedAssetID, selectedAssetInput) {
+		if extractor.AssetReferenceKey(row.AssetID, row.AssetInput) != extractor.AssetReferenceKey(selectedAssetID, selectedAssetInput) {
 			continue
 		}
 		context.UseCount = row.UseCount

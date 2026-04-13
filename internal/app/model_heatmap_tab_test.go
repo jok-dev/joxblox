@@ -4,6 +4,9 @@ import (
 	"image/color"
 	"math"
 	"testing"
+
+	"joxblox/internal/extractor"
+	"joxblox/internal/heatmap"
 )
 
 func TestBuildModelHeatmapInstancesCollectsTextureRefs(t *testing.T) {
@@ -13,7 +16,7 @@ func TestBuildModelHeatmapInstancesCollectsTextureRefs(t *testing.T) {
 	sizeX := 2.0
 	sizeY := 2.0
 	sizeZ := 2.0
-	mapParts := []mapRenderPartRustyAssetToolResult{
+	mapParts := []extractor.MapRenderPartResult{
 		{
 			InstanceType: "MeshPart",
 			InstancePath: "Workspace.Crate",
@@ -25,7 +28,7 @@ func TestBuildModelHeatmapInstancesCollectsTextureRefs(t *testing.T) {
 			SizeZ:        &sizeZ,
 		},
 	}
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           111,
 			RawContent:   "rbxassetid://111",
@@ -61,7 +64,7 @@ func TestBuildModelHeatmapInstancesCollectsSurfaceAppearanceTextures(t *testing.
 	sizeX := 2.0
 	sizeY := 2.0
 	sizeZ := 2.0
-	mapParts := []mapRenderPartRustyAssetToolResult{
+	mapParts := []extractor.MapRenderPartResult{
 		{
 			InstanceType: "MeshPart",
 			InstancePath: "Workspace.Floor",
@@ -73,7 +76,7 @@ func TestBuildModelHeatmapInstancesCollectsSurfaceAppearanceTextures(t *testing.
 			SizeZ:        &sizeZ,
 		},
 	}
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           111,
 			RawContent:   "rbxassetid://111",
@@ -130,16 +133,16 @@ func TestBuildModelHeatmapPreviewDataTextureModeColorsByTextureBytes(t *testing.
 	instances := []modelHeatmapMeshInstance{
 		{
 			InstancePath: "Workspace.Small",
-			MeshRef:      heatmapAssetReference{AssetID: 1, AssetInput: "rbxassetid://1"},
-			TextureRefs:  []heatmapAssetReference{{AssetID: 10, AssetInput: "rbxassetid://10"}},
+			MeshRef:      heatmap.AssetReference{AssetID: 1, AssetInput: "rbxassetid://1"},
+			TextureRefs:  []heatmap.AssetReference{{AssetID: 10, AssetInput: "rbxassetid://10"}},
 			SizeX:        2,
 			SizeY:        2,
 			SizeZ:        2,
 		},
 		{
 			InstancePath: "Workspace.Big",
-			MeshRef:      heatmapAssetReference{AssetID: 2, AssetInput: "rbxassetid://2"},
-			TextureRefs:  []heatmapAssetReference{{AssetID: 20, AssetInput: "rbxassetid://20"}},
+			MeshRef:      heatmap.AssetReference{AssetID: 2, AssetInput: "rbxassetid://2"},
+			TextureRefs:  []heatmap.AssetReference{{AssetID: 20, AssetInput: "rbxassetid://20"}},
 			SizeX:        2,
 			SizeY:        2,
 			SizeZ:        2,
@@ -147,13 +150,13 @@ func TestBuildModelHeatmapPreviewDataTextureModeColorsByTextureBytes(t *testing.
 	}
 	resolvedMeshes := map[string]modelHeatmapResolvedMesh{
 		"rbxassetid://1": {
-			Reference:     heatmapAssetReference{AssetID: 1, AssetInput: "rbxassetid://1"},
+			Reference:     heatmap.AssetReference{AssetID: 1, AssetInput: "rbxassetid://1"},
 			Preview:       meshPreview,
 			Bounds:        computeModelHeatmapMeshBounds(meshPreview.RawPositions),
 			TriangleCount: 24,
 		},
 		"rbxassetid://2": {
-			Reference:     heatmapAssetReference{AssetID: 2, AssetInput: "rbxassetid://2"},
+			Reference:     heatmap.AssetReference{AssetID: 2, AssetInput: "rbxassetid://2"},
 			Preview:       meshPreview,
 			Bounds:        computeModelHeatmapMeshBounds(meshPreview.RawPositions),
 			TriangleCount: 24,
@@ -161,13 +164,13 @@ func TestBuildModelHeatmapPreviewDataTextureModeColorsByTextureBytes(t *testing.
 	}
 	resolvedTextures := map[string]modelHeatmapResolvedTexture{
 		"rbxassetid://10": {
-			Reference: heatmapAssetReference{AssetID: 10, AssetInput: "rbxassetid://10"},
+			Reference: heatmap.AssetReference{AssetID: 10, AssetInput: "rbxassetid://10"},
 			Width:     16,
 			Height:    16,
 			BytesSize: 512,
 		},
 		"rbxassetid://20": {
-			Reference: heatmapAssetReference{AssetID: 20, AssetInput: "rbxassetid://20"},
+			Reference: heatmap.AssetReference{AssetID: 20, AssetInput: "rbxassetid://20"},
 			Width:     512,
 			Height:    512,
 			BytesSize: 65536,
@@ -229,7 +232,7 @@ func TestBuildModelHeatmapInstancesMatchesMeshContentRefs(t *testing.T) {
 	sizeY := 3.0
 	sizeZ := 4.0
 	yawDegrees := 45.0
-	mapParts := []mapRenderPartRustyAssetToolResult{
+	mapParts := []extractor.MapRenderPartResult{
 		{
 			InstanceType: "MeshPart",
 			InstancePath: "Workspace.Building.Statue",
@@ -252,7 +255,7 @@ func TestBuildModelHeatmapInstancesMatchesMeshContentRefs(t *testing.T) {
 			SizeZ:        &sizeZ,
 		},
 	}
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           123,
 			RawContent:   "rbxassetid://123",
@@ -298,7 +301,7 @@ func TestBuildModelHeatmapPreviewDataBuildsColoredScene(t *testing.T) {
 
 	instances := []modelHeatmapMeshInstance{{
 		InstancePath: "Workspace.Mesh",
-		MeshRef: heatmapAssetReference{
+		MeshRef: heatmap.AssetReference{
 			AssetID:    123,
 			AssetInput: "rbxassetid://123",
 		},
@@ -312,7 +315,7 @@ func TestBuildModelHeatmapPreviewDataBuildsColoredScene(t *testing.T) {
 	}}
 	resolved := map[string]modelHeatmapResolvedMesh{
 		"rbxassetid://123": {
-			Reference:     heatmapAssetReference{AssetID: 123, AssetInput: "rbxassetid://123"},
+			Reference:     heatmap.AssetReference{AssetID: 123, AssetInput: "rbxassetid://123"},
 			Preview:       meshPreview,
 			Bounds:        computeModelHeatmapMeshBounds(meshPreview.RawPositions),
 			TriangleCount: 120,
@@ -462,14 +465,14 @@ func TestBuildModelHeatmapPreviewDataTriangleModeColorsEqualTriangleCounts(t *te
 	instances := []modelHeatmapMeshInstance{
 		{
 			InstancePath: "Workspace.Small",
-			MeshRef:      heatmapAssetReference{AssetID: 123, AssetInput: "rbxassetid://123"},
+			MeshRef:      heatmap.AssetReference{AssetID: 123, AssetInput: "rbxassetid://123"},
 			SizeX:        2,
 			SizeY:        2,
 			SizeZ:        2,
 		},
 		{
 			InstancePath: "Workspace.Large",
-			MeshRef:      heatmapAssetReference{AssetID: 456, AssetInput: "rbxassetid://456"},
+			MeshRef:      heatmap.AssetReference{AssetID: 456, AssetInput: "rbxassetid://456"},
 			SizeX:        20,
 			SizeY:        20,
 			SizeZ:        20,
@@ -477,13 +480,13 @@ func TestBuildModelHeatmapPreviewDataTriangleModeColorsEqualTriangleCounts(t *te
 	}
 	resolved := map[string]modelHeatmapResolvedMesh{
 		"rbxassetid://123": {
-			Reference:     heatmapAssetReference{AssetID: 123, AssetInput: "rbxassetid://123"},
+			Reference:     heatmap.AssetReference{AssetID: 123, AssetInput: "rbxassetid://123"},
 			Preview:       meshPreview,
 			Bounds:        computeModelHeatmapMeshBounds(meshPreview.RawPositions),
 			TriangleCount: 120,
 		},
 		"rbxassetid://456": {
-			Reference:     heatmapAssetReference{AssetID: 456, AssetInput: "rbxassetid://456"},
+			Reference:     heatmap.AssetReference{AssetID: 456, AssetInput: "rbxassetid://456"},
 			Preview:       meshPreview,
 			Bounds:        computeModelHeatmapMeshBounds(meshPreview.RawPositions),
 			TriangleCount: 120,

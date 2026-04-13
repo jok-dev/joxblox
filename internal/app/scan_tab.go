@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	"joxblox/internal/extractor"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
@@ -62,7 +64,7 @@ func newScanTab(
 		MissingSourceStatusText:  "Select an .rbxl or .rbxm file first.",
 		ScanningStatusText:       "Scanning...",
 		NoResultsStatusText:      "No results found.",
-		MaxResultsDefault:        rustyAssetToolDefaultLimit,
+		MaxResultsDefault:        extractor.DefaultLimit,
 		ScanContextKey:           scanContextRBXLSingle,
 		RecentFilesPreferenceKey: "scan.recent.rbxl.single",
 		SelectSource:             pickRBXLSource,
@@ -79,7 +81,7 @@ func newScanTab(
 		MissingSecondarySourceStatusText: "Select a target .rbxl or .rbxm file.",
 		ScanningStatusText:               "Diffing...",
 		NoResultsStatusText:              "No new results found.",
-		MaxResultsDefault:                rustyAssetToolDefaultLimit,
+		MaxResultsDefault:                extractor.DefaultLimit,
 		ScanContextKey:                   scanContextRBXLDiff,
 		RecentFilesPreferenceKey:         "scan.recent.rbxl.diff",
 		SelectSource:                     pickRBXLBaselineSource,

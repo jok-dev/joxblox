@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"joxblox/internal/extractor"
 )
 
 const (
@@ -100,7 +102,7 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 			default:
 			}
 
-			referenceKey := scanAssetReferenceKey(assetReference.AssetID, assetReference.AssetInput)
+			referenceKey := extractor.AssetReferenceKey(assetReference.AssetID, assetReference.AssetInput)
 			if seenReferenceKeys[referenceKey] {
 				continue
 			}
@@ -166,7 +168,7 @@ func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bo
 		if err != nil {
 			continue
 		}
-		referenceKey := scanAssetReferenceKey(loadRequest.TargetID, thumbMatch)
+		referenceKey := extractor.AssetReferenceKey(loadRequest.TargetID, thumbMatch)
 		if seenReferenceKeys[referenceKey] {
 			continue
 		}
@@ -184,7 +186,7 @@ func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bo
 		}
 
 		assetID, err := strconv.ParseInt(match[1], 10, 64)
-		referenceKey := scanAssetReferenceKey(assetID, "")
+		referenceKey := extractor.AssetReferenceKey(assetID, "")
 		if err != nil || seenReferenceKeys[referenceKey] {
 			continue
 		}
@@ -200,7 +202,7 @@ func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bo
 	rawMatches := rawLargeNumberPattern.FindAllString(line, -1)
 	for _, rawMatch := range rawMatches {
 		assetID, err := strconv.ParseInt(rawMatch, 10, 64)
-		referenceKey := scanAssetReferenceKey(assetID, "")
+		referenceKey := extractor.AssetReferenceKey(assetID, "")
 		if err != nil || seenReferenceKeys[referenceKey] {
 			continue
 		}
@@ -275,11 +277,11 @@ func scanFolderDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan 
 
 	baselineReferenceKeys := map[string]bool{}
 	for _, hit := range baselineHits {
-		baselineReferenceKeys[scanAssetReferenceKey(hit.AssetID, hit.AssetInput)] = true
+		baselineReferenceKeys[extractor.AssetReferenceKey(hit.AssetID, hit.AssetInput)] = true
 	}
 	diffHits := make([]scanHit, 0, len(targetHits))
 	for _, hit := range targetHits {
-		if baselineReferenceKeys[scanAssetReferenceKey(hit.AssetID, hit.AssetInput)] {
+		if baselineReferenceKeys[extractor.AssetReferenceKey(hit.AssetID, hit.AssetInput)] {
 			continue
 		}
 		diffHits = append(diffHits, hit)

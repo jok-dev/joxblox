@@ -82,30 +82,20 @@ func formatSceneSurfaceArea(area float64) string {
 	return strconv.FormatFloat(area, 'f', -1, 64) + " stud^2"
 }
 
-func buildSceneSurfaceAreaIndexFromMapRenderParts(parts []mapRenderPartRustyAssetToolResult) map[string]float64 {
-	areaByPath := map[string]float64{}
-	for _, part := range parts {
-		instancePath := strings.TrimSpace(part.InstancePath)
-		if instancePath == "" {
-			continue
-		}
-		area := sceneSurfaceAreaForDimensions(valueOrZero(part.SizeX), valueOrZero(part.SizeY), valueOrZero(part.SizeZ))
-		if area <= 0 {
-			continue
-		}
-		areaByPath[instancePath] = area
-	}
-	return areaByPath
+type surfaceAreaPart interface {
+	GetInstancePath() string
+	GetDimensions() (float64, float64, float64)
 }
 
-func buildSceneSurfaceAreaIndexFromHeatmapParts(parts []rbxlHeatmapMapPart) map[string]float64 {
+func buildSceneSurfaceAreaIndex[T surfaceAreaPart](parts []T) map[string]float64 {
 	areaByPath := map[string]float64{}
 	for _, part := range parts {
-		instancePath := strings.TrimSpace(part.InstancePath)
+		instancePath := strings.TrimSpace(part.GetInstancePath())
 		if instancePath == "" {
 			continue
 		}
-		area := sceneSurfaceAreaForDimensions(part.SizeX, part.SizeY, part.SizeZ)
+		sizeX, sizeY, sizeZ := part.GetDimensions()
+		area := sceneSurfaceAreaForDimensions(sizeX, sizeY, sizeZ)
 		if area <= 0 {
 			continue
 		}
@@ -194,11 +184,4 @@ func maxPositiveFloat64(left float64, right float64) float64 {
 		return left
 	}
 	return math.Max(left, right)
-}
-
-func valueOrZero(value *float64) float64 {
-	if value == nil {
-		return 0
-	}
-	return *value
 }

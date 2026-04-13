@@ -1,6 +1,10 @@
 package app
 
-import "strings"
+import (
+	"strings"
+
+	"joxblox/internal/heatmap"
+)
 
 type assetExplorerRow struct {
 	AssetID       int64
@@ -121,10 +125,10 @@ func (state *assetExplorerState) selectAsset(assetID int64) (*assetPreviewResult
 	return preview, err
 }
 
-func (state *assetExplorerState) selectAssetWithRequestSource(assetID int64) (*assetPreviewResult, error, heatmapAssetRequestSource) {
+func (state *assetExplorerState) selectAssetWithRequestSource(assetID int64) (*assetPreviewResult, error, heatmap.RequestSource) {
 	state.selectedID = assetID
 	if knownPreview, exists := state.knownByID[assetID]; exists {
-		return knownPreview, nil, heatmapAssetRequestSourceMemory
+		return knownPreview, nil, heatmap.SourceMemory
 	}
 
 	trace := &assetRequestTrace{}

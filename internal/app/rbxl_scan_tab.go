@@ -7,11 +7,10 @@ import (
 	"strings"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/widget"
 	nativeDialog "github.com/sqweek/dialog"
 )
 
@@ -20,81 +19,47 @@ const robloxDOMFileFilterLabel = "Roblox place/model files"
 func newRBXLScanTab(
 	window fyne.Window,
 ) (fyne.CanvasObject, scanTabFileActionsProvider, []scanTabFileActionsProvider, func(string)) {
-	singleFileScan, singleFileActions := newAssetScanTab(window, assetScanTabOptions{
-		NoSourceSelectedText:     "No .rbxl/.rbxm file selected.",
-		SelectButtonText:         "Select .rbxl/.rbxm File",
-		ReadyStatusText:          "Ready.",
-		MissingSourceStatusText:  "Select an .rbxl or .rbxm file first.",
-		ScanningStatusText:       "Scanning...",
-		NoResultsStatusText:      "No results found.",
-		MaxResultsDefault:        rustyAssetToolDefaultLimit,
-		ScanContextKey:           scanContextRBXLSingle,
-		RecentFilesPreferenceKey: "scan.recent.rbxl.single",
-		SelectSource:             pickRBXLSource,
-		ExtractHits:              scanRBXLFileForAssetIDs,
-		PathFilteredExtractHits:  scanRBXLFileForAssetIDsFiltered,
-		BuildWarning:             buildRBXLScanWarning,
+	return buildScanModeTab(scanModeTabConfig{
+		Window:        window,
+		SingleLabel:   "Single File",
+		DiffLabel:     "File Diff",
+		SingleContext: scanContextRBXLSingle,
+		DiffContext:   scanContextRBXLDiff,
+		SingleOptions: assetScanTabOptions{
+			NoSourceSelectedText:     "No .rbxl/.rbxm file selected.",
+			SelectButtonText:         "Select .rbxl/.rbxm File",
+			ReadyStatusText:          "Ready.",
+			MissingSourceStatusText:  "Select an .rbxl or .rbxm file first.",
+			ScanningStatusText:       "Scanning...",
+			NoResultsStatusText:      "No results found.",
+			MaxResultsDefault:        extractor.DefaultLimit,
+			ScanContextKey:           scanContextRBXLSingle,
+			RecentFilesPreferenceKey: "scan.recent.rbxl.single",
+			SelectSource:             pickRBXLSource,
+			ExtractHits:              scanRBXLFileForAssetIDs,
+			PathFilteredExtractHits:  scanRBXLFileForAssetIDsFiltered,
+			BuildWarning:             buildRBXLScanWarning,
+		},
+		DiffOptions: assetScanTabOptions{
+			NoSourceSelectedText:             "Baseline: no .rbxl/.rbxm file selected.",
+			SelectButtonText:                 "Select Baseline",
+			NoSecondarySourceText:            "Target: no .rbxl/.rbxm file selected.",
+			SelectSecondaryButtonText:        "Select Target",
+			ReadyStatusText:                  "Ready.",
+			MissingSourceStatusText:          "Select baseline and target .rbxl/.rbxm files first.",
+			MissingSecondarySourceStatusText: "Select a target .rbxl or .rbxm file.",
+			ScanningStatusText:               "Diffing...",
+			NoResultsStatusText:              "No new results found.",
+			MaxResultsDefault:                extractor.DefaultLimit,
+			ScanContextKey:                   scanContextRBXLDiff,
+			RecentFilesPreferenceKey:         "scan.recent.rbxl.diff",
+			SelectSource:                     pickRBXLBaselineSource,
+			SelectSecondarySource:            pickRBXLTargetSource,
+			ExtractHits:                      scanRBXLFileDiffForAssetIDs,
+			PathFilteredExtractHits:          scanRBXLFileForAssetIDsFiltered,
+			BuildWarning:                     buildRBXLScanDiffWarning,
+		},
 	})
-	fileDiffScan, fileDiffActions := newAssetScanTab(window, assetScanTabOptions{
-		NoSourceSelectedText:             "Baseline: no .rbxl/.rbxm file selected.",
-		SelectButtonText:                 "Select Baseline",
-		NoSecondarySourceText:            "Target: no .rbxl/.rbxm file selected.",
-		SelectSecondaryButtonText:        "Select Target",
-		ReadyStatusText:                  "Ready.",
-		MissingSourceStatusText:          "Select baseline and target .rbxl/.rbxm files first.",
-		MissingSecondarySourceStatusText: "Select a target .rbxl or .rbxm file.",
-		ScanningStatusText:               "Diffing...",
-		NoResultsStatusText:              "No new results found.",
-		MaxResultsDefault:                rustyAssetToolDefaultLimit,
-		ScanContextKey:                   scanContextRBXLDiff,
-		RecentFilesPreferenceKey:         "scan.recent.rbxl.diff",
-		SelectSource:                     pickRBXLBaselineSource,
-		SelectSecondarySource:            pickRBXLTargetSource,
-		ExtractHits:                      scanRBXLFileDiffForAssetIDs,
-		PathFilteredExtractHits:          scanRBXLFileForAssetIDsFiltered,
-		BuildWarning:                     buildRBXLScanDiffWarning,
-	})
-
-	modeLabel := widget.NewLabel("Mode:")
-	modeSwitch := widget.NewRadioGroup([]string{"Single File", "File Diff"}, nil)
-	modeSwitch.Horizontal = true
-	modeSwitch.SetSelected("Single File")
-	contentStack := container.NewStack(singleFileScan, fileDiffScan)
-	contentStack.Objects[1].Hide()
-	currentActions := singleFileActions
-	singleFileProvider := func() *scanTabFileActions { return singleFileActions }
-	fileDiffProvider := func() *scanTabFileActions { return fileDiffActions }
-	modeSwitch.OnChanged = func(selectedMode string) {
-		if strings.EqualFold(selectedMode, "File Diff") {
-			contentStack.Objects[0].Hide()
-			contentStack.Objects[1].Show()
-			currentActions = fileDiffActions
-			contentStack.Refresh()
-			return
-		}
-		contentStack.Objects[1].Hide()
-		contentStack.Objects[0].Show()
-		currentActions = singleFileActions
-		contentStack.Refresh()
-	}
-	selectContext := func(contextKey string) {
-		switch strings.TrimSpace(contextKey) {
-		case scanContextRBXLDiff:
-			modeSwitch.SetSelected("File Diff")
-		default:
-			modeSwitch.SetSelected("Single File")
-		}
-	}
-	content := container.NewBorder(
-		container.NewHBox(modeLabel, modeSwitch),
-		nil,
-		nil,
-		nil,
-		contentStack,
-	)
-	return content, func() *scanTabFileActions {
-		return currentActions
-	}, []scanTabFileActionsProvider{singleFileProvider, fileDiffProvider}, selectContext
 }
 
 func pickRBXLSource(window fyne.Window, onSelected func(string), onError func(error)) {
@@ -170,7 +135,10 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 		return nil, readErr
 	}
 
-	_, _, extractedReferences, _, rustScanErr := extractAssetIDsWithRustyAssetToolFromFileWithCounts(filePath, 0, limit, stopChannel)
+	extractResult, rustScanErr := extractor.ExtractAssetIDsWithCounts(filePath, 0, limit, stopChannel)
+	if errors.Is(rustScanErr, extractor.ErrCancelled) {
+		rustScanErr = errScanStopped
+	}
 	if errors.Is(rustScanErr, errScanStopped) {
 		debug.Logf("RBXL scan stopped during Rust extraction")
 		return nil, errScanStopped
@@ -184,7 +152,7 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 		return nil, errScanStopped
 	}
 
-	hits := buildScanHitsFromRustReferences(extractedReferences, filePath, sceneSurfaceAreasByPath, limit)
+	hits := buildScanHitsFromRustReferences(extractResult.References, filePath, sceneSurfaceAreasByPath, limit)
 	debug.Logf("RBXL scan completed with %d unique asset IDs", len(hits))
 	return hits, nil
 }
@@ -194,7 +162,10 @@ func scanRBXLFileForAssetIDsFiltered(filePath string, pathPrefixes []string, lim
 	if _, readErr := os.Stat(filePath); readErr != nil {
 		return nil, readErr
 	}
-	refs, err := extractFilteredRefsWithRustyAssetTool(filePath, pathPrefixes, stopChannel)
+	refs, err := extractor.ExtractFilteredRefs(filePath, pathPrefixes, stopChannel)
+	if errors.Is(err, extractor.ErrCancelled) {
+		err = errScanStopped
+	}
 	if errors.Is(err, errScanStopped) {
 		return nil, errScanStopped
 	}
@@ -235,22 +206,28 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	)
 
 	baselineReferenceKeys := map[string]bool{}
-	_, _, baselineReferences, _, baselineErr := extractAssetIDsWithRustyAssetToolFromFileWithCounts(baselineFilePath, 0, 0, stopChannel)
+	baselineExtractResult, baselineErr := extractor.ExtractAssetIDsWithCounts(baselineFilePath, 0, 0, stopChannel)
+	if errors.Is(baselineErr, extractor.ErrCancelled) {
+		baselineErr = errScanStopped
+	}
 	if errors.Is(baselineErr, errScanStopped) {
 		return nil, errScanStopped
 	}
 	if baselineErr != nil {
 		return nil, baselineErr
 	}
-	for _, reference := range baselineReferences {
+	for _, reference := range baselineExtractResult.References {
 		if reference.ID <= 0 {
 			continue
 		}
-		baselineReferenceKeys[scanAssetReferenceKey(reference.ID, reference.RawContent)] = true
+		baselineReferenceKeys[extractor.AssetReferenceKey(reference.ID, reference.RawContent)] = true
 	}
 
 	results := []scanHit{}
-	_, _, targetReferences, _, targetErr := extractAssetIDsWithRustyAssetToolFromFileWithCounts(targetFilePath, 0, 0, stopChannel)
+	targetExtractResult, targetErr := extractor.ExtractAssetIDsWithCounts(targetFilePath, 0, 0, stopChannel)
+	if errors.Is(targetErr, extractor.ErrCancelled) {
+		targetErr = errScanStopped
+	}
 	if errors.Is(targetErr, errScanStopped) {
 		return results, errScanStopped
 	}
@@ -261,12 +238,12 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	if errors.Is(surfaceErr, errScanStopped) {
 		return nil, errScanStopped
 	}
-	filteredReferences := make([]rustyAssetToolResult, 0, len(targetReferences))
-	for _, reference := range targetReferences {
+	filteredReferences := make([]extractor.Result, 0, len(targetExtractResult.References))
+	for _, reference := range targetExtractResult.References {
 		if reference.ID <= 0 {
 			continue
 		}
-		if baselineReferenceKeys[scanAssetReferenceKey(reference.ID, reference.RawContent)] {
+		if baselineReferenceKeys[extractor.AssetReferenceKey(reference.ID, reference.RawContent)] {
 			continue
 		}
 		filteredReferences = append(filteredReferences, reference)
@@ -304,7 +281,7 @@ func buildRBXLScanDiffWarning(sourcePath string, pathPrefixes []string, stopChan
 	return combineMaterialVariantWarnings(baselineWarning, targetWarning), nil
 }
 
-func buildScanHitsFromRustReferences(references []rustyAssetToolResult, filePath string, sceneSurfaceAreasByPath map[string]float64, limit int) []scanHit {
+func buildScanHitsFromRustReferences(references []extractor.Result, filePath string, sceneSurfaceAreasByPath map[string]float64, limit int) []scanHit {
 	type hitBuilder struct {
 		hit     scanHit
 		pathSet map[string]bool
@@ -318,7 +295,7 @@ func buildScanHitsFromRustReferences(references []rustyAssetToolResult, filePath
 		}
 
 		assetInput := strings.TrimSpace(reference.RawContent)
-		referenceKey := scanAssetReferenceKey(reference.ID, assetInput)
+		referenceKey := extractor.AssetReferenceKey(reference.ID, assetInput)
 		builder, exists := builders[referenceKey]
 		if !exists {
 			builder = &hitBuilder{
@@ -357,14 +334,14 @@ func buildScanHitsFromRustReferences(references []rustyAssetToolResult, filePath
 	return hits
 }
 
-func rustReferenceUseCount(reference rustyAssetToolResult) int {
+func rustReferenceUseCount(reference extractor.Result) int {
 	if reference.Used > 0 {
 		return reference.Used
 	}
 	return 1
 }
 
-func addRustReferencePaths(hit *scanHit, pathSet map[string]bool, reference rustyAssetToolResult, sceneSurfaceAreasByPath map[string]float64) {
+func addRustReferencePaths(hit *scanHit, pathSet map[string]bool, reference extractor.Result, sceneSurfaceAreasByPath map[string]float64) {
 	if hit == nil {
 		return
 	}
@@ -391,7 +368,10 @@ func addRustReferencePaths(hit *scanHit, pathSet map[string]bool, reference rust
 }
 
 func loadRBXLSceneSurfaceAreas(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) (map[string]float64, error) {
-	mapParts, err := extractMapRenderPartsWithRustyAssetTool(filePath, pathPrefixes, stopChannel)
+	mapParts, err := extractor.ExtractMapRenderParts(filePath, pathPrefixes, stopChannel)
+	if errors.Is(err, extractor.ErrCancelled) {
+		err = errScanStopped
+	}
 	if errors.Is(err, errScanStopped) {
 		return nil, errScanStopped
 	}
@@ -399,5 +379,5 @@ func loadRBXLSceneSurfaceAreas(filePath string, pathPrefixes []string, stopChann
 		debug.Logf("RBXL map render extraction failed for large textures: %s", err.Error())
 		return map[string]float64{}, nil
 	}
-	return buildSceneSurfaceAreaIndexFromMapRenderParts(mapParts), nil
+	return buildSceneSurfaceAreaIndex(mapParts), nil
 }

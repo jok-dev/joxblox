@@ -1,9 +1,13 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"joxblox/internal/extractor"
+)
 
 func TestBuildScanHitsFromRustReferencesUsesExtractorUseCount(t *testing.T) {
-	references := []rustyAssetToolResult{
+	references := []extractor.Result{
 		{
 			ID:           101,
 			RawContent:   "rbxassetid://101",
@@ -25,7 +29,7 @@ func TestBuildScanHitsFromRustReferencesUsesExtractorUseCount(t *testing.T) {
 }
 
 func TestBuildScanHitsFromRustReferencesDefaultsUseCountAndDeduplicatesPaths(t *testing.T) {
-	references := []rustyAssetToolResult{
+	references := []extractor.Result{
 		{
 			ID:               202,
 			RawContent:       "rbxthumb://type=Asset&id=202&w=420&h=420",
@@ -51,7 +55,7 @@ func TestBuildScanHitsFromRustReferencesDefaultsUseCountAndDeduplicatesPaths(t *
 }
 
 func TestBuildScanHitsFromRustReferencesUsesLargestSceneSurfaceArea(t *testing.T) {
-	references := []rustyAssetToolResult{
+	references := []extractor.Result{
 		{
 			ID:               303,
 			RawContent:       "rbxassetid://303",

@@ -8,7 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
+	"joxblox/internal/heatmap"
 	"joxblox/internal/roblox"
 
 	"fyne.io/fyne/v2"
@@ -640,7 +642,7 @@ func (explorer *scanResultsExplorer) applySortAndFilters() {
 		for rowIndex, result := range explorer.displayResults {
 			if result.AssetID == previousSelectedAssetID &&
 				result.FilePath == previousSelectedFilePath &&
-				scanAssetReferenceKey(result.AssetID, result.AssetInput) == scanAssetReferenceKey(previousSelectedAssetID, previousSelectedAssetInput) {
+				extractor.AssetReferenceKey(result.AssetID, result.AssetInput) == extractor.AssetReferenceKey(previousSelectedAssetID, previousSelectedAssetInput) {
 				nextSelectedRowIndex = rowIndex
 				break
 			}
@@ -846,7 +848,7 @@ func (explorer *scanResultsExplorer) renderSelectedAsset(selectedAssetID int64, 
 				explorer.statusLabel.SetText(fmt.Sprintf(
 					"Showing asset %d. %s",
 					assetID,
-					formatSingleRequestSourceBreakdown(requestSource),
+					heatmap.FormatSingleRequestSourceBreakdown(requestSource),
 				))
 			})
 		}()
@@ -885,7 +887,7 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 		fullPreview, loadErr := loadSingleAssetPreviewWithTrace(loadRequest, trace)
 		fyne.Do(func() {
 			if explorer.selectedAssetID != assetToLoad ||
-				scanAssetReferenceKey(explorer.selectedAssetID, explorer.selectedResultAssetInput) != scanAssetReferenceKey(assetToLoad, assetInputToLoad) {
+				extractor.AssetReferenceKey(explorer.selectedAssetID, explorer.selectedResultAssetInput) != extractor.AssetReferenceKey(assetToLoad, assetInputToLoad) {
 				return
 			}
 			if requestErr != nil || loadErr != nil || fullPreview == nil {
@@ -898,7 +900,7 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 			explorer.statusLabel.SetText(fmt.Sprintf(
 				"Showing asset %d. %s",
 				assetToLoad,
-				formatSingleRequestSourceBreakdown(trace.classifyRequestSource()),
+				heatmap.FormatSingleRequestSourceBreakdown(trace.classifyRequestSource()),
 			))
 		})
 	}()

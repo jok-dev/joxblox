@@ -26,8 +26,10 @@ import (
 	xdraw "golang.org/x/image/draw"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/opencloud"
 )
 
 const optimizeMaxRetries = 2
@@ -213,8 +215,8 @@ func verifyImageAssets(
 
 func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 	selectedFilePath := ""
-	var scannedResults []rustyAssetToolResult
-	var filteredResults []rustyAssetToolResult
+	var scannedResults []extractor.Result
+	var filteredResults []extractor.Result
 	var verifiedImageURLs map[int64]string
 	ignoredThumbnailAssets := 0
 	inProgress := false
@@ -331,7 +333,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 		}
 		blacklisted := parseBlacklistedIDs()
 		seen := map[int64]bool{}
-		filtered := make([]rustyAssetToolResult, 0, len(scannedResults))
+		filtered := make([]extractor.Result, 0, len(scannedResults))
 		for _, result := range scannedResults {
 			if result.ID <= 0 {
 				continue
@@ -505,21 +507,19 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 				var scanErr error
 				if useWhitelist {
 					prefixes := whitelistPatternsToPathPrefixes(whitelistText)
-					results, scanErr = extractFilteredRefsWithRustyAssetTool(selectedFilePath, prefixes, neverStop)
-				} else {
-					var rawJSON string
-					_, _, _, rawJSON, scanErr = extractAssetIDsWithRustyAssetToolFromFileWithCounts(
-						selectedFilePath, 0, 0, neverStop,
-					)
-					if scanErr == nil {
-						var allReferences []rustyAssetToolResult
-						if jsonErr := json.Unmarshal([]byte(rawJSON), &allReferences); jsonErr != nil {
-							scanErr = jsonErr
-						} else {
-							results = allReferences
-						}
+					results, scanErr = extractor.ExtractFilteredRefs(selectedFilePath, prefixes, neverStop)
+			} else {
+				var extractResult extractor.AssetIDsResult
+				extractResult, scanErr = extractor.ExtractAssetIDsWithCounts(selectedFilePath, 0, 0, neverStop)
+				if scanErr == nil {
+					var allReferences []extractor.Result
+					if jsonErr := json.Unmarshal([]byte(extractResult.CommandOutput), &allReferences); jsonErr != nil {
+						scanErr = jsonErr
+					} else {
+						results = allReferences
 					}
 				}
+			}
 				if scanErr != nil {
 					fyne.Do(func() {
 						scanProgressBar.Stop()
@@ -687,7 +687,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 			dialog.ShowError(fmt.Errorf("creator ID must be a positive integer"), window)
 			return
 		}
-		creator := robloxOpenCloudCreator{
+		creator := opencloud.Creator{
 			IsGroup: creatorTypeSelect.Selected == uploadCreatorModeGroup,
 			ID:      creatorID,
 		}
@@ -695,7 +695,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 		scaler := sampleModeInterpolator(interpolationSelect.Selected)
 		minSizeBytes := getMinSizeBytes()
 		workerCount := getWorkerCount()
-		assetsToProcess := make([]rustyAssetToolResult, len(filteredResults))
+		assetsToProcess := make([]extractor.Result, len(filteredResults))
 		copy(assetsToProcess, filteredResults)
 
 		assetPaths := make(map[int64][]string)
@@ -833,11 +833,11 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 func runOptimization(
 	window fyne.Window,
 	localStopSignal *stopSignal,
-	assetsToProcess []rustyAssetToolResult,
+	assetsToProcess []extractor.Result,
 	assetPaths map[int64][]string,
 	cachedURLs map[int64]string,
 	apiKey string,
-	creator robloxOpenCloudCreator,
+	creator opencloud.Creator,
 	scale float64,
 	scaler xdraw.Interpolator,
 	minSizeBytes int,
@@ -907,7 +907,7 @@ func runOptimization(
 		fatalOnce.Do(func() { fatalMsg = msg })
 	}
 
-	jobs := make(chan rustyAssetToolResult, len(assetsToProcess))
+	jobs := make(chan extractor.Result, len(assetsToProcess))
 	for _, asset := range assetsToProcess {
 		jobs <- asset
 	}
@@ -1015,7 +1015,7 @@ func runOptimization(
 	outputIDsPath := baseName + "-optimized-ids.txt"
 	outputResultsPath := baseName + "-optimized-results.txt"
 
-	replaceCount, replaceErr := replaceAssetIDsInRBXLWithRustyAssetTool(
+	replaceCount, replaceErr := extractor.ReplaceAssetIDs(
 		selectedFilePath, outputRBXLPath, replacementsCopy, localStopSignal.channel,
 	)
 	if replaceErr != nil {
@@ -1081,10 +1081,10 @@ func runOptimization(
 }
 
 func processOptimizeAsset(
-	asset rustyAssetToolResult,
+	asset extractor.Result,
 	cachedURL string,
 	apiKey string,
-	creator robloxOpenCloudCreator,
+	creator opencloud.Creator,
 	scale float64,
 	scaler xdraw.Interpolator,
 	minSizeBytes int,
@@ -1186,7 +1186,7 @@ downloaded:
 	rateLimitBackoff := 5 * time.Second
 	attempts := 0
 	for {
-		newAssetID, uploadErr = uploadDecalToRobloxOpenCloud(
+		newAssetID, uploadErr = opencloud.UploadDecal(
 			apiKey, creator,
 			fmt.Sprintf("optimized_%d", asset.ID),
 			"",
@@ -1197,15 +1197,15 @@ downloaded:
 		if uploadErr == nil {
 			break
 		}
-		if errors.Is(uploadErr, errScanStopped) {
+		if errors.Is(uploadErr, opencloud.ErrUploadCancelled) {
 			return fail("stopped")
 		}
-		if errors.Is(uploadErr, errUploadForbidden) {
+		if errors.Is(uploadErr, opencloud.ErrUploadForbidden) {
 			onFatalError(uploadErr.Error())
 			stop.Stop()
 			return fail(uploadErr.Error())
 		}
-		if errors.Is(uploadErr, errRateLimited) {
+		if errors.Is(uploadErr, opencloud.ErrRateLimited) {
 			debug.Logf("Optimize: asset %d rate limited, backing off %s", asset.ID, rateLimitBackoff)
 			onRateLimitStart()
 			select {
@@ -1246,7 +1246,7 @@ downloaded:
 	}
 }
 
-func collectOptimizableAssetIDs(results []rustyAssetToolResult, useWhitelist bool, whitelistText string) ([]int64, int) {
+func collectOptimizableAssetIDs(results []extractor.Result, useWhitelist bool, whitelistText string) ([]int64, int) {
 	type optimizeCandidateState struct {
 		hasThumbReference   bool
 		hasRegularReference bool

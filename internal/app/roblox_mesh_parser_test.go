@@ -3,14 +3,16 @@ package app
 import (
 	"encoding/binary"
 	"testing"
+
+	"joxblox/internal/roblox/mesh"
 )
 
 func TestLocateDracoPayloadStartVersion7CoreMesh(t *testing.T) {
-	data := append([]byte("version 7.00\n"+meshCoreMeshPrefix), 0, 0, 0, 0)
+	data := append([]byte("version 7.00\n"+mesh.CoreMeshPrefix), 0, 0, 0, 0)
 	data = append(data, 0x3e, 0x27, 0x00, 0x00, 0x3a, 0x27, 0x00, 0x00)
 	data = append(data, []byte("DRACO\x02\x02\x01\x00\x00\x00")...)
 
-	start, err := locateDracoPayloadStart(data, len("version 7.00\n"))
+	start, err := mesh.LocateDracoPayloadStart(data, len("version 7.00\n"))
 	if err != nil {
 		t.Fatalf("locateDracoPayloadStart returned error: %v", err)
 	}
@@ -20,10 +22,10 @@ func TestLocateDracoPayloadStartVersion7CoreMesh(t *testing.T) {
 }
 
 func TestLocateDracoPayloadStartRejectsMissingMarker(t *testing.T) {
-	data := append([]byte("version 7.00\n"+meshCoreMeshPrefix), 0, 0, 0, 0)
+	data := append([]byte("version 7.00\n"+mesh.CoreMeshPrefix), 0, 0, 0, 0)
 	data = append(data, []byte("NOTDRACO")...)
 
-	if _, err := locateDracoPayloadStart(data, len("version 7.00\n")); err == nil {
+	if _, err := mesh.LocateDracoPayloadStart(data, len("version 7.00\n")); err == nil {
 		t.Fatal("expected locateDracoPayloadStart to fail when the Draco marker is missing")
 	}
 }
@@ -36,7 +38,7 @@ func TestParseMeshHeaderVersion4LegacyLayout(t *testing.T) {
 	binary.LittleEndian.PutUint32(countBytes[4:], 123)
 	data = append(data, countBytes...)
 
-	info, err := parseMeshHeader(data)
+	info, err := mesh.ParseHeader(data)
 	if err != nil {
 		t.Fatalf("parseMeshHeader returned error: %v", err)
 	}
@@ -93,7 +95,7 @@ func buildV4MeshData(numVerts, totalFaces uint32, numBones uint16, numHighQualit
 func TestParseMeshV4WithMultipleLODs(t *testing.T) {
 	data := buildV4MeshData(4, 10, 0, 1, []uint32{0, 6, 10})
 
-	info, err := parseMeshHeader(data)
+	info, err := mesh.ParseHeader(data)
 	if err != nil {
 		t.Fatalf("parseMeshHeader returned error: %v", err)
 	}
@@ -108,7 +110,7 @@ func TestParseMeshV4WithMultipleLODs(t *testing.T) {
 func TestParseMeshV4SingleLOD(t *testing.T) {
 	data := buildV4MeshData(4, 8, 0, 1, []uint32{0, 8})
 
-	info, err := parseMeshHeader(data)
+	info, err := mesh.ParseHeader(data)
 	if err != nil {
 		t.Fatalf("parseMeshHeader returned error: %v", err)
 	}
@@ -120,7 +122,7 @@ func TestParseMeshV4SingleLOD(t *testing.T) {
 func TestParseMeshV4WithSkinnedLODs(t *testing.T) {
 	data := buildV4MeshData(4, 10, 2, 1, []uint32{0, 7, 10})
 
-	info, err := parseMeshHeader(data)
+	info, err := mesh.ParseHeader(data)
 	if err != nil {
 		t.Fatalf("parseMeshHeader returned error: %v", err)
 	}
@@ -168,7 +170,7 @@ func buildV3MeshData(numVerts, totalFaces uint32, lodOffsetValues []uint32) []by
 func TestParseMeshV3WithMultipleLODs(t *testing.T) {
 	data := buildV3MeshData(4, 10, []uint32{0, 6, 10})
 
-	info, err := parseMeshHeader(data)
+	info, err := mesh.ParseHeader(data)
 	if err != nil {
 		t.Fatalf("parseMeshHeader returned error: %v", err)
 	}
@@ -180,7 +182,7 @@ func TestParseMeshV3WithMultipleLODs(t *testing.T) {
 func TestParseMeshV3SingleLOD(t *testing.T) {
 	data := buildV3MeshData(4, 8, nil)
 
-	info, err := parseMeshHeader(data)
+	info, err := mesh.ParseHeader(data)
 	if err != nil {
 		t.Fatalf("parseMeshHeader returned error: %v", err)
 	}
@@ -194,14 +196,14 @@ func TestReadHighQualityFaceCountFallsBackOnInvalidTable(t *testing.T) {
 	binary.LittleEndian.PutUint32(data[0:], 5)
 	binary.LittleEndian.PutUint32(data[4:], 3)
 
-	result := readHighQualityFaceCount(data, 0, 1, 10)
+	result := mesh.ReadHighQualityFaceCount(data, 0, 1, 10)
 	if result != 10 {
 		t.Fatalf("expected fallback to totalFaces 10 when lod0Start != 0, got %d", result)
 	}
 }
 
 func TestReadHighQualityFaceCountFallsBackOnTruncatedData(t *testing.T) {
-	result := readHighQualityFaceCount([]byte{0, 0, 0, 0}, 0, 1, 10)
+	result := mesh.ReadHighQualityFaceCount([]byte{0, 0, 0, 0}, 0, 1, 10)
 	if result != 10 {
 		t.Fatalf("expected fallback to totalFaces 10 when data is too short, got %d", result)
 	}

@@ -8,7 +8,9 @@ import (
 	"strings"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/mesh"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -30,6 +32,8 @@ var appIconSVG []byte
 
 func Run() {
 	debug.Logf = logDebugf
+	extractor.BinaryProvider = bundledRustyAssetToolBinary
+	mesh.CoreMeshFallback = extractor.ExtractMeshStatsFromBytes
 	initializeDebugLogFile()
 	guiApp := app.NewWithID("dev.jok.joxblox")
 	appIcon := fyne.NewStaticResource("app_icon.svg", appIconSVG)

@@ -1,13 +1,17 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"joxblox/internal/heatmap"
+)
 
 func TestBuildHeatmapCellsTracksUniqueTextureAndMeshCounts(t *testing.T) {
 	scene := &rbxlHeatmapScene{
 		Points: []rbxlHeatmapPoint{
 			{
 				AssetID: 101,
-				Stats: rbxlHeatmapAssetStats{
+				Stats: heatmap.AssetStats{
 					TextureBytes: 1200,
 					TotalBytes:   1200,
 					PixelCount:   4096,
@@ -17,7 +21,7 @@ func TestBuildHeatmapCellsTracksUniqueTextureAndMeshCounts(t *testing.T) {
 			},
 			{
 				AssetID: 101,
-				Stats: rbxlHeatmapAssetStats{
+				Stats: heatmap.AssetStats{
 					TextureBytes: 1200,
 					TotalBytes:   1200,
 					PixelCount:   4096,
@@ -27,7 +31,7 @@ func TestBuildHeatmapCellsTracksUniqueTextureAndMeshCounts(t *testing.T) {
 			},
 			{
 				AssetID: 202,
-				Stats: rbxlHeatmapAssetStats{
+				Stats: heatmap.AssetStats{
 					MeshBytes:     2400,
 					TotalBytes:    2400,
 					TriangleCount: 300,
@@ -69,7 +73,7 @@ func TestBuildHeatmapCellsTracksPartAndMeshPartCounts(t *testing.T) {
 				AssetID:      101,
 				InstanceType: "MeshPart",
 				InstancePath: "Workspace.MeshPart1",
-				Stats:        rbxlHeatmapAssetStats{TotalBytes: 1000},
+				Stats:        heatmap.AssetStats{TotalBytes: 1000},
 				X:            1,
 				Z:            1,
 			},
@@ -77,7 +81,7 @@ func TestBuildHeatmapCellsTracksPartAndMeshPartCounts(t *testing.T) {
 				AssetID:      102,
 				InstanceType: "MeshPart",
 				InstancePath: "Workspace.MeshPart1",
-				Stats:        rbxlHeatmapAssetStats{TotalBytes: 2000},
+				Stats:        heatmap.AssetStats{TotalBytes: 2000},
 				X:            1.5,
 				Z:            1.5,
 			},
@@ -85,7 +89,7 @@ func TestBuildHeatmapCellsTracksPartAndMeshPartCounts(t *testing.T) {
 				AssetID:      103,
 				InstanceType: "MeshPart",
 				InstancePath: "Workspace.MeshPart2",
-				Stats:        rbxlHeatmapAssetStats{TotalBytes: 500},
+				Stats:        heatmap.AssetStats{TotalBytes: 500},
 				X:            2,
 				Z:            2,
 			},
@@ -93,7 +97,7 @@ func TestBuildHeatmapCellsTracksPartAndMeshPartCounts(t *testing.T) {
 				AssetID:      201,
 				InstanceType: "Part",
 				InstancePath: "Workspace.Part1",
-				Stats:        rbxlHeatmapAssetStats{TotalBytes: 300},
+				Stats:        heatmap.AssetStats{TotalBytes: 300},
 				X:            3,
 				Z:            3,
 			},
@@ -126,7 +130,7 @@ func TestBuildHeatmapCellsCountsTrianglesPerMeshInstance(t *testing.T) {
 				InstanceType: "MeshPart",
 				InstancePath: "Workspace.MeshPart1",
 				PropertyName: "MeshContent",
-				Stats: rbxlHeatmapAssetStats{
+				Stats: heatmap.AssetStats{
 					MeshBytes:     2400,
 					TotalBytes:    2400,
 					TriangleCount: 300,
@@ -139,7 +143,7 @@ func TestBuildHeatmapCellsCountsTrianglesPerMeshInstance(t *testing.T) {
 				InstanceType: "MeshPart",
 				InstancePath: "Workspace.MeshPart2",
 				PropertyName: "MeshContent",
-				Stats: rbxlHeatmapAssetStats{
+				Stats: heatmap.AssetStats{
 					MeshBytes:     2400,
 					TotalBytes:    2400,
 					TriangleCount: 300,
@@ -197,7 +201,7 @@ func TestBuildHeatmapCellsTracksUniqueTextureAndMeshDiffCounts(t *testing.T) {
 		Points: []rbxlHeatmapPoint{
 			{
 				AssetID: 101,
-				Stats: rbxlHeatmapAssetStats{
+				Stats: heatmap.AssetStats{
 					TextureBytes: 1000,
 					TotalBytes:   1000,
 					PixelCount:   1024,
@@ -209,7 +213,7 @@ func TestBuildHeatmapCellsTracksUniqueTextureAndMeshDiffCounts(t *testing.T) {
 		ComparePoints: []rbxlHeatmapPoint{
 			{
 				AssetID: 202,
-				Stats: rbxlHeatmapAssetStats{
+				Stats: heatmap.AssetStats{
 					MeshBytes:     2000,
 					TotalBytes:    2000,
 					TriangleCount: 250,

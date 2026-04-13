@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
+	"joxblox/internal/heatmap"
 	"joxblox/internal/roblox"
 
 	"fyne.io/fyne/v2"
@@ -175,19 +177,19 @@ func (trace *assetRequestTrace) markNetwork() {
 	trace.mutex.Unlock()
 }
 
-func (trace *assetRequestTrace) classifyRequestSource() heatmapAssetRequestSource {
+func (trace *assetRequestTrace) classifyRequestSource() heatmap.RequestSource {
 	if trace == nil {
-		return heatmapAssetRequestSourceMemory
+		return heatmap.SourceMemory
 	}
 	trace.mutex.Lock()
 	defer trace.mutex.Unlock()
 	if trace.usedNetwork {
-		return heatmapAssetRequestSourceNetwork
+		return heatmap.SourceNetwork
 	}
 	if trace.usedDisk {
-		return heatmapAssetRequestSourceDisk
+		return heatmap.SourceDisk
 	}
-	return heatmapAssetRequestSourceMemory
+	return heatmap.SourceMemory
 }
 
 type economyAssetDetailsResponse struct {
@@ -203,7 +205,7 @@ type assetFileInfo struct {
 	Info                     *imageInfo
 	IsImage                  bool
 	ReferencedAssetIDs       []int64
-	RustyAssetToolReferences []rustyAssetToolResult
+	RustyAssetToolReferences []extractor.Result
 	RustyAssetToolJSON       string
 	FileBytes                []byte
 	FileName                 string
@@ -420,14 +422,6 @@ func (request singleAssetLoadRequest) logDescription() string {
 		request.TargetID,
 		request.ThumbnailRequest.Size,
 	)
-}
-
-func scanAssetReferenceKey(assetID int64, assetInput string) string {
-	trimmedInput := strings.TrimSpace(assetInput)
-	if trimmedInput != "" {
-		return strings.ToLower(trimmedInput)
-	}
-	return strconv.FormatInt(assetID, 10)
 }
 
 func scanAssetReferenceDisplayInput(assetID int64, assetInput string) string {
@@ -1110,7 +1104,7 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 			}
 		}
 		referencedAssetIDs := []int64{}
-		rustyAssetToolReferences := []rustyAssetToolResult{}
+		rustyAssetToolReferences := []extractor.Result{}
 		rustyAssetToolJSON := ""
 		var extractErr error
 		if !roblox.ShouldSkipRustExtractionForAssetType(assetTypeID) {
@@ -1142,7 +1136,7 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 		info.RecompressedJPEGByteSize = recompressedJPEGByteSize
 	}
 	referencedAssetIDs := []int64{}
-	rustyAssetToolReferences := []rustyAssetToolResult{}
+	rustyAssetToolReferences := []extractor.Result{}
 	rustyAssetToolJSON := ""
 	var extractErr error
 	if !roblox.ShouldSkipRustExtractionForAssetType(assetTypeID) {
@@ -1260,14 +1254,14 @@ func computeBestCompressedImageSizes(imageBytes []byte) (int, int, error) {
 	return recompressedBuffer.Len(), recompressedJPEGBuffer.Len(), nil
 }
 
-func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []rustyAssetToolResult) (int, []childAssetInfo) {
+func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []extractor.Result) (int, []childAssetInfo) {
 	return computeChildAssetsAndTotalWithTrace(selfBytesSize, referencedAssetIDs, rustyAssetToolReferences, nil)
 }
 
-func computeChildAssetsAndTotalWithTrace(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []rustyAssetToolResult, trace *assetRequestTrace) (int, []childAssetInfo) {
+func computeChildAssetsAndTotalWithTrace(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []extractor.Result, trace *assetRequestTrace) (int, []childAssetInfo) {
 	totalBytesSize := selfBytesSize
 	childAssets := make([]childAssetInfo, 0, len(referencedAssetIDs))
-	referenceByAssetID := map[int64]rustyAssetToolResult{}
+	referenceByAssetID := map[int64]extractor.Result{}
 	for _, reference := range rustyAssetToolReferences {
 		if reference.ID <= 0 {
 			continue
@@ -1354,12 +1348,12 @@ func getAssetSelfInfoWithTrace(assetID int64, trace *assetRequestTrace) (assetSe
 	return selfInfo, nil
 }
 
-func extractReferencedAssetIDsFromBytes(fileBytes []byte, assetTypeID int) ([]int64, []rustyAssetToolResult, string, error) {
-	rustAssetIDs, _, rustyAssetToolReferences, rustyAssetToolJSON, rustErr := extractAssetIDsWithRustyAssetToolFromFileWithCountsFromBytes(fileBytes, assetTypeID, rustyAssetToolDefaultLimit)
+func extractReferencedAssetIDsFromBytes(fileBytes []byte, assetTypeID int) ([]int64, []extractor.Result, string, error) {
+	result, rustErr := extractor.ExtractAssetIDsFromBytesWithCounts(fileBytes, assetTypeID, extractor.DefaultLimit)
 	if rustErr != nil {
 		debug.Logf("Referenced asset extraction Rusty Asset Tool path errored: %s", rustErr.Error())
-		return []int64{}, []rustyAssetToolResult{}, rustyAssetToolJSON, rustErr
+		return []int64{}, []extractor.Result{}, result.CommandOutput, rustErr
 	}
-	debug.Logf("Referenced asset extraction Rusty Asset Tool path returned %d IDs", len(rustAssetIDs))
-	return rustAssetIDs, rustyAssetToolReferences, rustyAssetToolJSON, nil
+	debug.Logf("Referenced asset extraction Rusty Asset Tool path returned %d IDs", len(result.AssetIDs))
+	return result.AssetIDs, result.References, result.CommandOutput, nil
 }

@@ -20,7 +20,9 @@ import (
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
+	"joxblox/internal/heatmap"
 )
 
 type reportGenerationSummary struct {
@@ -41,7 +43,7 @@ type reportGenerationSummary struct {
 }
 
 type reportGenerationResolvedAsset struct {
-	Stats      rbxlHeatmapAssetStats
+	Stats      heatmap.AssetStats
 	FileSHA256 string
 }
 
@@ -197,7 +199,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 				return loadToken.Load() != expectedToken
 			}
 
-			positionedRefs, extractErr := extractPositionedRefsWithRustyAssetTool(sourcePath, prefixes, nil)
+			positionedRefs, extractErr := extractor.ExtractPositionedRefs(sourcePath, prefixes, nil)
 			if extractErr != nil {
 				fyne.Do(func() {
 					if isCanceled() {
@@ -212,7 +214,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 				return
 			}
 
-			mapPartsRaw, mapPartsErr := extractMapRenderPartsWithRustyAssetTool(sourcePath, prefixes, nil)
+			mapPartsRaw, mapPartsErr := extractor.ExtractMapRenderParts(sourcePath, prefixes, nil)
 			if mapPartsErr != nil {
 				debug.Logf("Report generation map extraction failed for %s: %s", sourcePath, mapPartsErr.Error())
 			}
@@ -249,18 +251,18 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 				return
 			}
 
-			uniqueRefsByKey := map[string]heatmapAssetReference{}
+			uniqueRefsByKey := map[string]heatmap.AssetReference{}
 			for _, ref := range positionedRefs {
 				if ref.ID <= 0 {
 					continue
 				}
-				key := scanAssetReferenceKey(ref.ID, ref.RawContent)
-				uniqueRefsByKey[key] = heatmapAssetReference{
+				key := extractor.AssetReferenceKey(ref.ID, ref.RawContent)
+				uniqueRefsByKey[key] = heatmap.AssetReference{
 					AssetID:    ref.ID,
 					AssetInput: strings.TrimSpace(ref.RawContent),
 				}
 			}
-			refsToResolve := make([]heatmapAssetReference, 0, len(uniqueRefsByKey))
+			refsToResolve := make([]heatmap.AssetReference, 0, len(uniqueRefsByKey))
 			for _, ref := range uniqueRefsByKey {
 				refsToResolve = append(refsToResolve, ref)
 			}
@@ -395,12 +397,12 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 	), loadReportFile
 }
 
-func resolveReportGenerationAssets(references []heatmapAssetReference, onProgress func(done int, total int, memoryRequestCount int, diskRequestCount int, networkRequestCount int), shouldCancel func() bool) map[string]reportGenerationResolvedAsset {
+func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgress func(done int, total int, memoryRequestCount int, diskRequestCount int, networkRequestCount int), shouldCancel func() bool) map[string]reportGenerationResolvedAsset {
 	if len(references) == 0 {
 		return map[string]reportGenerationResolvedAsset{}
 	}
 
-	jobs := make(chan heatmapAssetReference, len(references))
+	jobs := make(chan heatmap.AssetReference, len(references))
 	for _, reference := range references {
 		jobs <- reference
 	}
@@ -426,14 +428,14 @@ func resolveReportGenerationAssets(references []heatmapAssetReference, onProgres
 				if shouldCancel != nil && shouldCancel() {
 					return
 				}
-				referenceKey := scanAssetReferenceKey(reference.AssetID, reference.AssetInput)
+				referenceKey := extractor.AssetReferenceKey(reference.AssetID, reference.AssetInput)
 				trace := &assetRequestTrace{}
 				previewResult, previewErr := loadAssetStatsPreviewForReferenceWithTrace(reference.AssetID, reference.AssetInput, trace)
 				if shouldCancel != nil && shouldCancel() {
 					return
 				}
 				resolvedAsset := reportGenerationResolvedAsset{
-					Stats: rbxlHeatmapAssetStats{AssetID: reference.AssetID},
+					Stats: heatmap.AssetStats{AssetID: reference.AssetID},
 				}
 				if previewErr == nil && previewResult != nil {
 					resolvedAsset = reportGenerationResolvedAsset{
@@ -446,9 +448,9 @@ func resolveReportGenerationAssets(references []heatmapAssetReference, onProgres
 				resolvedMutex.Unlock()
 				if onProgress != nil && (shouldCancel == nil || !shouldCancel()) {
 					switch trace.classifyRequestSource() {
-					case heatmapAssetRequestSourceNetwork:
+					case heatmap.SourceNetwork:
 						networkRequestCount.Add(1)
-					case heatmapAssetRequestSourceDisk:
+					case heatmap.SourceDisk:
 						diskRequestCount.Add(1)
 					default:
 						memoryRequestCount.Add(1)
@@ -468,7 +470,7 @@ func resolveReportGenerationAssets(references []heatmapAssetReference, onProgres
 	return resolvedByReferenceKey
 }
 
-func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatmapMapPart, refs []positionedRustyAssetToolResult) []rbxlHeatmapCell {
+func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) []rbxlHeatmapCell {
 	if len(points) == 0 && len(mapParts) == 0 {
 		return nil
 	}
@@ -577,35 +579,11 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 	return cells
 }
 
-func buildReportGenerationStatsFromPreview(assetID int64, previewResult *assetPreviewResult) rbxlHeatmapAssetStats {
-	stats := rbxlHeatmapAssetStats{AssetID: assetID}
-	if previewResult == nil {
-		return stats
-	}
-
-	stats.AssetTypeID = previewResult.AssetTypeID
-	stats.AssetTypeName = strings.TrimSpace(previewResult.AssetTypeName)
-	statsInfo := previewResult.Stats
-	if statsInfo == nil {
-		statsInfo = previewResult.Image
-	}
-	if statsInfo != nil {
-		stats.TotalBytes = statsInfo.BytesSize
-	}
-	if previewResult.Image != nil && previewResult.Image.Width > 0 && previewResult.Image.Height > 0 {
-		stats.TextureBytes = previewResult.Image.BytesSize
-		stats.PixelCount = int64(previewResult.Image.Width * previewResult.Image.Height)
-	}
-	if isMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
-		stats.MeshBytes = stats.TotalBytes
-		if meshInfo, meshErr := parseMeshHeader(previewResult.DownloadBytes); meshErr == nil {
-			stats.TriangleCount = meshInfo.NumFaces
-		}
-	}
-	return stats
+func buildReportGenerationStatsFromPreview(assetID int64, previewResult *assetPreviewResult) heatmap.AssetStats {
+	return buildAssetStatsFromPreview(assetID, previewResult)
 }
 
-func buildReportSummaryAndPoints(refs []positionedRustyAssetToolResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, oversizedTextureThreshold float64) (reportGenerationSummary, []rbxlHeatmapPoint) {
+func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, oversizedTextureThreshold float64) (reportGenerationSummary, []rbxlHeatmapPoint) {
 	summary := reportGenerationSummary{}
 	uniqueAssetIDs := map[int64]struct{}{}
 	uniqueReferenceKeys := map[string]struct{}{}
@@ -619,7 +597,7 @@ func buildReportSummaryAndPoints(refs []positionedRustyAssetToolResult, resolved
 
 		summary.ReferenceCount++
 		uniqueAssetIDs[ref.ID] = struct{}{}
-		key := scanAssetReferenceKey(ref.ID, ref.RawContent)
+		key := extractor.AssetReferenceKey(ref.ID, ref.RawContent)
 		if _, seen := uniqueReferenceKeys[key]; !seen {
 			uniqueReferenceKeys[key] = struct{}{}
 			summary.UniqueReferenceCount++
@@ -672,7 +650,7 @@ func buildReportSummaryAndPoints(refs []positionedRustyAssetToolResult, resolved
 		if ref.ID <= 0 || ref.WorldX == nil || ref.WorldY == nil || ref.WorldZ == nil {
 			continue
 		}
-		key := scanAssetReferenceKey(ref.ID, ref.RawContent)
+		key := extractor.AssetReferenceKey(ref.ID, ref.RawContent)
 		asset, found := resolved[key]
 		if !found || asset.Stats.TotalBytes <= 0 {
 			continue
@@ -695,7 +673,7 @@ func buildReportSummaryAndPoints(refs []positionedRustyAssetToolResult, resolved
 	return summary, points
 }
 
-func countReportGenerationOversizedTextures(refs []positionedRustyAssetToolResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, threshold float64) int {
+func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, threshold float64) int {
 	if threshold <= 0 {
 		threshold = defaultLargeTextureThreshold
 	}
@@ -703,13 +681,13 @@ func countReportGenerationOversizedTextures(refs []positionedRustyAssetToolResul
 		return 0
 	}
 
-	areaByPath := buildSceneSurfaceAreaIndexFromHeatmapParts(mapParts)
+	areaByPath := buildSceneSurfaceAreaIndex(mapParts)
 	maxAreaByReferenceKey := map[string]float64{}
 	for _, ref := range refs {
 		if ref.ID <= 0 {
 			continue
 		}
-		referenceKey := scanAssetReferenceKey(ref.ID, ref.RawContent)
+		referenceKey := extractor.AssetReferenceKey(ref.ID, ref.RawContent)
 		area := estimateSceneSurfaceAreaForPaths(strings.TrimSpace(ref.InstancePath), nil, areaByPath)
 		maxAreaByReferenceKey[referenceKey] = maxPositiveFloat64(maxAreaByReferenceKey[referenceKey], area)
 	}
@@ -727,7 +705,7 @@ func countReportGenerationOversizedTextures(refs []positionedRustyAssetToolResul
 	return oversizedTextureCount
 }
 
-func countReportGenerationParts(mapParts []rbxlHeatmapMapPart, refs []positionedRustyAssetToolResult) (int, int) {
+func countReportGenerationParts(mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) (int, int) {
 	if len(mapParts) > 0 {
 		meshPartCount := 0
 		partCount := 0
@@ -770,7 +748,7 @@ func countReportGenerationParts(mapParts []rbxlHeatmapMapPart, refs []positioned
 	return meshPartCount, partCount
 }
 
-func countEstimatedDrawCalls(mapParts []rbxlHeatmapMapPart, refs []positionedRustyAssetToolResult) int {
+func countEstimatedDrawCalls(mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) int {
 	renderInfos := buildReportGenerationRenderInfos(mapParts, refs)
 	if len(renderInfos) == 0 {
 		return 0
@@ -794,7 +772,7 @@ func countEstimatedDrawCalls(mapParts []rbxlHeatmapMapPart, refs []positionedRus
 	return drawCalls + len(meshDrawKeys)
 }
 
-func buildReportGenerationRenderInfos(mapParts []rbxlHeatmapMapPart, refs []positionedRustyAssetToolResult) map[string]reportGenerationInstanceRenderInfo {
+func buildReportGenerationRenderInfos(mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) map[string]reportGenerationInstanceRenderInfo {
 	renderInfos := map[string]reportGenerationInstanceRenderInfo{}
 	for _, part := range mapParts {
 		instancePath := strings.TrimSpace(part.InstancePath)
@@ -853,7 +831,7 @@ func buildReportGenerationRenderInfos(mapParts []rbxlHeatmapMapPart, refs []posi
 	return renderInfos
 }
 
-func reportGenerationRefTarget(ref positionedRustyAssetToolResult) (string, string) {
+func reportGenerationRefTarget(ref extractor.PositionedResult) (string, string) {
 	instancePath := strings.TrimSpace(ref.InstancePath)
 	instanceType := strings.TrimSpace(ref.InstanceType)
 	if strings.EqualFold(instanceType, "SurfaceAppearance") {
@@ -865,7 +843,7 @@ func reportGenerationRefTarget(ref positionedRustyAssetToolResult) (string, stri
 	return instancePath, instanceType
 }
 
-func reportGenerationMeshTriangleInstanceKey(ref positionedRustyAssetToolResult) string {
+func reportGenerationMeshTriangleInstanceKey(ref extractor.PositionedResult) string {
 	if !isReportGenerationMeshContentProperty(strings.ToLower(strings.TrimSpace(ref.PropertyName))) {
 		return ""
 	}
@@ -886,7 +864,7 @@ func parentReportGenerationInstancePath(instancePath string) string {
 }
 
 func reportGenerationAssetContentKey(assetID int64, rawContent string) string {
-	return scanAssetReferenceKey(assetID, rawContent)
+	return extractor.AssetReferenceKey(assetID, rawContent)
 }
 
 func normalizeReportGenerationInstanceType(instanceType string) string {

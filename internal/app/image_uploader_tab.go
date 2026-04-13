@@ -16,6 +16,7 @@ import (
 
 	"joxblox/internal/debug"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/opencloud"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -355,7 +356,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		}
 
 		uploadEnabled := uploadToRobloxCheck.Checked
-		var uploadCreator robloxOpenCloudCreator
+		var uploadCreator opencloud.Creator
 		apiKey := ""
 		assetNameBase := strings.TrimSpace(assetNameEntry.Text)
 		description := strings.TrimSpace(descriptionEntry.Text)
@@ -373,7 +374,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 				statusLabel.SetText("Creator ID must be a positive integer for upload.")
 				return
 			}
-			uploadCreator = robloxOpenCloudCreator{
+			uploadCreator = opencloud.Creator{
 				IsGroup: strings.TrimSpace(creatorTypeSelect.Selected) == uploadCreatorModeGroup,
 				ID:      creatorID,
 			}
@@ -407,7 +408,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 			samples []sampleSpec,
 			scaler xdraw.Interpolator,
 			enableUpload bool,
-			creator robloxOpenCloudCreator,
+			creator opencloud.Creator,
 			openCloudAPIKey string,
 			baseAssetName string,
 			assetDescription string,
@@ -516,7 +517,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 							displayName = fmt.Sprintf("%s (%s)", displayName, spec.Resolution)
 						}
 
-						assetID, uploadErr := uploadDecalToRobloxOpenCloud(
+						assetID, uploadErr := opencloud.UploadDecal(
 							openCloudAPIKey,
 							creator,
 							displayName,
@@ -526,7 +527,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 							localStopSignal.channel,
 						)
 						if uploadErr != nil {
-							if errors.Is(uploadErr, errScanStopped) {
+							if errors.Is(uploadErr, opencloud.ErrUploadCancelled) {
 								fyne.Do(func() {
 									finishGeneration(localStopSignal, stoppedImageUploadStatus(fileIndex, uploadedCount, totalFiles, true))
 								})

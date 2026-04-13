@@ -25,6 +25,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 )
 
@@ -1384,4 +1385,28 @@ func centerAndNormalizePositions(positions []float32) {
 	for i := range positions {
 		positions[i] /= radius
 	}
+}
+
+func extractMeshPreviewFromBytes(fileBytes []byte) (meshPreviewData, error) {
+	return extractMeshPreviewFromBytesWithLimit(fileBytes, maxMeshPreviewTriangles)
+}
+
+func extractMeshPreviewFromBytesWithLimit(fileBytes []byte, maxTriangles int) (meshPreviewData, error) {
+	raw, err := extractor.ExtractMeshPreviewRawFromBytes(fileBytes, maxTriangles)
+	if err != nil {
+		return meshPreviewData{}, err
+	}
+	return buildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
+}
+
+func extractMeshPreviewFromFile(filePath string) (meshPreviewData, error) {
+	return extractMeshPreviewFromFileWithLimit(filePath, maxMeshPreviewTriangles)
+}
+
+func extractMeshPreviewFromFileWithLimit(filePath string, maxTriangles int) (meshPreviewData, error) {
+	raw, err := extractor.ExtractMeshPreviewRawFromFile(filePath, maxTriangles)
+	if err != nil {
+		return meshPreviewData{}, err
+	}
+	return buildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
 }

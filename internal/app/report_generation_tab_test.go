@@ -4,7 +4,9 @@ import (
 	"math"
 	"testing"
 
+	"joxblox/internal/extractor"
 	"joxblox/internal/format"
+	"joxblox/internal/heatmap"
 )
 
 func TestBuildReportSummaryAndPoints(t *testing.T) {
@@ -12,7 +14,7 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 	x2, y2, z2 := 30.0, 5.0, 40.0
 	x3, y3, z3 := 50.0, 5.0, 60.0
 
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           111,
 			RawContent:   "rbxassetid://111",
@@ -53,8 +55,8 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 	}
 
 	resolved := map[string]reportGenerationResolvedAsset{
-		scanAssetReferenceKey(111, "rbxassetid://111"): {
-			Stats: rbxlHeatmapAssetStats{
+		extractor.AssetReferenceKey(111, "rbxassetid://111"): {
+			Stats: heatmap.AssetStats{
 				TotalBytes:    5 * format.Megabyte,
 				TextureBytes:  3 * format.Megabyte,
 				PixelCount:    512 * 512,
@@ -62,24 +64,24 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 			},
 			FileSHA256: "same-hash",
 		},
-		scanAssetReferenceKey(222, "rbxthumb://type=Asset&id=111&w=420&h=420"): {
-			Stats: rbxlHeatmapAssetStats{
+		extractor.AssetReferenceKey(222, "rbxthumb://type=Asset&id=111&w=420&h=420"): {
+			Stats: heatmap.AssetStats{
 				TotalBytes:   5 * format.Megabyte,
 				TextureBytes: 3 * format.Megabyte,
 				PixelCount:   512 * 512,
 			},
 			FileSHA256: "same-hash",
 		},
-		scanAssetReferenceKey(333, "rbxassetid://333"): {
-			Stats: rbxlHeatmapAssetStats{
+		extractor.AssetReferenceKey(333, "rbxassetid://333"): {
+			Stats: heatmap.AssetStats{
 				TotalBytes:   5 * format.Megabyte,
 				TextureBytes: 3 * format.Megabyte,
 				PixelCount:   1024 * 1024,
 			},
 			FileSHA256: "same-hash",
 		},
-		scanAssetReferenceKey(444, "rbxassetid://444"): {
-			Stats: rbxlHeatmapAssetStats{
+		extractor.AssetReferenceKey(444, "rbxassetid://444"): {
+			Stats: heatmap.AssetStats{
 				TotalBytes:    7 * format.Megabyte,
 				MeshBytes:     7 * format.Megabyte,
 				TriangleCount: 4321,
@@ -141,7 +143,7 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 }
 
 func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           111,
 			RawContent:   "rbxassetid://111",
@@ -151,8 +153,8 @@ func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
 	}
 
 	resolved := map[string]reportGenerationResolvedAsset{
-		scanAssetReferenceKey(111, "rbxassetid://111"): {
-			Stats: rbxlHeatmapAssetStats{
+		extractor.AssetReferenceKey(111, "rbxassetid://111"): {
+			Stats: heatmap.AssetStats{
 				TotalBytes:   5 * format.Megabyte,
 				TextureBytes: 3 * format.Megabyte,
 			},
@@ -179,7 +181,7 @@ func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
 func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t *testing.T) {
 	x1, y1, z1 := 10.0, 5.0, 20.0
 	x2, y2, z2 := 20.0, 5.0, 30.0
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           111,
 			RawContent:   "rbxassetid://111",
@@ -209,12 +211,12 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 		},
 	}
 	resolved := map[string]reportGenerationResolvedAsset{
-		scanAssetReferenceKey(111, "rbxassetid://111"): {
-			Stats:      rbxlHeatmapAssetStats{TotalBytes: 5 * format.Megabyte},
+		extractor.AssetReferenceKey(111, "rbxassetid://111"): {
+			Stats:      heatmap.AssetStats{TotalBytes: 5 * format.Megabyte},
 			FileSHA256: "same-hash",
 		},
-		scanAssetReferenceKey(222, "rbxassetid://222"): {
-			Stats:      rbxlHeatmapAssetStats{TotalBytes: 5 * format.Megabyte},
+		extractor.AssetReferenceKey(222, "rbxassetid://222"): {
+			Stats:      heatmap.AssetStats{TotalBytes: 5 * format.Megabyte},
 			FileSHA256: "same-hash",
 		},
 	}
@@ -247,7 +249,7 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T) {
 	x1, y1, z1 := 10.0, 5.0, 20.0
 	x2, y2, z2 := 20.0, 5.0, 30.0
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           111,
 			RawContent:   "rbxassetid://111",
@@ -270,8 +272,8 @@ func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T)
 		},
 	}
 	resolved := map[string]reportGenerationResolvedAsset{
-		scanAssetReferenceKey(111, "rbxassetid://111"): {
-			Stats: rbxlHeatmapAssetStats{
+		extractor.AssetReferenceKey(111, "rbxassetid://111"): {
+			Stats: heatmap.AssetStats{
 				TotalBytes:    5 * format.Megabyte,
 				MeshBytes:     5 * format.Megabyte,
 				TriangleCount: 123,
@@ -295,7 +297,7 @@ func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T)
 
 func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 	x1, y1, z1 := 10.0, 5.0, 20.0
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{
 			ID:           111,
 			RawContent:   "rbxassetid://111",
@@ -307,8 +309,8 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 		},
 	}
 	resolved := map[string]reportGenerationResolvedAsset{
-		scanAssetReferenceKey(111, "rbxassetid://111"): {
-			Stats: rbxlHeatmapAssetStats{
+		extractor.AssetReferenceKey(111, "rbxassetid://111"): {
+			Stats: heatmap.AssetStats{
 				TotalBytes: 5 * format.Megabyte,
 				MeshBytes:  5 * format.Megabyte,
 			},
@@ -340,13 +342,13 @@ func TestBuildReportGenerationCellsUsesFixedCellSize(t *testing.T) {
 	points := []rbxlHeatmapPoint{
 		{
 			AssetID: 1,
-			Stats:   rbxlHeatmapAssetStats{TotalBytes: 100},
+			Stats:   heatmap.AssetStats{TotalBytes: 100},
 			X:       10,
 			Z:       10,
 		},
 		{
 			AssetID: 2,
-			Stats:   rbxlHeatmapAssetStats{TotalBytes: 100},
+			Stats:   heatmap.AssetStats{TotalBytes: 100},
 			X:       1350,
 			Z:       10,
 		},
@@ -377,7 +379,7 @@ func TestBuildReportGenerationCellsUsesMapPartsForPartCounts(t *testing.T) {
 	points := []rbxlHeatmapPoint{
 		{
 			AssetID: 1,
-			Stats:   rbxlHeatmapAssetStats{TotalBytes: 100},
+			Stats:   heatmap.AssetStats{TotalBytes: 100},
 			X:       10,
 			Z:       10,
 		},
@@ -430,7 +432,7 @@ func TestBuildReportGenerationCellsDeduplicatesAssetSizeWithinCell(t *testing.T)
 		{
 			AssetID:      1,
 			InstancePath: "Workspace.MeshPart1",
-			Stats: rbxlHeatmapAssetStats{
+			Stats: heatmap.AssetStats{
 				TotalBytes:   100,
 				TextureBytes: 60,
 			},
@@ -440,7 +442,7 @@ func TestBuildReportGenerationCellsDeduplicatesAssetSizeWithinCell(t *testing.T)
 		{
 			AssetID:      1,
 			InstancePath: "Workspace.MeshPart2",
-			Stats: rbxlHeatmapAssetStats{
+			Stats: heatmap.AssetStats{
 				TotalBytes:   100,
 				TextureBytes: 60,
 			},
@@ -474,7 +476,7 @@ func TestCountEstimatedDrawCallsGroupsMeshPartsByInstancingKey(t *testing.T) {
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart3", MaterialKey: "wood"},
 		{InstanceType: "Part", InstancePath: "Workspace.Part1"},
 	}
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{ID: 100, RawContent: "rbxassetid://100", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart1", PropertyName: "MeshContent"},
 		{ID: 200, RawContent: "rbxassetid://200", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart1", PropertyName: "TextureContent"},
 		{ID: 100, RawContent: "rbxassetid://100", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2", PropertyName: "MeshContent"},
@@ -496,7 +498,7 @@ func TestBuildReportGenerationCellsEstimatesDrawCallsFromRefs(t *testing.T) {
 			AssetID:      1,
 			InstanceType: "MeshPart",
 			InstancePath: "Workspace.MeshPart1",
-			Stats:        rbxlHeatmapAssetStats{TotalBytes: 100},
+			Stats:        heatmap.AssetStats{TotalBytes: 100},
 			X:            x1,
 			Y:            y1,
 			Z:            z1,
@@ -505,13 +507,13 @@ func TestBuildReportGenerationCellsEstimatesDrawCallsFromRefs(t *testing.T) {
 			AssetID:      2,
 			InstanceType: "MeshPart",
 			InstancePath: "Workspace.MeshPart2",
-			Stats:        rbxlHeatmapAssetStats{TotalBytes: 100},
+			Stats:        heatmap.AssetStats{TotalBytes: 100},
 			X:            x2,
 			Y:            y2,
 			Z:            z2,
 		},
 	}
-	refs := []positionedRustyAssetToolResult{
+	refs := []extractor.PositionedResult{
 		{ID: 100, RawContent: "rbxassetid://100", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart1", PropertyName: "MeshContent", WorldX: &x1, WorldY: &y1, WorldZ: &z1},
 		{ID: 200, RawContent: "rbxassetid://200", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart1", PropertyName: "TextureContent", WorldX: &x1, WorldY: &y1, WorldZ: &z1},
 		{ID: 100, RawContent: "rbxassetid://100", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2", PropertyName: "MeshContent", WorldX: &x2, WorldY: &y2, WorldZ: &z2},

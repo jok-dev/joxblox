@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"joxblox/internal/heatmap"
+
 	"fyne.io/fyne/v2"
 )
 
@@ -86,7 +88,7 @@ func loadScanResult(hit scanHit) (scanResult, error) {
 	return applyPreviewToScanResult(result, previewResult), nil
 }
 
-func loadScanResultWithRequestSource(hit scanHit) (scanResult, error, heatmapAssetRequestSource) {
+func loadScanResultWithRequestSource(hit scanHit) (scanResult, error, heatmap.RequestSource) {
 	trace := &assetRequestTrace{}
 	previewResult, err := loadScanPreviewWithTrace(hit, trace)
 	if err != nil {

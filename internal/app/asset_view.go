@@ -11,6 +11,7 @@ import (
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/mesh"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -555,12 +556,12 @@ func (view *assetView) SetData(data assetViewData) {
 
 	view.currentAssetID = assetID
 	view.AssetIDValue.SetText(strconv.FormatInt(assetID, 10))
-	if isMeshAssetType(assetTypeID) {
+	if mesh.IsMeshAssetType(assetTypeID) {
 		view.DimensionsLabel.SetText("Mesh Info:")
 		if len(downloadBytes) > 0 {
-			meshInfo, meshErr := parseMeshHeader(downloadBytes)
+			meshInfo, meshErr := mesh.ParseHeader(downloadBytes)
 			if meshErr == nil {
-				view.DimensionsValue.SetText(formatMeshInfo(meshInfo))
+				view.DimensionsValue.SetText(mesh.FormatInfo(meshInfo))
 			} else {
 				view.DimensionsValue.SetText("-")
 			}
@@ -665,7 +666,7 @@ func (view *assetView) SetData(data assetViewData) {
 	view.currentMeshPreviewData = meshPreviewData{}
 	view.MeshPreview.Clear()
 	view.MeshPreview.Hide()
-	if isMeshAssetType(assetTypeID) && len(downloadBytes) > 0 {
+	if mesh.IsMeshAssetType(assetTypeID) && len(downloadBytes) > 0 {
 		view.showMeshPreview(downloadBytes)
 	} else if previewResource != nil {
 		view.currentPreviewResource = previewResource
@@ -743,7 +744,7 @@ func (view *assetView) showMeshPreview(downloadBytes []byte) {
 	loadToken := view.meshPreviewLoadToken.Add(1)
 	meshBytes := append([]byte(nil), downloadBytes...)
 	go func() {
-		meshData, previewErr := extractMeshPreviewWithRustyAssetToolFromBytes(meshBytes)
+		meshData, previewErr := extractMeshPreviewFromBytes(meshBytes)
 		fyne.Do(func() {
 			if view.currentAssetID != selectedAssetID || view.meshPreviewLoadToken.Load() != loadToken {
 				return
