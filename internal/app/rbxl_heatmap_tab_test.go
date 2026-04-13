@@ -176,8 +176,8 @@ func TestBuildHeatmapCellsCountsTrianglesPerMeshInstance(t *testing.T) {
 }
 
 func TestHeatMetricValueNewMetrics(t *testing.T) {
-	cell := rbxlHeatmapCell{
-		Stats: rbxlHeatmapTotals{
+	cell := heatmap.Cell{
+		Stats: heatmap.Totals{
 			UniqueAssetCount: 42,
 			MeshPartCount:    15,
 			PartCount:        7,

@@ -1,4 +1,4 @@
-package app
+package report
 
 import (
 	"fmt"
@@ -6,9 +6,10 @@ import (
 	"sort"
 
 	"joxblox/internal/format"
+	"joxblox/internal/heatmap"
 )
 
-type performanceGrade struct {
+type PerformanceGrade struct {
 	Grade             string
 	Label             string
 	Value             string
@@ -28,7 +29,7 @@ const (
 	reportGenerationPercentile = 0.9
 )
 
-type reportCellPercentiles struct {
+type CellPercentiles struct {
 	P90TotalBytes    float64
 	P90TextureBytes  float64
 	P90MeshBytes     float64
@@ -42,9 +43,9 @@ type reportCellPercentiles struct {
 	WholeFileMode    bool
 }
 
-func computeCellPercentiles(cells []rbxlHeatmapCell) reportCellPercentiles {
+func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
 	if len(cells) == 0 {
-		return reportCellPercentiles{}
+		return CellPercentiles{}
 	}
 
 	occupied := 0
@@ -86,26 +87,26 @@ func computeCellPercentiles(cells []rbxlHeatmapCell) reportCellPercentiles {
 	}
 
 	if occupied == 0 && len(meshPartValues) == 0 && len(partValues) == 0 && len(drawCallValues) == 0 {
-		return reportCellPercentiles{}
+		return CellPercentiles{}
 	}
 
-	return reportCellPercentiles{
-		P90TotalBytes:    percentileFloat64(totalBytesValues, reportGenerationPercentile),
-		P90TextureBytes:  percentileFloat64(textureBytesValues, reportGenerationPercentile),
-		P90MeshBytes:     percentileFloat64(meshBytesValues, reportGenerationPercentile),
-		P90TriangleCount: percentileFloat64(triangleCountValues, reportGenerationPercentile),
-		P90UniqueAssets:  percentileFloat64(uniqueAssetValues, reportGenerationPercentile),
-		P90MeshParts:     percentileFloat64(meshPartValues, reportGenerationPercentile),
-		P90Parts:         percentileFloat64(partValues, reportGenerationPercentile),
-		P90DrawCalls:     percentileFloat64(drawCallValues, reportGenerationPercentile),
+	return CellPercentiles{
+		P90TotalBytes:    PercentileFloat64(totalBytesValues, reportGenerationPercentile),
+		P90TextureBytes:  PercentileFloat64(textureBytesValues, reportGenerationPercentile),
+		P90MeshBytes:     PercentileFloat64(meshBytesValues, reportGenerationPercentile),
+		P90TriangleCount: PercentileFloat64(triangleCountValues, reportGenerationPercentile),
+		P90UniqueAssets:  PercentileFloat64(uniqueAssetValues, reportGenerationPercentile),
+		P90MeshParts:     PercentileFloat64(meshPartValues, reportGenerationPercentile),
+		P90Parts:         PercentileFloat64(partValues, reportGenerationPercentile),
+		P90DrawCalls:     PercentileFloat64(drawCallValues, reportGenerationPercentile),
 		CellCount:        occupied,
 		CellSizeStuds:    cellSize,
 	}
 }
 
-func computeReportCellPercentiles(assetType reportGenerationAssetTypeConfig, cells []rbxlHeatmapCell, summary reportGenerationSummary) reportCellPercentiles {
+func ComputeReportCellPercentiles(assetType AssetTypeConfig, cells []heatmap.Cell, summary Summary) CellPercentiles {
 	if assetType.DisableSpatialMode {
-		return reportCellPercentiles{
+		return CellPercentiles{
 			P90TotalBytes:    float64(summary.TotalBytes),
 			P90TextureBytes:  float64(summary.TextureBytes),
 			P90MeshBytes:     float64(summary.MeshBytes),
@@ -118,10 +119,10 @@ func computeReportCellPercentiles(assetType reportGenerationAssetTypeConfig, cel
 			WholeFileMode:    true,
 		}
 	}
-	return computeCellPercentiles(cells)
+	return ComputeCellPercentiles(cells)
 }
 
-func percentileFloat64(values []float64, percentile float64) float64 {
+func PercentileFloat64(values []float64, percentile float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}
@@ -147,293 +148,293 @@ func percentileFloat64(values []float64, percentile float64) float64 {
 	return sortedValues[index]
 }
 
-func computePerformanceProfile(percentiles reportCellPercentiles, summary reportGenerationSummary) []performanceGrade {
-	return computePerformanceProfileForAssetType(defaultReportGenerationAssetType(), percentiles, summary)
+func ComputePerformanceProfile(percentiles CellPercentiles, summary Summary) []PerformanceGrade {
+	return ComputePerformanceProfileForAssetType(DefaultAssetType(), percentiles, summary)
 }
 
-func computePerformanceProfileForAssetType(assetType reportGenerationAssetTypeConfig, percentiles reportCellPercentiles, summary reportGenerationSummary) []performanceGrade {
+func ComputePerformanceProfileForAssetType(assetType AssetTypeConfig, percentiles CellPercentiles, summary Summary) []PerformanceGrade {
 	useCellPercentiles := percentiles.CellCount > 0
 	thresholds := assetType.Thresholds
 
-	grades := []performanceGrade{
-		computeDownloadSizeGradeWithThresholds(summary.TotalBytes, percentiles.P90TotalBytes, useCellPercentiles, thresholds.TotalSizeMB),
-		computeTextureSizeGradeWithThresholds(summary.TextureBytes, percentiles.P90TextureBytes, useCellPercentiles, thresholds.TextureSizeMB),
-		computeMeshSizeGradeWithThresholds(summary.MeshBytes, percentiles.P90MeshBytes, useCellPercentiles, thresholds.MeshSizeMB),
-		computeOversizedTextureCountGradeWithThresholds(summary.OversizedTextureCount, thresholds.OversizedTextures),
-		computeMeshComplexityGradeWithThresholds(summary.TriangleCount, percentiles.P90TriangleCount, useCellPercentiles, thresholds.MeshComplexity),
-		computeDrawCallGradeWithThresholds(summary.DrawCallCount, percentiles.P90DrawCalls, useCellPercentiles, thresholds.DrawCalls),
-		computeMeshPartCountGradeWithThresholds(summary.MeshPartCount, percentiles.P90MeshParts, useCellPercentiles, thresholds.MeshPartCount),
-		computePartCountGradeWithThresholds(summary.PartCount, percentiles.P90Parts, useCellPercentiles, thresholds.PartCount),
-		computeAssetDiversityGradeWithThresholds(summary.UniqueAssetCount, percentiles.P90UniqueAssets, useCellPercentiles, thresholds.AssetDiversity),
+	grades := []PerformanceGrade{
+		ComputeDownloadSizeGradeWithThresholds(summary.TotalBytes, percentiles.P90TotalBytes, useCellPercentiles, thresholds.TotalSizeMB),
+		ComputeTextureSizeGradeWithThresholds(summary.TextureBytes, percentiles.P90TextureBytes, useCellPercentiles, thresholds.TextureSizeMB),
+		ComputeMeshSizeGradeWithThresholds(summary.MeshBytes, percentiles.P90MeshBytes, useCellPercentiles, thresholds.MeshSizeMB),
+		ComputeOversizedTextureCountGradeWithThresholds(summary.OversizedTextureCount, thresholds.OversizedTextures),
+		ComputeMeshComplexityGradeWithThresholds(summary.TriangleCount, percentiles.P90TriangleCount, useCellPercentiles, thresholds.MeshComplexity),
+		ComputeDrawCallGradeWithThresholds(summary.DrawCallCount, percentiles.P90DrawCalls, useCellPercentiles, thresholds.DrawCalls),
+		ComputeMeshPartCountGradeWithThresholds(summary.MeshPartCount, percentiles.P90MeshParts, useCellPercentiles, thresholds.MeshPartCount),
+		ComputePartCountGradeWithThresholds(summary.PartCount, percentiles.P90Parts, useCellPercentiles, thresholds.PartCount),
+		ComputeAssetDiversityGradeWithThresholds(summary.UniqueAssetCount, percentiles.P90UniqueAssets, useCellPercentiles, thresholds.AssetDiversity),
 	}
 
-	dupCount := computeDuplicateCountGradeWithThresholds(summary.DuplicateCount, thresholds.DuplicateCount)
-	dupWaste := computeDuplicationWasteGradeWithThresholds(summary.DuplicateSizeBytes, summary.TotalBytes, thresholds.DuplicationWastePct)
+	dupCount := ComputeDuplicateCountGradeWithThresholds(summary.DuplicateCount, thresholds.DuplicateCount)
+	dupWaste := ComputeDuplicationWasteGradeWithThresholds(summary.DuplicateSizeBytes, summary.TotalBytes, thresholds.DuplicationWastePct)
 	if summary.DuplicateCount > 0 {
-		dupCount.Grade = capGradeAtC(dupCount.Grade)
-		dupWaste.Grade = capGradeAtC(dupWaste.Grade)
+		dupCount.Grade = CapGradeAtC(dupCount.Grade)
+		dupWaste.Grade = CapGradeAtC(dupWaste.Grade)
 	}
 	grades = append(grades, dupCount, dupWaste)
 	return grades
 }
 
-func overallPerformanceGrade(grades []performanceGrade, hasDuplicates bool) string {
-	avg := overallPerformanceNumericAverage(grades)
-	grade := numericToGrade(int(math.Round(avg)))
-	if hasDuplicates && gradeToNumeric(grade) > gradeToNumeric(gradeB) {
+func OverallPerformanceGrade(grades []PerformanceGrade, hasDuplicates bool) string {
+	avg := OverallPerformanceNumericAverage(grades)
+	grade := NumericToGrade(int(math.Round(avg)))
+	if hasDuplicates && GradeToNumeric(grade) > GradeToNumeric(gradeB) {
 		return gradeB
 	}
 	return grade
 }
 
-func overallPerformanceScorePercent(grades []performanceGrade, hasDuplicates bool) int {
-	avg := overallPerformanceNumericAverage(grades)
-	if hasDuplicates && avg > float64(gradeToNumeric(gradeB)) {
-		avg = float64(gradeToNumeric(gradeB))
+func OverallPerformanceScorePercent(grades []PerformanceGrade, hasDuplicates bool) int {
+	avg := OverallPerformanceNumericAverage(grades)
+	if hasDuplicates && avg > float64(GradeToNumeric(gradeB)) {
+		avg = float64(GradeToNumeric(gradeB))
 	}
-	return int(math.Round((avg / float64(gradeToNumeric(gradeAPlus))) * 100))
+	return int(math.Round((avg / float64(GradeToNumeric(gradeAPlus))) * 100))
 }
 
-func overallPerformanceNumericAverage(grades []performanceGrade) float64 {
+func OverallPerformanceNumericAverage(grades []PerformanceGrade) float64 {
 	if len(grades) == 0 {
 		return 0
 	}
 
 	total := 0
 	for _, g := range grades {
-		total += gradeToNumeric(g.Grade)
+		total += GradeToNumeric(g.Grade)
 	}
 	return float64(total) / float64(len(grades))
 }
 
-func computeMeshComplexityGrade(triangleCount int64, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computeMeshComplexityGradeWithThresholds(triangleCount, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.MeshComplexity)
+func ComputeMeshComplexityGrade(triangleCount int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeMeshComplexityGradeWithThresholds(triangleCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.MeshComplexity)
 }
 
-func computeMeshComplexityGradeWithThresholds(triangleCount int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputeMeshComplexityGradeWithThresholds(triangleCount int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(triangleCount)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell
 		totalLabel = format.FormatIntCommas(int64(percentilePerCell)) + " p90/cell"
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Mesh Complexity",
 		Value:             format.FormatIntCommas(triangleCount) + " tris",
 		TotalValue:        totalLabel,
-		Description:       meshGradeDescription(grade),
+		Description:       MeshGradeDescription(grade),
 		MetricDescription: "Total triangle count across all MeshParts in the scene",
 	}
 }
 
-func computeDuplicationWasteGrade(duplicateSizeBytes int64, totalBytes int64) performanceGrade {
-	return computeDuplicationWasteGradeWithThresholds(duplicateSizeBytes, totalBytes, defaultReportGenerationAssetType().Thresholds.DuplicationWastePct)
+func ComputeDuplicationWasteGrade(duplicateSizeBytes int64, totalBytes int64) PerformanceGrade {
+	return ComputeDuplicationWasteGradeWithThresholds(duplicateSizeBytes, totalBytes, DefaultAssetType().Thresholds.DuplicationWastePct)
 }
 
-func computeDuplicationWasteGradeWithThresholds(duplicateSizeBytes int64, totalBytes int64, thresholds [6]float64) performanceGrade {
+func ComputeDuplicationWasteGradeWithThresholds(duplicateSizeBytes int64, totalBytes int64, thresholds [6]float64) PerformanceGrade {
 	percentage := 0.0
 	if totalBytes > 0 {
 		percentage = float64(duplicateSizeBytes) / float64(totalBytes) * 100.0
 	}
-	grade := gradeFromThresholds(percentage, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(percentage, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Duplication Waste",
 		Value:             fmt.Sprintf("%.1f%%", percentage),
-		Description:       duplicationGradeDescription(grade),
+		Description:       DuplicationGradeDescription(grade),
 		MetricDescription: "Percentage of total size wasted by duplicate assets",
 	}
 }
 
-func computeDownloadSizeGrade(totalBytes int64, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computeDownloadSizeGradeWithThresholds(totalBytes, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.TotalSizeMB)
+func ComputeDownloadSizeGrade(totalBytes int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeDownloadSizeGradeWithThresholds(totalBytes, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.TotalSizeMB)
 }
 
-func computeDownloadSizeGradeWithThresholds(totalBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputeDownloadSizeGradeWithThresholds(totalBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(totalBytes) / float64(format.Megabyte)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell / float64(format.Megabyte)
 		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Total Size",
 		Value:             format.FormatSizeAuto64(totalBytes),
 		TotalValue:        totalLabel,
-		Description:       downloadSizeGradeDescription(grade),
+		Description:       DownloadSizeGradeDescription(grade),
 		MetricDescription: "Sum of all asset data (meshes + textures) that must be downloaded",
 	}
 }
 
-func computeTextureSizeGrade(textureBytes int64, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computeTextureSizeGradeWithThresholds(textureBytes, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.TextureSizeMB)
+func ComputeTextureSizeGrade(textureBytes int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeTextureSizeGradeWithThresholds(textureBytes, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.TextureSizeMB)
 }
 
-func computeTextureSizeGradeWithThresholds(textureBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputeTextureSizeGradeWithThresholds(textureBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(textureBytes) / float64(format.Megabyte)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell / float64(format.Megabyte)
 		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Texture Size",
 		Value:             format.FormatSizeAuto64(textureBytes),
 		TotalValue:        totalLabel,
-		Description:       textureSizeGradeDescription(grade),
+		Description:       TextureSizeGradeDescription(grade),
 		MetricDescription: "Total size of all image/texture assets in the scene",
 	}
 }
 
-func computeMeshSizeGrade(meshBytes int64, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computeMeshSizeGradeWithThresholds(meshBytes, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.MeshSizeMB)
+func ComputeMeshSizeGrade(meshBytes int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeMeshSizeGradeWithThresholds(meshBytes, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.MeshSizeMB)
 }
 
-func computeMeshSizeGradeWithThresholds(meshBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputeMeshSizeGradeWithThresholds(meshBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(meshBytes) / float64(format.Megabyte)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell / float64(format.Megabyte)
 		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Mesh Size",
 		Value:             format.FormatSizeAuto64(meshBytes),
 		TotalValue:        totalLabel,
-		Description:       meshSizeGradeDescription(grade),
+		Description:       MeshSizeGradeDescription(grade),
 		MetricDescription: "Total size of all mesh geometry data in the scene",
 	}
 }
 
-func computeOversizedTextureCountGrade(oversizedTextureCount int) performanceGrade {
-	return computeOversizedTextureCountGradeWithThresholds(oversizedTextureCount, defaultReportGenerationAssetType().Thresholds.OversizedTextures)
+func ComputeOversizedTextureCountGrade(oversizedTextureCount int) PerformanceGrade {
+	return ComputeOversizedTextureCountGradeWithThresholds(oversizedTextureCount, DefaultAssetType().Thresholds.OversizedTextures)
 }
 
-func computeOversizedTextureCountGradeWithThresholds(oversizedTextureCount int, thresholds [6]float64) performanceGrade {
-	grade := gradeFromThresholds(float64(oversizedTextureCount), thresholds)
-	return performanceGrade{
+func ComputeOversizedTextureCountGradeWithThresholds(oversizedTextureCount int, thresholds [6]float64) PerformanceGrade {
+	grade := GradeFromThresholds(float64(oversizedTextureCount), thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Oversized Textures",
 		Value:             fmt.Sprintf("%d textures", oversizedTextureCount),
-		Description:       oversizedTextureCountGradeDescription(grade),
+		Description:       OversizedTextureCountGradeDescription(grade),
 		MetricDescription: "Textures larger than optimal for their on-screen surface area",
 	}
 }
 
-func computeDuplicateCountGrade(duplicateCount int64) performanceGrade {
-	return computeDuplicateCountGradeWithThresholds(duplicateCount, defaultReportGenerationAssetType().Thresholds.DuplicateCount)
+func ComputeDuplicateCountGrade(duplicateCount int64) PerformanceGrade {
+	return ComputeDuplicateCountGradeWithThresholds(duplicateCount, DefaultAssetType().Thresholds.DuplicateCount)
 }
 
-func computeDuplicateCountGradeWithThresholds(duplicateCount int64, thresholds [6]float64) performanceGrade {
-	grade := gradeFromThresholds(float64(duplicateCount), thresholds)
-	return performanceGrade{
+func ComputeDuplicateCountGradeWithThresholds(duplicateCount int64, thresholds [6]float64) PerformanceGrade {
+	grade := GradeFromThresholds(float64(duplicateCount), thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Duplicates",
 		Value:             format.FormatIntCommas(duplicateCount) + " duplicates",
-		Description:       duplicateCountGradeDescription(grade),
+		Description:       DuplicateCountGradeDescription(grade),
 		MetricDescription: "Assets uploaded multiple times with identical content",
 	}
 }
 
-func computeMeshPartCountGrade(meshPartCount int, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computeMeshPartCountGradeWithThresholds(meshPartCount, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.MeshPartCount)
+func ComputeMeshPartCountGrade(meshPartCount int, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeMeshPartCountGradeWithThresholds(meshPartCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.MeshPartCount)
 }
 
-func computeMeshPartCountGradeWithThresholds(meshPartCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputeMeshPartCountGradeWithThresholds(meshPartCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(meshPartCount)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell
 		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "MeshParts",
 		Value:             fmt.Sprintf("%d", meshPartCount),
 		TotalValue:        totalLabel,
-		Description:       meshPartCountGradeDescription(grade),
+		Description:       MeshPartCountGradeDescription(grade),
 		MetricDescription: "Count of MeshPart instances in the scene",
 	}
 }
 
-func computeDrawCallGrade(drawCallCount int64, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computeDrawCallGradeWithThresholds(drawCallCount, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.DrawCalls)
+func ComputeDrawCallGrade(drawCallCount int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeDrawCallGradeWithThresholds(drawCallCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.DrawCalls)
 }
 
-func computeDrawCallGradeWithThresholds(drawCallCount int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputeDrawCallGradeWithThresholds(drawCallCount int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(drawCallCount)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell
 		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Draw Calls",
 		Value:             fmt.Sprintf("%d est.", drawCallCount),
 		TotalValue:        totalLabel,
-		Description:       drawCallGradeDescription(grade),
+		Description:       DrawCallGradeDescription(grade),
 		MetricDescription: "Estimated GPU draw calls based on unique mesh/texture/material combos",
 	}
 }
 
-func computePartCountGrade(partCount int, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computePartCountGradeWithThresholds(partCount, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.PartCount)
+func ComputePartCountGrade(partCount int, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputePartCountGradeWithThresholds(partCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.PartCount)
 }
 
-func computePartCountGradeWithThresholds(partCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputePartCountGradeWithThresholds(partCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(partCount)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell
 		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Parts",
 		Value:             fmt.Sprintf("%d", partCount),
 		TotalValue:        totalLabel,
-		Description:       partCountGradeDescription(grade),
+		Description:       PartCountGradeDescription(grade),
 		MetricDescription: "Count of Part instances (legacy bricks) in the scene",
 	}
 }
 
-func computeAssetDiversityGrade(uniqueAssetCount int, percentilePerCell float64, useCellPercentile bool) performanceGrade {
-	return computeAssetDiversityGradeWithThresholds(uniqueAssetCount, percentilePerCell, useCellPercentile, defaultReportGenerationAssetType().Thresholds.AssetDiversity)
+func ComputeAssetDiversityGrade(uniqueAssetCount int, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeAssetDiversityGradeWithThresholds(uniqueAssetCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.AssetDiversity)
 }
 
-func computeAssetDiversityGradeWithThresholds(uniqueAssetCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) performanceGrade {
+func ComputeAssetDiversityGradeWithThresholds(uniqueAssetCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(uniqueAssetCount)
 	totalLabel := ""
 	if useCellPercentile {
 		gradeValue = percentilePerCell
 		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
 	}
-	grade := gradeFromThresholds(gradeValue, thresholds)
-	return performanceGrade{
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
 		Grade:             grade,
 		Label:             "Asset Diversity",
 		Value:             fmt.Sprintf("%d unique", uniqueAssetCount),
 		TotalValue:        totalLabel,
-		Description:       assetDiversityGradeDescription(grade),
+		Description:       AssetDiversityGradeDescription(grade),
 		MetricDescription: "Number of unique assets that must be fetched from CDN",
 	}
 }
 
-// thresholds define 7 grade buckets: A+, A, B, C, D, E, F.
+// GradeFromThresholds defines 7 grade buckets: A+, A, B, C, D, E, F.
 // Values below thresholds[0] get A+; values >= thresholds[5] get F.
-func gradeFromThresholds(value float64, thresholds [6]float64) string {
+func GradeFromThresholds(value float64, thresholds [6]float64) string {
 	switch {
 	case value < thresholds[0]:
 		return gradeAPlus
@@ -452,14 +453,14 @@ func gradeFromThresholds(value float64, thresholds [6]float64) string {
 	}
 }
 
-func capGradeAtC(grade string) string {
-	if gradeToNumeric(grade) > gradeToNumeric(gradeC) {
+func CapGradeAtC(grade string) string {
+	if GradeToNumeric(grade) > GradeToNumeric(gradeC) {
 		return gradeC
 	}
 	return grade
 }
 
-func gradeToNumeric(grade string) int {
+func GradeToNumeric(grade string) int {
 	switch grade {
 	case gradeAPlus:
 		return 6
@@ -478,7 +479,7 @@ func gradeToNumeric(grade string) int {
 	}
 }
 
-func numericToGrade(value int) string {
+func NumericToGrade(value int) string {
 	switch {
 	case value >= 6:
 		return gradeAPlus
@@ -497,7 +498,7 @@ func numericToGrade(value int) string {
 	}
 }
 
-func meshGradeDescription(grade string) string {
+func MeshGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Minimal polygon count, excellent rendering performance"
@@ -516,7 +517,7 @@ func meshGradeDescription(grade string) string {
 	}
 }
 
-func duplicationGradeDescription(grade string) string {
+func DuplicationGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "No meaningful duplication, assets are perfectly consolidated"
@@ -535,7 +536,7 @@ func duplicationGradeDescription(grade string) string {
 	}
 }
 
-func downloadSizeGradeDescription(grade string) string {
+func DownloadSizeGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Tiny download footprint, near-instant load"
@@ -554,7 +555,7 @@ func downloadSizeGradeDescription(grade string) string {
 	}
 }
 
-func textureSizeGradeDescription(grade string) string {
+func TextureSizeGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Minimal texture payload, negligible bandwidth impact"
@@ -573,7 +574,7 @@ func textureSizeGradeDescription(grade string) string {
 	}
 }
 
-func meshSizeGradeDescription(grade string) string {
+func MeshSizeGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Minimal mesh data, negligible download cost"
@@ -592,7 +593,7 @@ func meshSizeGradeDescription(grade string) string {
 	}
 }
 
-func duplicateCountGradeDescription(grade string) string {
+func DuplicateCountGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "No duplicates, assets are perfectly managed"
@@ -611,7 +612,7 @@ func duplicateCountGradeDescription(grade string) string {
 	}
 }
 
-func oversizedTextureCountGradeDescription(grade string) string {
+func OversizedTextureCountGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "No oversized textures detected"
@@ -630,7 +631,7 @@ func oversizedTextureCountGradeDescription(grade string) string {
 	}
 }
 
-func meshPartCountGradeDescription(grade string) string {
+func MeshPartCountGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Very few MeshParts, minimal rendering overhead"
@@ -649,7 +650,7 @@ func meshPartCountGradeDescription(grade string) string {
 	}
 }
 
-func drawCallGradeDescription(grade string) string {
+func DrawCallGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Very low estimated draw call overhead, excellent batching"
@@ -668,7 +669,7 @@ func drawCallGradeDescription(grade string) string {
 	}
 }
 
-func partCountGradeDescription(grade string) string {
+func PartCountGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Very few Parts, minimal physics and rendering cost"
@@ -687,7 +688,7 @@ func partCountGradeDescription(grade string) string {
 	}
 }
 
-func assetDiversityGradeDescription(grade string) string {
+func AssetDiversityGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
 		return "Very few unique assets, near-instant CDN resolution"

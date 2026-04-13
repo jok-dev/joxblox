@@ -1,4 +1,4 @@
-package app
+package report
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestReportGenerationAssetTypeByID(t *testing.T) {
-	mapAssetType, found := reportGenerationAssetTypeByID("map")
+	mapAssetType, found := AssetTypeByID("map")
 	if !found {
 		t.Fatalf("expected to find map asset type")
 	}
@@ -15,7 +15,7 @@ func TestReportGenerationAssetTypeByID(t *testing.T) {
 		t.Fatalf("expected map label, got %q", mapAssetType.Label)
 	}
 
-	vehicleAssetType, found := reportGenerationAssetTypeByID("vehicle")
+	vehicleAssetType, found := AssetTypeByID("vehicle")
 	if !found {
 		t.Fatalf("expected to find vehicle asset type")
 	}
@@ -28,11 +28,11 @@ func TestReportGenerationAssetTypeByID(t *testing.T) {
 }
 
 func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T) {
-	customAssetType := reportGenerationAssetTypeConfig{
+	customAssetType := AssetTypeConfig{
 		ID:                        "custom",
 		Label:                     "Custom",
-		OversizedTextureThreshold: defaultLargeTextureThreshold,
-		Thresholds: reportGenerationGradeThresholds{
+		OversizedTextureThreshold: DefaultOversizedTextureThreshold,
+		Thresholds: GradeThresholds{
 			MeshComplexity:      [6]float64{10_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000, 60_000_000},
 			DuplicationWastePct: [6]float64{100, 200, 300, 400, 500, 600},
 			TotalSizeMB:         [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
@@ -47,7 +47,7 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 		},
 	}
 
-	summary := reportGenerationSummary{
+	summary := Summary{
 		TotalBytes:            800 * format.Megabyte,
 		TextureBytes:          500 * format.Megabyte,
 		MeshBytes:             500 * format.Megabyte,
@@ -59,7 +59,7 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 		PartCount:             10000,
 	}
 
-	grades := computePerformanceProfileForAssetType(customAssetType, reportCellPercentiles{}, summary)
+	grades := ComputePerformanceProfileForAssetType(customAssetType, CellPercentiles{}, summary)
 	if len(grades) != 11 {
 		t.Fatalf("expected 11 grades, got %d", len(grades))
 	}
@@ -71,12 +71,12 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 }
 
 func TestComputeReportCellPercentilesDisableSpatialMode(t *testing.T) {
-	assetType := reportGenerationAssetTypeConfig{
+	assetType := AssetTypeConfig{
 		ID:                 "vehicle",
 		Label:              "Vehicle",
 		DisableSpatialMode: true,
 	}
-	summary := reportGenerationSummary{
+	summary := Summary{
 		TotalBytes:       123,
 		TextureBytes:     45,
 		MeshBytes:        67,
@@ -87,7 +87,7 @@ func TestComputeReportCellPercentilesDisableSpatialMode(t *testing.T) {
 		PartCount:        13,
 	}
 
-	percentiles := computeReportCellPercentiles(assetType, nil, summary)
+	percentiles := ComputeReportCellPercentiles(assetType, nil, summary)
 	if !percentiles.WholeFileMode {
 		t.Fatalf("expected whole-file mode percentiles")
 	}

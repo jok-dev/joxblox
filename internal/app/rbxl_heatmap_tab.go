@@ -89,7 +89,7 @@ type rbxlHeatmapScene struct {
 	Points         []rbxlHeatmapPoint
 	ComparePoints  []rbxlHeatmapPoint
 	MapParts       []rbxlHeatmapMapPart
-	Cells          []rbxlHeatmapCell
+	Cells          []heatmap.Cell
 	CellIndexByKey map[string]int
 	CellSizeWorld  float64
 	ColumnCount    int
@@ -157,33 +157,6 @@ const (
 	heatMetricMeshPartCount      rbxlHeatMetric = "MeshParts"
 	heatMetricPartCount          rbxlHeatMetric = "Parts"
 )
-
-type rbxlHeatmapCell struct {
-	Row        int
-	Column     int
-	Stats      rbxlHeatmapTotals
-	BaseStats  rbxlHeatmapTotals
-	DeltaStats rbxlHeatmapTotals
-	MinimumX   float64
-	MaximumX   float64
-	MinimumZ   float64
-	MaximumZ   float64
-}
-
-type rbxlHeatmapTotals struct {
-	ReferenceCount     int64
-	UniqueAssetCount   int64
-	UniqueTextureCount int64
-	UniqueMeshCount    int64
-	TextureBytes       int64
-	MeshBytes          int64
-	TotalBytes         int64
-	TriangleCount      int64
-	PixelCount         int64
-	MeshPartCount      int64
-	PartCount          int64
-	DrawCallCount      int64
-}
 
 type heatmapSquareAssetRow struct {
 	Side               string
@@ -1217,7 +1190,7 @@ func getHeatmapAssetStats(assetID int64, assetInput string) (heatmap.AssetStats,
 	return stats, trace.classifyRequestSource()
 }
 
-func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatmapCell, float64, int, int, int64) {
+func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]heatmap.Cell, float64, int, int, int64) {
 	if scene == nil || (len(scene.Points) == 0 && len(scene.ComparePoints) == 0) {
 		return nil, 0, 0, 0, 0
 	}
@@ -1237,7 +1210,7 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 	columnCount := max(1, int(math.Ceil(rangeX/cellSizeWorld)))
 	rowCount := max(1, int(math.Ceil(rangeZ/cellSizeWorld)))
 	type heatmapCellAccumulator struct {
-		cell                 *rbxlHeatmapCell
+		cell                 *heatmap.Cell
 		baseSeenAssets       map[int64]struct{}
 		compareSeenAssets    map[int64]struct{}
 		baseSeenInstances    map[string]struct{}
@@ -1253,7 +1226,7 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 			accumulator, found := cellByKey[cellKey]
 			if !found {
 				accumulator = &heatmapCellAccumulator{
-					cell: &rbxlHeatmapCell{
+					cell: &heatmap.Cell{
 						Row:      row,
 						Column:   column,
 						MinimumX: scene.MinimumX + float64(column)*cellSizeWorld,
@@ -1271,7 +1244,7 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 			apply(accumulator, point)
 		}
 	}
-	accumulateTotals := func(totals *rbxlHeatmapTotals, point rbxlHeatmapPoint, delta int64, firstAssetInSquare bool, firstInstanceInSquare bool) {
+	accumulateTotals := func(totals *heatmap.Totals, point rbxlHeatmapPoint, delta int64, firstAssetInSquare bool, firstInstanceInSquare bool) {
 		totals.ReferenceCount += delta
 		if firstInstanceInSquare {
 			switch point.InstanceType {
@@ -1331,7 +1304,7 @@ func buildHeatmapCells(scene *rbxlHeatmapScene, gridDivisions int) ([]rbxlHeatma
 		accumulateTotals(&accumulator.cell.DeltaStats, point, 1, !seenAssetInCompare, firstInst)
 	})
 
-	cells := make([]rbxlHeatmapCell, 0, len(cellByKey))
+	cells := make([]heatmap.Cell, 0, len(cellByKey))
 	for _, accumulator := range cellByKey {
 		cell := accumulator.cell
 		if scene.DiffMode {
@@ -1363,7 +1336,7 @@ func heatmapPointHasMeshContent(point rbxlHeatmapPoint) bool {
 	return point.Stats.MeshBytes > 0 || point.Stats.TriangleCount > 0
 }
 
-func heatmapCellPixelBounds(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, width int, height int) (int, int, int, int) {
+func heatmapCellPixelBounds(scene *rbxlHeatmapScene, cell heatmap.Cell, width int, height int) (int, int, int, int) {
 	minPixelX, maxPixelY := mapHeatmapWorldPoint(cell.MinimumX, cell.MinimumZ, scene.MinimumX, scene.MaximumX, scene.MinimumZ, scene.MaximumZ, width, height)
 	maxPixelX, minPixelY := mapHeatmapWorldPoint(cell.MaximumX, cell.MaximumZ, scene.MinimumX, scene.MaximumX, scene.MinimumZ, scene.MaximumZ, width, height)
 	startX := format.Clamp(int(math.Floor(math.Min(minPixelX, maxPixelX))), 0, width-1)
@@ -1373,13 +1346,13 @@ func heatmapCellPixelBounds(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, width
 	return startX, endX, startY, endY
 }
 
-func heatmapCellAtImagePoint(scene *rbxlHeatmapScene, imageX float64, imageY float64, width int, height int) (rbxlHeatmapCell, bool) {
+func heatmapCellAtImagePoint(scene *rbxlHeatmapScene, imageX float64, imageY float64, width int, height int) (heatmap.Cell, bool) {
 	if scene == nil || len(scene.Cells) == 0 || width <= 0 || height <= 0 {
-		return rbxlHeatmapCell{}, false
+		return heatmap.Cell{}, false
 	}
 	worldX, worldZ, inside := imagePointToHeatmapWorld(imageX, imageY, width, height, scene)
 	if !inside {
-		return rbxlHeatmapCell{}, false
+		return heatmap.Cell{}, false
 	}
 	column := format.Clamp(int(math.Floor((worldX-scene.MinimumX)/scene.CellSizeWorld)), 0, scene.ColumnCount-1)
 	row := format.Clamp(int(math.Floor((worldZ-scene.MinimumZ)/scene.CellSizeWorld)), 0, scene.RowCount-1)
@@ -1387,7 +1360,7 @@ func heatmapCellAtImagePoint(scene *rbxlHeatmapScene, imageX float64, imageY flo
 	pixelX := format.Clamp(int(math.Round(imageX)), 0, width-1)
 	pixelY := format.Clamp(int(math.Round(imageY)), 0, height-1)
 	bestIndex := -1
-	bestCell := rbxlHeatmapCell{}
+	bestCell := heatmap.Cell{}
 	for rowOffset := -1; rowOffset <= 1; rowOffset++ {
 		candidateRow := row + rowOffset
 		if candidateRow < 0 || candidateRow >= scene.RowCount {
@@ -1419,7 +1392,7 @@ func heatmapCellAtImagePoint(scene *rbxlHeatmapScene, imageX float64, imageY flo
 	if index, found := scene.CellIndexByKey[heatmapCellKey(row, column)]; found && index >= 0 && index < len(scene.Cells) {
 		return scene.Cells[index], true
 	}
-	return rbxlHeatmapCell{}, false
+	return heatmap.Cell{}, false
 }
 
 func heatmapPointCellMatches(scene *rbxlHeatmapScene, point rbxlHeatmapPoint, row int, column int) bool {
@@ -1431,7 +1404,7 @@ func heatmapPointCellMatches(scene *rbxlHeatmapScene, point rbxlHeatmapPoint, ro
 	return pointRow == row && pointColumn == column
 }
 
-func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, baseFilePath string, compareFilePath string) []heatmapSquareAssetRow {
+func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell heatmap.Cell, baseFilePath string, compareFilePath string) []heatmapSquareAssetRow {
 	if scene == nil {
 		return nil
 	}
@@ -1560,7 +1533,7 @@ func imagePointToHeatmapWorld(imageX float64, imageY float64, width int, height 
 	return worldX, worldZ, true
 }
 
-func formatHeatmapCellStats(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) string {
+func formatHeatmapCellStats(cell heatmap.Cell, heatMetric rbxlHeatMetric) string {
 	centerX := (cell.MinimumX + cell.MaximumX) / 2
 	centerZ := (cell.MinimumZ + cell.MaximumZ) / 2
 	if cell.BaseStats.ReferenceCount > 0 || cell.DeltaStats.ReferenceCount != 0 {
@@ -1607,7 +1580,7 @@ func formatHeatmapCellStats(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) str
 	)
 }
 
-func formatHeatmapMetricSummary(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) string {
+func formatHeatmapMetricSummary(cell heatmap.Cell, heatMetric rbxlHeatMetric) string {
 	isDiff := cell.BaseStats.ReferenceCount > 0 || cell.DeltaStats.ReferenceCount != 0
 	switch heatMetric {
 	case heatMetricTotalBytes:
@@ -1668,7 +1641,7 @@ func formatHeatmapMetricSummary(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric)
 	}
 }
 
-func heatMetricValue(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric, maximums heatMetricMaximums) float64 {
+func heatMetricValue(cell heatmap.Cell, heatMetric rbxlHeatMetric, maximums heatMetricMaximums) float64 {
 	switch heatMetric {
 	case heatMetricTotalBytes:
 		return float64(cell.Stats.TotalBytes)
@@ -1695,7 +1668,7 @@ func heatMetricValue(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric, maximums h
 	}
 }
 
-func maxHeatMetricValue(cells []rbxlHeatmapCell, heatMetric rbxlHeatMetric, maximums heatMetricMaximums) float64 {
+func maxHeatMetricValue(cells []heatmap.Cell, heatMetric rbxlHeatMetric, maximums heatMetricMaximums) float64 {
 	maximum := 0.0
 	for _, cell := range cells {
 		value := math.Abs(heatMetricValue(cell, heatMetric, maximums))
@@ -1720,7 +1693,7 @@ func applyHeatSpread(normalized float64, spread float64) float64 {
 	return math.Pow(clamped, 1.0/spread)
 }
 
-func buildHeatMetricMaximums(cells []rbxlHeatmapCell) heatMetricMaximums {
+func buildHeatMetricMaximums(cells []heatmap.Cell) heatMetricMaximums {
 	maximums := heatMetricMaximums{}
 	for _, cell := range cells {
 		maximums.TotalBytes = math.Max(maximums.TotalBytes, math.Abs(float64(cell.Stats.TotalBytes)))
@@ -1741,7 +1714,7 @@ func normalizedMetricComponent(value float64, maximum float64) float64 {
 	return value / maximum
 }
 
-func formatHeatmapDeltaSummary(cell rbxlHeatmapCell, heatMetric rbxlHeatMetric) string {
+func formatHeatmapDeltaSummary(cell heatmap.Cell, heatMetric rbxlHeatMetric) string {
 	switch heatMetric {
 	case heatMetricTotalBytes:
 		return format.FormatSignedSizeAuto(cell.Stats.TotalBytes)
@@ -1838,7 +1811,7 @@ func cloneHeatmapSceneForRerender(scene *rbxlHeatmapScene, gridDivisions int) *r
 	return &snapshot
 }
 
-func openHeatmapSquareAssetsWindow(parentWindow fyne.Window, scene *rbxlHeatmapScene, cell rbxlHeatmapCell, rows []heatmapSquareAssetRow, heatMetric rbxlHeatMetric) {
+func openHeatmapSquareAssetsWindow(parentWindow fyne.Window, scene *rbxlHeatmapScene, cell heatmap.Cell, rows []heatmapSquareAssetRow, heatMetric rbxlHeatMetric) {
 	if len(rows) == 0 {
 		return
 	}
@@ -1981,7 +1954,7 @@ func compareHeatmapSquareRows(left heatmapSquareAssetRow, right heatmapSquareAss
 	}
 }
 
-func formatHeatmapSquareWindowSummary(scene *rbxlHeatmapScene, cell rbxlHeatmapCell, rows []heatmapSquareAssetRow) string {
+func formatHeatmapSquareWindowSummary(scene *rbxlHeatmapScene, cell heatmap.Cell, rows []heatmapSquareAssetRow) string {
 	centerX := (cell.MinimumX + cell.MaximumX) / 2
 	centerZ := (cell.MinimumZ + cell.MaximumZ) / 2
 	uniqueAssetIDs := map[int64]struct{}{}

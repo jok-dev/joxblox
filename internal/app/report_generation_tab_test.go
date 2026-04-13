@@ -528,3 +528,45 @@ func TestBuildReportGenerationCellsEstimatesDrawCallsFromRefs(t *testing.T) {
 		t.Fatalf("expected 1 draw call after instancing identical meshparts, got %d", cells[0].Stats.DrawCallCount)
 	}
 }
+
+func TestCountReportGenerationOversizedTextures(t *testing.T) {
+	refs := []extractor.PositionedResult{
+		{
+			ID:           101,
+			RawContent:   "rbxassetid://101",
+			InstancePath: "Workspace.BigTexture",
+		},
+		{
+			ID:           202,
+			RawContent:   "rbxassetid://202",
+			InstancePath: "Workspace.SmallTexture",
+		},
+	}
+	resolved := map[string]reportGenerationResolvedAsset{
+		extractor.AssetReferenceKey(101, "rbxassetid://101"): {
+			Stats: heatmap.AssetStats{TextureBytes: 200_000},
+		},
+		extractor.AssetReferenceKey(202, "rbxassetid://202"): {
+			Stats: heatmap.AssetStats{TextureBytes: 10_000},
+		},
+	}
+	mapParts := []rbxlHeatmapMapPart{
+		{
+			InstancePath: "Workspace.BigTexture",
+			SizeX:        5,
+			SizeY:        5,
+			SizeZ:        5,
+		},
+		{
+			InstancePath: "Workspace.SmallTexture",
+			SizeX:        100,
+			SizeY:        100,
+			SizeZ:        100,
+		},
+	}
+
+	count := countReportGenerationOversizedTextures(refs, resolved, mapParts, defaultLargeTextureThreshold)
+	if count != 1 {
+		t.Fatalf("expected 1 oversized texture, got %d", count)
+	}
+}

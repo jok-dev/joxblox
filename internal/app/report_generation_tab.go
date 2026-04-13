@@ -19,28 +19,12 @@ import (
 	"fyne.io/fyne/v2/widget"
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
+	"joxblox/internal/app/report"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/heatmap"
 )
-
-type reportGenerationSummary struct {
-	TotalBytes            int64
-	TextureBytes          int64
-	MeshBytes             int64
-	TriangleCount         int64
-	OversizedTextureCount int
-	DrawCallCount         int64
-	DuplicateCount        int64
-	DuplicateSizeBytes    int64
-	ReferenceCount        int64
-	UniqueReferenceCount  int
-	UniqueAssetCount      int
-	ResolvedCount         int
-	MeshPartCount         int
-	PartCount             int
-}
 
 type reportGenerationResolvedAsset struct {
 	Stats      heatmap.AssetStats
@@ -63,9 +47,9 @@ const reportGenerationCellSizeStuds = 1000.0
 
 func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string)) {
 	selectedFilePath := ""
-	currentSummary := reportGenerationSummary{}
-	currentCells := []rbxlHeatmapCell{}
-	currentAssetType := reportGenerationAssetTypeConfig{}
+	currentSummary := report.Summary{}
+	currentCells := []heatmap.Cell{}
+	currentAssetType := report.AssetTypeConfig{}
 	hasSummary := false
 	var loadToken atomic.Uint64
 	var loading atomic.Bool
@@ -113,13 +97,13 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		}
 		assetType := currentAssetType
 		if assetType.ID == "" {
-			assetType = defaultReportGenerationAssetType()
+			assetType = report.DefaultAssetType()
 		}
-		percentiles := computeReportCellPercentiles(assetType, currentCells, currentSummary)
-		grades := computePerformanceProfileForAssetType(assetType, percentiles, currentSummary)
+		percentiles := report.ComputeReportCellPercentiles(assetType, currentCells, currentSummary)
+		grades := report.ComputePerformanceProfileForAssetType(assetType, percentiles, currentSummary)
 		hasDuplicates := currentSummary.DuplicateCount > 0
-		overall := overallPerformanceGrade(grades, hasDuplicates)
-		overallScore := overallPerformanceScorePercent(grades, hasDuplicates)
+		overall := report.OverallPerformanceGrade(grades, hasDuplicates)
+		overallScore := report.OverallPerformanceScorePercent(grades, hasDuplicates)
 		profileContainer.Add(buildPerformanceProfileUI(assetType.Label, overall, overallScore, grades, percentiles))
 		if onViewInScan != nil || onViewInHeatmap != nil {
 			navButtons := container.NewHBox()
@@ -149,9 +133,9 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 			return
 		}
 		loadToken.Add(1)
-		currentAssetType = reportGenerationAssetTypeConfig{}
+		currentAssetType = report.AssetTypeConfig{}
 		hasSummary = false
-		currentSummary = reportGenerationSummary{}
+		currentSummary = report.Summary{}
 		currentCells = nil
 		profileContainer.Hide()
 		setWarning(materialVariantWarningData{})
@@ -162,7 +146,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		}
 	}
 	startReportLoad := func(assetTypeID string) {
-		assetType, found := reportGenerationAssetTypeByID(assetTypeID)
+		assetType, found := report.AssetTypeByID(assetTypeID)
 		if !found {
 			statusLabel.SetText("Choose a valid asset type")
 			return
@@ -178,7 +162,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		}
 		currentAssetType = assetType
 		hasSummary = false
-		currentSummary = reportGenerationSummary{}
+		currentSummary = report.Summary{}
 		currentCells = nil
 		profileContainer.Hide()
 		setWarning(materialVariantWarningData{})
@@ -194,7 +178,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		}
 
 		token := loadToken.Add(1)
-		go func(expectedToken uint64, sourcePath string, prefixes []string, selectedAssetType reportGenerationAssetTypeConfig) {
+		go func(expectedToken uint64, sourcePath string, prefixes []string, selectedAssetType report.AssetTypeConfig) {
 			isCanceled := func() bool {
 				return loadToken.Load() != expectedToken
 			}
@@ -316,12 +300,12 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		if assetTypeDialog != nil {
 			assetTypeDialog.Hide()
 		}
-		buttons := make([]fyne.CanvasObject, 0, len(reportGenerationAssetTypeConfigs)+2)
+		buttons := make([]fyne.CanvasObject, 0, len(report.AssetTypeConfigs)+2)
 		description := widget.NewLabel("Choose the asset type for this report.")
 		description.Alignment = fyne.TextAlignCenter
 		description.Wrapping = fyne.TextWrapWord
 		buttons = append(buttons, description)
-		for _, assetType := range reportGenerationAssetTypeConfigs {
+		for _, assetType := range report.AssetTypeConfigs {
 			assetType := assetType
 			button := widget.NewButton(assetType.Label, func() {
 				startReportLoad(assetType.ID)
@@ -352,9 +336,9 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 
 		selectedFilePath = trimmedPath
 		filePathLabel.SetText(selectedFilePath)
-		currentAssetType = reportGenerationAssetTypeConfig{}
+		currentAssetType = report.AssetTypeConfig{}
 		hasSummary = false
-		currentSummary = reportGenerationSummary{}
+		currentSummary = report.Summary{}
 		currentCells = nil
 		profileContainer.Hide()
 		setWarning(materialVariantWarningData{})
@@ -470,7 +454,7 @@ func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgre
 	return resolvedByReferenceKey
 }
 
-func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) []rbxlHeatmapCell {
+func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) []heatmap.Cell {
 	if len(points) == 0 && len(mapParts) == 0 {
 		return nil
 	}
@@ -504,7 +488,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 	}
 
 	renderInfos := buildReportGenerationRenderInfos(mapParts, refs)
-	partCountsByCell := map[string]rbxlHeatmapTotals{}
+	partCountsByCell := map[string]heatmap.Totals{}
 	meshDrawKeysByCell := map[string]map[string]struct{}{}
 	for _, renderInfo := range renderInfos {
 		if !renderInfo.HasPosition {
@@ -555,7 +539,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 			if _, scanErr := fmt.Sscanf(cellKey, "%d:%d", &row, &column); scanErr != nil {
 				continue
 			}
-			cells = append(cells, rbxlHeatmapCell{
+			cells = append(cells, heatmap.Cell{
 				Row:      row,
 				Column:   column,
 				MinimumX: scene.MinimumX + float64(column)*cellSizeWorld,
@@ -583,8 +567,8 @@ func buildReportGenerationStatsFromPreview(assetID int64, previewResult *assetPr
 	return buildAssetStatsFromPreview(assetID, previewResult)
 }
 
-func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, oversizedTextureThreshold float64) (reportGenerationSummary, []rbxlHeatmapPoint) {
-	summary := reportGenerationSummary{}
+func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, oversizedTextureThreshold float64) (report.Summary, []rbxlHeatmapPoint) {
+	summary := report.Summary{}
 	uniqueAssetIDs := map[int64]struct{}{}
 	uniqueReferenceKeys := map[string]struct{}{}
 	hashCounts := map[string]int{}
@@ -941,7 +925,7 @@ func isRobloxDOMFilePath(filePath string) bool {
 	return extension == ".rbxl" || extension == ".rbxm"
 }
 
-func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overallScore int, grades []performanceGrade, percentiles reportCellPercentiles) fyne.CanvasObject {
+func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overallScore int, grades []report.PerformanceGrade, percentiles report.CellPercentiles) fyne.CanvasObject {
 	headingText := "Performance Profile"
 	if strings.TrimSpace(assetTypeLabel) != "" {
 		headingText = fmt.Sprintf("Performance Profile (%s)", assetTypeLabel)
@@ -1005,17 +989,17 @@ func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overa
 
 func gradeColor(grade string) color.Color {
 	switch grade {
-	case gradeAPlus:
+	case "A+":
 		return color.RGBA{R: 0, G: 200, B: 83, A: 255}
-	case gradeA:
+	case "A":
 		return color.RGBA{R: 76, G: 175, B: 80, A: 255}
-	case gradeB:
+	case "B":
 		return color.RGBA{R: 139, G: 195, B: 74, A: 255}
-	case gradeC:
+	case "C":
 		return color.RGBA{R: 255, G: 193, B: 7, A: 255}
-	case gradeD:
+	case "D":
 		return color.RGBA{R: 255, G: 152, B: 0, A: 255}
-	case gradeE:
+	case "E":
 		return color.RGBA{R: 255, G: 87, B: 34, A: 255}
 	default:
 		return color.RGBA{R: 244, G: 67, B: 54, A: 255}

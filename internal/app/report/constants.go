@@ -1,13 +1,15 @@
-package app
+package report
 
 import "strings"
 
+const DefaultOversizedTextureThreshold = 4096.0
+
 const (
-	reportGenerationAssetTypeMap     = "map"
-	reportGenerationAssetTypeVehicle = "vehicle"
+	AssetTypeMap     = "map"
+	AssetTypeVehicle = "vehicle"
 )
 
-type reportGenerationGradeThresholds struct {
+type GradeThresholds struct {
 	MeshComplexity      [6]float64
 	DuplicationWastePct [6]float64
 	TotalSizeMB         [6]float64
@@ -21,20 +23,20 @@ type reportGenerationGradeThresholds struct {
 	AssetDiversity      [6]float64
 }
 
-type reportGenerationAssetTypeConfig struct {
+type AssetTypeConfig struct {
 	ID                        string
 	Label                     string
 	DisableSpatialMode        bool
 	OversizedTextureThreshold float64
-	Thresholds                reportGenerationGradeThresholds
+	Thresholds                GradeThresholds
 }
 
-var reportGenerationAssetTypeConfigs = []reportGenerationAssetTypeConfig{
+var AssetTypeConfigs = []AssetTypeConfig{
 	{
-		ID:                        reportGenerationAssetTypeMap,
+		ID:                        AssetTypeMap,
 		Label:                     "Map",
-		OversizedTextureThreshold: defaultLargeTextureThreshold,
-		Thresholds: reportGenerationGradeThresholds{
+		OversizedTextureThreshold: DefaultOversizedTextureThreshold,
+		Thresholds: GradeThresholds{
 			MeshComplexity:      [6]float64{5_000, 15_000, 20_000, 35_000, 45_000, 60_000},
 			DuplicationWastePct: [6]float64{2, 5, 15, 25, 40, 60},
 			TotalSizeMB:         [6]float64{2, 5, 8, 12, 20, 30},
@@ -49,11 +51,11 @@ var reportGenerationAssetTypeConfigs = []reportGenerationAssetTypeConfig{
 		},
 	},
 	{
-		ID:                        reportGenerationAssetTypeVehicle,
+		ID:                        AssetTypeVehicle,
 		Label:                     "Vehicle",
 		DisableSpatialMode:        true,
-		OversizedTextureThreshold: defaultLargeTextureThreshold,
-		Thresholds: reportGenerationGradeThresholds{
+		OversizedTextureThreshold: DefaultOversizedTextureThreshold,
+		Thresholds: GradeThresholds{
 			MeshComplexity:      [6]float64{75_000, 100_000, 120_000, 140_000, 160_000, 180_000},
 			DuplicationWastePct: [6]float64{2, 5, 15, 25, 40, 60},
 			TotalSizeMB:         [6]float64{5, 8, 10, 12, 18, 22},
@@ -69,23 +71,23 @@ var reportGenerationAssetTypeConfigs = []reportGenerationAssetTypeConfig{
 	},
 }
 
-func defaultReportGenerationAssetType() reportGenerationAssetTypeConfig {
-	for _, config := range reportGenerationAssetTypeConfigs {
-		if strings.EqualFold(config.ID, reportGenerationAssetTypeMap) {
+func DefaultAssetType() AssetTypeConfig {
+	for _, config := range AssetTypeConfigs {
+		if strings.EqualFold(config.ID, AssetTypeMap) {
 			return config
 		}
 	}
-	if len(reportGenerationAssetTypeConfigs) > 0 {
-		return reportGenerationAssetTypeConfigs[0]
+	if len(AssetTypeConfigs) > 0 {
+		return AssetTypeConfigs[0]
 	}
-	return reportGenerationAssetTypeConfig{}
+	return AssetTypeConfig{}
 }
 
-func reportGenerationAssetTypeByID(assetTypeID string) (reportGenerationAssetTypeConfig, bool) {
-	for _, config := range reportGenerationAssetTypeConfigs {
+func AssetTypeByID(assetTypeID string) (AssetTypeConfig, bool) {
+	for _, config := range AssetTypeConfigs {
 		if strings.EqualFold(config.ID, strings.TrimSpace(assetTypeID)) {
 			return config, true
 		}
 	}
-	return reportGenerationAssetTypeConfig{}, false
+	return AssetTypeConfig{}, false
 }

@@ -1,9 +1,8 @@
-package app
+package report
 
 import (
 	"testing"
 
-	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/heatmap"
 )
@@ -31,9 +30,9 @@ func TestGradeFromThresholds(t *testing.T) {
 		{9999, gradeF},
 	}
 	for _, tt := range tests {
-		got := gradeFromThresholds(tt.value, thresholds)
+		got := GradeFromThresholds(tt.value, thresholds)
 		if got != tt.expected {
-			t.Errorf("gradeFromThresholds(%.1f) = %s, want %s", tt.value, got, tt.expected)
+			t.Errorf("GradeFromThresholds(%.1f) = %s, want %s", tt.value, got, tt.expected)
 		}
 	}
 }
@@ -58,19 +57,19 @@ func TestComputeMeshComplexityGrade(t *testing.T) {
 		{60_000, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeMeshComplexityGrade(tt.triangles, 0, false)
+		got := ComputeMeshComplexityGrade(tt.triangles, 0, false)
 		if got.Grade != tt.expected {
-			t.Errorf("computeMeshComplexityGrade(%d) = %s, want %s", tt.triangles, got.Grade, tt.expected)
+			t.Errorf("ComputeMeshComplexityGrade(%d) = %s, want %s", tt.triangles, got.Grade, tt.expected)
 		}
 	}
 }
 
 func TestComputeMeshComplexityGradeCellPercentile(t *testing.T) {
-	got := computeMeshComplexityGrade(8_000_000, 4_000, true)
+	got := ComputeMeshComplexityGrade(8_000_000, 4_000, true)
 	if got.Grade != gradeAPlus {
 		t.Errorf("expected A+ when cell p90 is 4000 (< 5000), got %s", got.Grade)
 	}
-	got = computeMeshComplexityGrade(100, 10_000, true)
+	got = ComputeMeshComplexityGrade(100, 10_000, true)
 	if got.Grade != gradeA {
 		t.Errorf("expected A when cell p90 is 10000 (>= 5000, < 15000), got %s", got.Grade)
 	}
@@ -96,9 +95,9 @@ func TestComputeDrawCallGrade(t *testing.T) {
 		{4000, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeDrawCallGrade(tt.drawCalls, 0, false)
+		got := ComputeDrawCallGrade(tt.drawCalls, 0, false)
 		if got.Grade != tt.expected {
-			t.Errorf("computeDrawCallGrade(%d) = %s, want %s", tt.drawCalls, got.Grade, tt.expected)
+			t.Errorf("ComputeDrawCallGrade(%d) = %s, want %s", tt.drawCalls, got.Grade, tt.expected)
 		}
 	}
 }
@@ -124,15 +123,15 @@ func TestComputeDuplicationWasteGrade(t *testing.T) {
 		{60 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeDuplicationWasteGrade(tt.dupBytes, total)
+		got := ComputeDuplicationWasteGrade(tt.dupBytes, total)
 		if got.Grade != tt.expected {
-			t.Errorf("computeDuplicationWasteGrade(%d, %d) = %s, want %s", tt.dupBytes, total, got.Grade, tt.expected)
+			t.Errorf("ComputeDuplicationWasteGrade(%d, %d) = %s, want %s", tt.dupBytes, total, got.Grade, tt.expected)
 		}
 	}
 }
 
 func TestComputeDuplicationWasteGradeZeroTotal(t *testing.T) {
-	got := computeDuplicationWasteGrade(0, 0)
+	got := ComputeDuplicationWasteGrade(0, 0)
 	if got.Grade != gradeAPlus {
 		t.Errorf("expected A+ for zero total, got %s", got.Grade)
 	}
@@ -158,9 +157,9 @@ func TestComputeDownloadSizeGrade(t *testing.T) {
 		{30 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeDownloadSizeGrade(tt.totalBytes, 0, false)
+		got := ComputeDownloadSizeGrade(tt.totalBytes, 0, false)
 		if got.Grade != tt.expected {
-			t.Errorf("computeDownloadSizeGrade(%d) = %s, want %s", tt.totalBytes, got.Grade, tt.expected)
+			t.Errorf("ComputeDownloadSizeGrade(%d) = %s, want %s", tt.totalBytes, got.Grade, tt.expected)
 		}
 	}
 }
@@ -185,9 +184,9 @@ func TestComputeAssetDiversityGrade(t *testing.T) {
 		{2000, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeAssetDiversityGrade(tt.count, 0, false)
+		got := ComputeAssetDiversityGrade(tt.count, 0, false)
 		if got.Grade != tt.expected {
-			t.Errorf("computeAssetDiversityGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
+			t.Errorf("ComputeAssetDiversityGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
 		}
 	}
 }
@@ -195,75 +194,75 @@ func TestComputeAssetDiversityGrade(t *testing.T) {
 func TestOverallPerformanceGrade(t *testing.T) {
 	tests := []struct {
 		name     string
-		grades   []performanceGrade
+		grades   []PerformanceGrade
 		expected string
 	}{
 		{
 			name:     "all A+",
-			grades:   []performanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}},
+			grades:   []PerformanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}},
 			expected: gradeAPlus,
 		},
 		{
 			name:     "all F",
-			grades:   []performanceGrade{{Grade: gradeF}, {Grade: gradeF}, {Grade: gradeF}},
+			grades:   []PerformanceGrade{{Grade: gradeF}, {Grade: gradeF}, {Grade: gradeF}},
 			expected: gradeF,
 		},
 		{
 			name:     "mixed A+ and A rounds to A",
-			grades:   []performanceGrade{{Grade: gradeAPlus}, {Grade: gradeA}, {Grade: gradeA}},
+			grades:   []PerformanceGrade{{Grade: gradeAPlus}, {Grade: gradeA}, {Grade: gradeA}},
 			expected: gradeA,
 		},
 		{
 			name:     "mixed rounds to D",
-			grades:   []performanceGrade{{Grade: gradeA}, {Grade: gradeC}, {Grade: gradeD}, {Grade: gradeD}, {Grade: gradeF}},
+			grades:   []PerformanceGrade{{Grade: gradeA}, {Grade: gradeC}, {Grade: gradeD}, {Grade: gradeD}, {Grade: gradeF}},
 			expected: gradeD,
 		},
 		{
 			name:     "empty returns F",
-			grades:   []performanceGrade{},
+			grades:   []PerformanceGrade{},
 			expected: gradeF,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := overallPerformanceGrade(tt.grades, false)
+			got := OverallPerformanceGrade(tt.grades, false)
 			if got != tt.expected {
-				t.Errorf("overallPerformanceGrade() = %s, want %s", got, tt.expected)
+				t.Errorf("OverallPerformanceGrade() = %s, want %s", got, tt.expected)
 			}
 		})
 	}
 }
 
 func TestOverallPerformanceGradeCappedWithDuplicates(t *testing.T) {
-	grades := []performanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}}
-	got := overallPerformanceGrade(grades, true)
+	grades := []PerformanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}}
+	got := OverallPerformanceGrade(grades, true)
 	if got != gradeB {
-		t.Errorf("overallPerformanceGrade(all A+, hasDuplicates=true) = %s, want %s", got, gradeB)
+		t.Errorf("OverallPerformanceGrade(all A+, hasDuplicates=true) = %s, want %s", got, gradeB)
 	}
 
-	lowGrades := []performanceGrade{{Grade: gradeD}, {Grade: gradeF}}
-	got = overallPerformanceGrade(lowGrades, true)
+	lowGrades := []PerformanceGrade{{Grade: gradeD}, {Grade: gradeF}}
+	got = OverallPerformanceGrade(lowGrades, true)
 	if got != gradeE {
-		t.Errorf("overallPerformanceGrade(D+F, hasDuplicates=true) = %s, want %s (should not raise low grades)", got, gradeE)
+		t.Errorf("OverallPerformanceGrade(D+F, hasDuplicates=true) = %s, want %s (should not raise low grades)", got, gradeE)
 	}
 }
 
 func TestOverallPerformanceScorePercent(t *testing.T) {
-	perfectGrades := []performanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}}
-	got := overallPerformanceScorePercent(perfectGrades, false)
+	perfectGrades := []PerformanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}}
+	got := OverallPerformanceScorePercent(perfectGrades, false)
 	if got != 100 {
-		t.Errorf("overallPerformanceScorePercent(all A+, false) = %d, want 100", got)
+		t.Errorf("OverallPerformanceScorePercent(all A+, false) = %d, want 100", got)
 	}
 
-	mixedGrades := []performanceGrade{{Grade: gradeA}, {Grade: gradeC}, {Grade: gradeD}, {Grade: gradeD}, {Grade: gradeF}}
-	got = overallPerformanceScorePercent(mixedGrades, false)
+	mixedGrades := []PerformanceGrade{{Grade: gradeA}, {Grade: gradeC}, {Grade: gradeD}, {Grade: gradeD}, {Grade: gradeF}}
+	got = OverallPerformanceScorePercent(mixedGrades, false)
 	if got != 40 {
-		t.Errorf("overallPerformanceScorePercent(mixed, false) = %d, want 40", got)
+		t.Errorf("OverallPerformanceScorePercent(mixed, false) = %d, want 40", got)
 	}
 
-	got = overallPerformanceScorePercent(perfectGrades, true)
+	got = OverallPerformanceScorePercent(perfectGrades, true)
 	if got != 67 {
-		t.Errorf("overallPerformanceScorePercent(all A+, true) = %d, want 67", got)
+		t.Errorf("OverallPerformanceScorePercent(all A+, true) = %d, want 67", got)
 	}
 }
 
@@ -287,9 +286,9 @@ func TestComputeTextureSizeGrade(t *testing.T) {
 		{20 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeTextureSizeGrade(tt.textureBytes, 0, false)
+		got := ComputeTextureSizeGrade(tt.textureBytes, 0, false)
 		if got.Grade != tt.expected {
-			t.Errorf("computeTextureSizeGrade(%d) = %s, want %s", tt.textureBytes, got.Grade, tt.expected)
+			t.Errorf("ComputeTextureSizeGrade(%d) = %s, want %s", tt.textureBytes, got.Grade, tt.expected)
 		}
 	}
 }
@@ -314,9 +313,9 @@ func TestComputeMeshSizeGrade(t *testing.T) {
 		{15 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeMeshSizeGrade(tt.meshBytes, 0, false)
+		got := ComputeMeshSizeGrade(tt.meshBytes, 0, false)
 		if got.Grade != tt.expected {
-			t.Errorf("computeMeshSizeGrade(%d) = %s, want %s", tt.meshBytes, got.Grade, tt.expected)
+			t.Errorf("ComputeMeshSizeGrade(%d) = %s, want %s", tt.meshBytes, got.Grade, tt.expected)
 		}
 	}
 }
@@ -340,9 +339,9 @@ func TestComputeDuplicateCountGrade(t *testing.T) {
 		{150, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeDuplicateCountGrade(tt.count)
+		got := ComputeDuplicateCountGrade(tt.count)
 		if got.Grade != tt.expected {
-			t.Errorf("computeDuplicateCountGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
+			t.Errorf("ComputeDuplicateCountGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
 		}
 	}
 }
@@ -366,9 +365,9 @@ func TestComputeOversizedTextureCountGrade(t *testing.T) {
 		{25, gradeF},
 	}
 	for _, tt := range tests {
-		got := computeOversizedTextureCountGrade(tt.count)
+		got := ComputeOversizedTextureCountGrade(tt.count)
 		if got.Grade != tt.expected {
-			t.Errorf("computeOversizedTextureCountGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
+			t.Errorf("ComputeOversizedTextureCountGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
 		}
 	}
 }
@@ -387,15 +386,15 @@ func TestCapGradeAtC(t *testing.T) {
 		{gradeF, gradeF},
 	}
 	for _, tt := range tests {
-		got := capGradeAtC(tt.grade)
+		got := CapGradeAtC(tt.grade)
 		if got != tt.expected {
-			t.Errorf("capGradeAtC(%s) = %s, want %s", tt.grade, got, tt.expected)
+			t.Errorf("CapGradeAtC(%s) = %s, want %s", tt.grade, got, tt.expected)
 		}
 	}
 }
 
 func TestDuplicatesCappedAtCInProfile(t *testing.T) {
-	summary := reportGenerationSummary{
+	summary := Summary{
 		TotalBytes:         5 * format.Megabyte,
 		TextureBytes:       3 * format.Megabyte,
 		MeshBytes:          2 * format.Megabyte,
@@ -406,11 +405,11 @@ func TestDuplicatesCappedAtCInProfile(t *testing.T) {
 		UniqueAssetCount:   20,
 	}
 
-	grades := computePerformanceProfile(reportCellPercentiles{}, summary)
+	grades := ComputePerformanceProfile(CellPercentiles{}, summary)
 
 	for _, g := range grades {
 		if g.Label == "Duplicates" || g.Label == "Duplication Waste" {
-			if gradeToNumeric(g.Grade) > gradeToNumeric(gradeC) {
+			if GradeToNumeric(g.Grade) > GradeToNumeric(gradeC) {
 				t.Errorf("grade %q = %s, expected C or worse when duplicates > 0", g.Label, g.Grade)
 			}
 		}
@@ -418,7 +417,7 @@ func TestDuplicatesCappedAtCInProfile(t *testing.T) {
 }
 
 func TestComputePerformanceProfileIntegration(t *testing.T) {
-	summary := reportGenerationSummary{
+	summary := Summary{
 		TotalBytes:            1 * format.Megabyte,
 		TextureBytes:          format.Megabyte / 2,
 		MeshBytes:             format.Megabyte / 2,
@@ -430,7 +429,7 @@ func TestComputePerformanceProfileIntegration(t *testing.T) {
 		UniqueAssetCount:      20,
 	}
 
-	grades := computePerformanceProfile(reportCellPercentiles{}, summary)
+	grades := ComputePerformanceProfile(CellPercentiles{}, summary)
 	if len(grades) != 11 {
 		t.Fatalf("expected 11 grades, got %d", len(grades))
 	}
@@ -441,14 +440,14 @@ func TestComputePerformanceProfileIntegration(t *testing.T) {
 		}
 	}
 
-	overall := overallPerformanceGrade(grades, false)
+	overall := OverallPerformanceGrade(grades, false)
 	if overall != gradeAPlus {
 		t.Errorf("overall = %s, want %s", overall, gradeAPlus)
 	}
 }
 
 func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
-	summary := reportGenerationSummary{
+	summary := Summary{
 		TotalBytes:            800 * format.Megabyte,
 		TextureBytes:          500 * format.Megabyte,
 		MeshBytes:             500 * format.Megabyte,
@@ -459,7 +458,7 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 		MeshPartCount:         4000,
 		PartCount:             10000,
 	}
-	percentiles := reportCellPercentiles{
+	percentiles := CellPercentiles{
 		P90TotalBytes:    1 * float64(format.Megabyte),
 		P90TextureBytes:  1 * float64(format.Megabyte),
 		P90MeshBytes:     512 * 1024,
@@ -472,7 +471,7 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 		CellSizeStuds:    50,
 	}
 
-	grades := computePerformanceProfile(percentiles, summary)
+	grades := ComputePerformanceProfile(percentiles, summary)
 	for _, g := range grades {
 		if g.Label == "Duplicates" || g.Label == "Duplication Waste" {
 			continue
@@ -495,55 +494,13 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 	}
 }
 
-func TestCountReportGenerationOversizedTextures(t *testing.T) {
-	refs := []extractor.PositionedResult{
-		{
-			ID:           101,
-			RawContent:   "rbxassetid://101",
-			InstancePath: "Workspace.BigTexture",
-		},
-		{
-			ID:           202,
-			RawContent:   "rbxassetid://202",
-			InstancePath: "Workspace.SmallTexture",
-		},
-	}
-	resolved := map[string]reportGenerationResolvedAsset{
-		extractor.AssetReferenceKey(101, "rbxassetid://101"): {
-			Stats: heatmap.AssetStats{TextureBytes: 200_000},
-		},
-		extractor.AssetReferenceKey(202, "rbxassetid://202"): {
-			Stats: heatmap.AssetStats{TextureBytes: 10_000},
-		},
-	}
-	mapParts := []rbxlHeatmapMapPart{
-		{
-			InstancePath: "Workspace.BigTexture",
-			SizeX:        5,
-			SizeY:        5,
-			SizeZ:        5,
-		},
-		{
-			InstancePath: "Workspace.SmallTexture",
-			SizeX:        100,
-			SizeY:        100,
-			SizeZ:        100,
-		},
-	}
-
-	count := countReportGenerationOversizedTextures(refs, resolved, mapParts, defaultLargeTextureThreshold)
-	if count != 1 {
-		t.Fatalf("expected 1 oversized texture, got %d", count)
-	}
-}
-
 func TestComputeCellPercentiles(t *testing.T) {
-	cells := []rbxlHeatmapCell{
-		{Stats: rbxlHeatmapTotals{ReferenceCount: 5, TotalBytes: 100, TextureBytes: 40, MeshBytes: 60, TriangleCount: 1000, UniqueAssetCount: 3, MeshPartCount: 2, PartCount: 1, DrawCallCount: 2}, MinimumX: 0, MaximumX: 50},
-		{Stats: rbxlHeatmapTotals{ReferenceCount: 3, TotalBytes: 200, TextureBytes: 80, MeshBytes: 120, TriangleCount: 2000, UniqueAssetCount: 5, MeshPartCount: 4, PartCount: 3, DrawCallCount: 4}, MinimumX: 50, MaximumX: 100},
-		{Stats: rbxlHeatmapTotals{ReferenceCount: 0}},
+	cells := []heatmap.Cell{
+		{Stats: heatmap.Totals{ReferenceCount: 5, TotalBytes: 100, TextureBytes: 40, MeshBytes: 60, TriangleCount: 1000, UniqueAssetCount: 3, MeshPartCount: 2, PartCount: 1, DrawCallCount: 2}, MinimumX: 0, MaximumX: 50},
+		{Stats: heatmap.Totals{ReferenceCount: 3, TotalBytes: 200, TextureBytes: 80, MeshBytes: 120, TriangleCount: 2000, UniqueAssetCount: 5, MeshPartCount: 4, PartCount: 3, DrawCallCount: 4}, MinimumX: 50, MaximumX: 100},
+		{Stats: heatmap.Totals{ReferenceCount: 0}},
 	}
-	percentiles := computeCellPercentiles(cells)
+	percentiles := ComputeCellPercentiles(cells)
 	if percentiles.CellCount != 2 {
 		t.Fatalf("expected 2 occupied cells, got %d", percentiles.CellCount)
 	}
@@ -568,37 +525,37 @@ func TestComputeCellPercentiles(t *testing.T) {
 }
 
 func TestComputeCellPercentilesEmpty(t *testing.T) {
-	percentiles := computeCellPercentiles(nil)
+	percentiles := ComputeCellPercentiles(nil)
 	if percentiles.CellCount != 0 {
 		t.Errorf("expected 0 cells for nil input, got %d", percentiles.CellCount)
 	}
 }
 
 func TestComputeCellPercentilesUsesMetricSpecificOccupiedCells(t *testing.T) {
-	cells := []rbxlHeatmapCell{
+	cells := []heatmap.Cell{
 		{
-			Stats:    rbxlHeatmapTotals{ReferenceCount: 2, TotalBytes: 100, MeshPartCount: 4, DrawCallCount: 5},
+			Stats:    heatmap.Totals{ReferenceCount: 2, TotalBytes: 100, MeshPartCount: 4, DrawCallCount: 5},
 			MinimumX: 0,
 			MaximumX: 200,
 		},
 		{
-			Stats:    rbxlHeatmapTotals{MeshPartCount: 2, DrawCallCount: 1},
+			Stats:    heatmap.Totals{MeshPartCount: 2, DrawCallCount: 1},
 			MinimumX: 200,
 			MaximumX: 400,
 		},
 		{
-			Stats:    rbxlHeatmapTotals{PartCount: 6},
+			Stats:    heatmap.Totals{PartCount: 6},
 			MinimumX: 400,
 			MaximumX: 600,
 		},
 		{
-			Stats:    rbxlHeatmapTotals{PartCount: 2},
+			Stats:    heatmap.Totals{PartCount: 2},
 			MinimumX: 600,
 			MaximumX: 800,
 		},
 	}
 
-	percentiles := computeCellPercentiles(cells)
+	percentiles := ComputeCellPercentiles(cells)
 	if percentiles.CellCount != 1 {
 		t.Fatalf("expected 1 reference-occupied cell, got %d", percentiles.CellCount)
 	}
@@ -617,13 +574,13 @@ func TestComputeCellPercentilesUsesMetricSpecificOccupiedCells(t *testing.T) {
 }
 
 func TestComputeCellPercentilesCaptureTopTenPercent(t *testing.T) {
-	cells := []rbxlHeatmapCell{
-		{Stats: rbxlHeatmapTotals{ReferenceCount: 1, TotalBytes: 100, TriangleCount: 1000}, MinimumX: 0, MaximumX: 50},
-		{Stats: rbxlHeatmapTotals{ReferenceCount: 1, TotalBytes: 110, TriangleCount: 1100}, MinimumX: 50, MaximumX: 100},
-		{Stats: rbxlHeatmapTotals{ReferenceCount: 1, TotalBytes: 10000, TriangleCount: 500000}, MinimumX: 100, MaximumX: 150},
+	cells := []heatmap.Cell{
+		{Stats: heatmap.Totals{ReferenceCount: 1, TotalBytes: 100, TriangleCount: 1000}, MinimumX: 0, MaximumX: 50},
+		{Stats: heatmap.Totals{ReferenceCount: 1, TotalBytes: 110, TriangleCount: 1100}, MinimumX: 50, MaximumX: 100},
+		{Stats: heatmap.Totals{ReferenceCount: 1, TotalBytes: 10000, TriangleCount: 500000}, MinimumX: 100, MaximumX: 150},
 	}
 
-	percentiles := computeCellPercentiles(cells)
+	percentiles := ComputeCellPercentiles(cells)
 	if percentiles.P90TotalBytes != 10000 {
 		t.Fatalf("expected P90TotalBytes 10000 to reflect the top 10%% cells, got %.0f", percentiles.P90TotalBytes)
 	}
