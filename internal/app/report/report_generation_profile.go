@@ -171,6 +171,10 @@ func ComputePerformanceProfileForAssetType(assetType AssetTypeConfig, percentile
 
 	dupCount := ComputeDuplicateCountGradeWithThresholds(summary.DuplicateCount, thresholds.DuplicateCount)
 	dupWaste := ComputeDuplicationWasteGradeWithThresholds(summary.DuplicateSizeBytes, summary.TotalBytes, thresholds.DuplicationWastePct)
+	if summary.DuplicateCount > 0 {
+		dupCount.Grade = CapGradeAtC(dupCount.Grade)
+		dupWaste.Grade = CapGradeAtC(dupWaste.Grade)
+	}
 	grades = append(grades, dupCount, dupWaste)
 	return grades
 }
