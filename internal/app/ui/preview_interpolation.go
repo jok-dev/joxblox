@@ -3,23 +3,23 @@ package ui
 import xdraw "golang.org/x/image/draw"
 
 const (
-	sampleModeNearestNeighbor = "Nearest Neighbor"
-	sampleModeBilinear        = "Bilinear"
-	sampleModeCatmullRom      = "Catmull-Rom"
-	defaultSampleMode         = sampleModeCatmullRom
+	SampleModeNearestNeighbor = "Nearest Neighbor"
+	SampleModeBilinear        = "Bilinear"
+	SampleModeCatmullRom      = "Catmull-Rom"
+	DefaultSampleMode         = SampleModeCatmullRom
 )
 
-var sampleModeOptions = []string{
-	sampleModeNearestNeighbor,
-	sampleModeBilinear,
-	sampleModeCatmullRom,
+var SampleModeOptions = []string{
+	SampleModeNearestNeighbor,
+	SampleModeBilinear,
+	SampleModeCatmullRom,
 }
 
-func sampleModeInterpolator(mode string) xdraw.Interpolator {
+func SampleModeInterpolator(mode string) xdraw.Interpolator {
 	switch mode {
-	case sampleModeNearestNeighbor:
+	case SampleModeNearestNeighbor:
 		return xdraw.NearestNeighbor
-	case sampleModeBilinear:
+	case SampleModeBilinear:
 		return xdraw.BiLinear
 	default:
 		return xdraw.CatmullRom

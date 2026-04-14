@@ -356,10 +356,10 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 		view.applySelectedPreviewVariant()
 	})
 	view.previewVariantSelect.Disable()
-	view.interpolationSelect = widget.NewSelect(sampleModeOptions, func(string) {
+	view.interpolationSelect = widget.NewSelect(SampleModeOptions, func(string) {
 		view.rebuildPreviewVariants()
 	})
-	view.interpolationSelect.SetSelected(defaultSampleMode)
+	view.interpolationSelect.SetSelected(DefaultSampleMode)
 	view.interpolationSelect.Disable()
 	previewVariantControl := container.NewGridWrap(fyne.NewSize(240, 36), view.previewVariantSelect)
 	interpolationControl := container.NewGridWrap(fyne.NewSize(160, 36), view.interpolationSelect)

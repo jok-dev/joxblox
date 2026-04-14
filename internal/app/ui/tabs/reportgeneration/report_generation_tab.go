@@ -1,4 +1,4 @@
-package app
+package reportgeneration
 
 import (
 	"fmt"
@@ -20,10 +20,10 @@ import (
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	"joxblox/internal/app/common"
-	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/app/loader"
 	"joxblox/internal/app/report"
 	"joxblox/internal/app/ui"
+	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -49,7 +49,7 @@ type reportGenerationInstanceRenderInfo struct {
 
 const reportGenerationCellSizeStuds = 1000.0
 
-func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string)) {
+func NewReportGenerationTab(window fyne.Window, onViewInScan func(string), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string)) {
 	selectedFilePath := ""
 	currentSummary := report.Summary{}
 	currentCells := []heatmap.Cell{}
@@ -333,7 +333,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 
 	loadReportFile = func(filePath string) {
 		trimmedPath := strings.TrimSpace(filePath)
-		if !isRobloxDOMFilePath(trimmedPath) {
+		if !common.IsRobloxDOMFilePath(trimmedPath) {
 			statusLabel.SetText("Only .rbxl/.rbxm")
 			return
 		}
@@ -881,11 +881,6 @@ func reportGenerationSurfaceAppearanceKey(properties map[string]string) string {
 		parts = append(parts, propertyName+"="+properties[propertyName])
 	}
 	return strings.Join(parts, "|")
-}
-
-func isRobloxDOMFilePath(filePath string) bool {
-	extension := strings.ToLower(filepath.Ext(strings.TrimSpace(filePath)))
-	return extension == ".rbxl" || extension == ".rbxm"
 }
 
 func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overallScore int, grades []report.PerformanceGrade, percentiles report.CellPercentiles) fyne.CanvasObject {

@@ -1,11 +1,11 @@
-package app
+package reportgeneration
 
 import (
 	"math"
 	"testing"
 
-	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/heatmap"

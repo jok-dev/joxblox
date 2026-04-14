@@ -1,4 +1,4 @@
-package app
+package imageuploader
 
 import (
 	"bytes"
@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/opencloud"
@@ -33,8 +34,6 @@ const (
 	uploadUIRefreshEvery    = 5
 	patternModeNoise        = "Random Noise (largest)"
 	patternModeCheckered    = "Random Checkered (smaller)"
-	uploadCreatorModeUser   = "User"
-	uploadCreatorModeGroup  = "Group"
 	defaultAssetNameBase    = "Joxblox Texture"
 )
 
@@ -57,30 +56,6 @@ var sampleSizeOptions = []string{
 }
 
 const defaultSampleSize = "Original"
-
-const (
-	sampleModeNearestNeighbor = "Nearest Neighbor"
-	sampleModeBilinear        = "Bilinear"
-	sampleModeCatmullRom      = "Catmull-Rom"
-	defaultSampleMode         = sampleModeCatmullRom
-)
-
-var sampleModeOptions = []string{
-	sampleModeNearestNeighbor,
-	sampleModeBilinear,
-	sampleModeCatmullRom,
-}
-
-func sampleModeInterpolator(mode string) xdraw.Interpolator {
-	switch mode {
-	case sampleModeNearestNeighbor:
-		return xdraw.NearestNeighbor
-	case sampleModeBilinear:
-		return xdraw.BiLinear
-	default:
-		return xdraw.CatmullRom
-	}
-}
 
 func parseImageSize(sizeStr string) (int, int, error) {
 	parts := strings.SplitN(sizeStr, "x", 2)
@@ -136,7 +111,7 @@ func buildSampleSpecs(labels []string, baseW, baseH int) []sampleSpec {
 	return specs
 }
 
-func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
+func NewImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 	countEntry := widget.NewEntry()
 	countEntry.SetText(strconv.Itoa(uploadDefaultImageCount))
 	countEntry.SetPlaceHolder(strconv.Itoa(uploadDefaultImageCount))
@@ -149,8 +124,8 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 	addSampleSelect := widget.NewSelect(sampleSizeOptions, nil)
 	addSampleSelect.SetSelected(defaultSampleSize)
 	addSampleButton := widget.NewButton("Add", nil)
-	sampleModeSelect := widget.NewSelect(sampleModeOptions, nil)
-	sampleModeSelect.SetSelected(defaultSampleMode)
+	sampleModeSelect := widget.NewSelect(ui.SampleModeOptions, nil)
+	sampleModeSelect.SetSelected(ui.DefaultSampleMode)
 
 	var inProgress bool
 	var rebuildSampleList func()
@@ -196,8 +171,8 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 	apiKeyEntry := widget.NewPasswordEntry()
 	apiKeyEntry.SetPlaceHolder("Open Cloud API key")
 	rememberAPIKeyCheck := widget.NewCheck("Save API key to keychain", nil)
-	creatorTypeSelect := widget.NewSelect([]string{uploadCreatorModeUser, uploadCreatorModeGroup}, nil)
-	creatorTypeSelect.SetSelected(uploadCreatorModeUser)
+	creatorTypeSelect := widget.NewSelect([]string{ui.UploadCreatorModeUser, ui.UploadCreatorModeGroup}, nil)
+	creatorTypeSelect.SetSelected(ui.UploadCreatorModeUser)
 	creatorIDEntry := widget.NewEntry()
 	creatorIDEntry.SetPlaceHolder("Creator user/group ID")
 	assetNameEntry := widget.NewEntry()
@@ -345,7 +320,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 			return
 		}
 		samples := buildSampleSpecs(selectedSampleLabels, imgWidth, imgHeight)
-		interpolator := sampleModeInterpolator(strings.TrimSpace(sampleModeSelect.Selected))
+		interpolator := ui.SampleModeInterpolator(strings.TrimSpace(sampleModeSelect.Selected))
 		outputFolderPath := strings.TrimSpace(outputFolderEntry.Text)
 		if outputFolderPath == "" {
 			statusLabel.SetText("Output folder is required.")
@@ -376,7 +351,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 				return
 			}
 			uploadCreator = opencloud.Creator{
-				IsGroup: strings.TrimSpace(creatorTypeSelect.Selected) == uploadCreatorModeGroup,
+				IsGroup: strings.TrimSpace(creatorTypeSelect.Selected) == ui.UploadCreatorModeGroup,
 				ID:      creatorID,
 			}
 			if rememberAPIKeyCheck.Checked {

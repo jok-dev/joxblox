@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	lastUploadCreatorType = uploadCreatorModeUser
+	lastUploadCreatorType = UploadCreatorModeUser
 	lastUploadCreatorID   = ""
 )
 
@@ -89,7 +89,7 @@ func (view *AssetView) uploadSelectedPreviewVariant() {
 		apiKeyEntry.SetText(storedKey)
 	}
 
-	creatorTypeSelect := widget.NewSelect([]string{uploadCreatorModeUser, uploadCreatorModeGroup}, nil)
+	creatorTypeSelect := widget.NewSelect([]string{UploadCreatorModeUser, UploadCreatorModeGroup}, nil)
 	creatorTypeSelect.SetSelected(lastUploadCreatorType)
 
 	creatorIDEntry := widget.NewEntry()
@@ -134,7 +134,7 @@ func (view *AssetView) uploadSelectedPreviewVariant() {
 		lastUploadCreatorID = strings.TrimSpace(creatorIDEntry.Text)
 
 		creator := opencloud.Creator{
-			IsGroup: creatorTypeSelect.Selected == uploadCreatorModeGroup,
+			IsGroup: creatorTypeSelect.Selected == UploadCreatorModeGroup,
 			ID:      creatorID,
 		}
 
@@ -247,7 +247,7 @@ func (view *AssetView) showExpandedImageWindow() {
 	}
 
 	variantSelect := widget.NewSelect(variantLabels, nil)
-	interpolationSelect := widget.NewSelect(sampleModeOptions, nil)
+	interpolationSelect := widget.NewSelect(SampleModeOptions, nil)
 	backgroundSelect := widget.NewSelect([]string{ExpandedBackgroundBlack, ExpandedBackgroundWhite}, nil)
 	interpolationSelect.SetSelected(view.interpolationSelect.Selected)
 	backgroundSelect.SetSelected(ExpandedBackgroundBlack)
@@ -269,7 +269,7 @@ func (view *AssetView) showExpandedImageWindow() {
 		if capturedResource == nil {
 			return
 		}
-		scaler := sampleModeInterpolator(mode)
+		scaler := SampleModeInterpolator(mode)
 		go func() {
 			newOptions, buildErr := buildPreviewDownloadOptions(capturedResource, capturedAssetID, scaler)
 			if buildErr != nil || len(newOptions) == 0 {
@@ -554,7 +554,7 @@ func (view *AssetView) rebuildPreviewVariants() {
 	selectedAssetID := view.currentAssetID
 	previousIndex := findOptionIndex(view.previewDownloadOptions, view.selectedPreviewOption)
 	buildToken := view.previewVariantBuildToken.Add(1)
-	scaler := sampleModeInterpolator(view.interpolationSelect.Selected)
+	scaler := SampleModeInterpolator(view.interpolationSelect.Selected)
 	go func() {
 		downloadOptions, buildErr := buildPreviewDownloadOptions(resource, selectedAssetID, scaler)
 		if buildErr != nil || len(downloadOptions) == 0 {

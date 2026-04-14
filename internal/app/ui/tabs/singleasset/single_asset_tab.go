@@ -1,4 +1,4 @@
-package app
+package singleasset
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
+func NewSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	assetInput := widget.NewEntry()
 	assetInput.SetPlaceHolder("Paste an asset ID, rbxassetid URL, or rbxthumb URL")
 

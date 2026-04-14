@@ -1,6 +1,6 @@
 package ui
 
 const (
-	uploadCreatorModeUser  = "User"
-	uploadCreatorModeGroup = "Group"
+	UploadCreatorModeUser  = "User"
+	UploadCreatorModeGroup = "Group"
 )

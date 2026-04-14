@@ -1,4 +1,4 @@
-package app
+package optimizeassets
 
 import (
 	"bytes"
@@ -155,7 +155,7 @@ func verifyImageAssets(
 	return confirmed
 }
 
-func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
+func NewOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 	selectedFilePath := ""
 	var scannedResults []extractor.Result
 	var filteredResults []extractor.Result
@@ -196,8 +196,8 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 	scaleSelect := widget.NewSelect(scaleLabels, nil)
 	scaleSelect.SetSelected(optimizeScaleOptions[0].Label)
 
-	interpolationSelect := widget.NewSelect(sampleModeOptions, nil)
-	interpolationSelect.SetSelected(defaultSampleMode)
+	interpolationSelect := widget.NewSelect(ui.SampleModeOptions, nil)
+	interpolationSelect.SetSelected(ui.DefaultSampleMode)
 
 	workersEntry := widget.NewEntry()
 	workersEntry.SetText("8")
@@ -209,8 +209,8 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 		apiKeyEntry.SetText(storedKey)
 		rememberKeyCheck.SetChecked(true)
 	}
-	creatorTypeSelect := widget.NewSelect([]string{uploadCreatorModeUser, uploadCreatorModeGroup}, nil)
-	creatorTypeSelect.SetSelected(uploadCreatorModeUser)
+	creatorTypeSelect := widget.NewSelect([]string{ui.UploadCreatorModeUser, ui.UploadCreatorModeGroup}, nil)
+	creatorTypeSelect.SetSelected(ui.UploadCreatorModeUser)
 	creatorIDEntry := widget.NewEntry()
 	creatorIDEntry.SetPlaceHolder("Creator user/group ID")
 
@@ -630,11 +630,11 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 			return
 		}
 		creator := opencloud.Creator{
-			IsGroup: creatorTypeSelect.Selected == uploadCreatorModeGroup,
+			IsGroup: creatorTypeSelect.Selected == ui.UploadCreatorModeGroup,
 			ID:      creatorID,
 		}
 		scale := getSelectedScale()
-		scaler := sampleModeInterpolator(interpolationSelect.Selected)
+		scaler := ui.SampleModeInterpolator(interpolationSelect.Selected)
 		minSizeBytes := getMinSizeBytes()
 		workerCount := getWorkerCount()
 		assetsToProcess := make([]extractor.Result, len(filteredResults))
