@@ -11,6 +11,7 @@ import (
 
 type PerformanceGrade struct {
 	Grade             string
+	Score             float64
 	Label             string
 	Value             string
 	TotalValue        string
@@ -170,10 +171,6 @@ func ComputePerformanceProfileForAssetType(assetType AssetTypeConfig, percentile
 
 	dupCount := ComputeDuplicateCountGradeWithThresholds(summary.DuplicateCount, thresholds.DuplicateCount)
 	dupWaste := ComputeDuplicationWasteGradeWithThresholds(summary.DuplicateSizeBytes, summary.TotalBytes, thresholds.DuplicationWastePct)
-	if summary.DuplicateCount > 0 {
-		dupCount.Grade = CapGradeAtC(dupCount.Grade)
-		dupWaste.Grade = CapGradeAtC(dupWaste.Grade)
-	}
 	grades = append(grades, dupCount, dupWaste)
 	return grades
 }
@@ -188,7 +185,7 @@ func OverallPerformanceGrade(grades []PerformanceGrade, hasDuplicates bool) stri
 }
 
 func OverallPerformanceScorePercent(grades []PerformanceGrade, hasDuplicates bool) int {
-	avg := OverallPerformanceNumericAverage(grades)
+	avg := overallContinuousAverage(grades)
 	if hasDuplicates && avg > float64(GradeToNumeric(gradeB)) {
 		avg = float64(GradeToNumeric(gradeB))
 	}
@@ -207,6 +204,21 @@ func OverallPerformanceNumericAverage(grades []PerformanceGrade) float64 {
 	return float64(total) / float64(len(grades))
 }
 
+func overallContinuousAverage(grades []PerformanceGrade) float64 {
+	if len(grades) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, g := range grades {
+		if g.Score > 0 || g.Grade == gradeF {
+			total += g.Score
+		} else {
+			total += float64(GradeToNumeric(g.Grade))
+		}
+	}
+	return total / float64(len(grades))
+}
+
 func ComputeMeshComplexityGrade(triangleCount int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
 	return ComputeMeshComplexityGradeWithThresholds(triangleCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.MeshComplexity)
 }
@@ -221,6 +233,7 @@ func ComputeMeshComplexityGradeWithThresholds(triangleCount int64, percentilePer
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Mesh Complexity",
 		Value:             format.FormatIntCommas(triangleCount) + " tris",
 		TotalValue:        totalLabel,
@@ -241,6 +254,7 @@ func ComputeDuplicationWasteGradeWithThresholds(duplicateSizeBytes int64, totalB
 	grade := GradeFromThresholds(percentage, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(percentage, thresholds),
 		Label:             "Duplication Waste",
 		Value:             fmt.Sprintf("%.1f%%", percentage),
 		Description:       DuplicationGradeDescription(grade),
@@ -262,6 +276,7 @@ func ComputeDownloadSizeGradeWithThresholds(totalBytes int64, percentilePerCell 
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Total Size",
 		Value:             format.FormatSizeAuto64(totalBytes),
 		TotalValue:        totalLabel,
@@ -284,6 +299,7 @@ func ComputeTextureSizeGradeWithThresholds(textureBytes int64, percentilePerCell
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Texture Size",
 		Value:             format.FormatSizeAuto64(textureBytes),
 		TotalValue:        totalLabel,
@@ -306,6 +322,7 @@ func ComputeMeshSizeGradeWithThresholds(meshBytes int64, percentilePerCell float
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Mesh Size",
 		Value:             format.FormatSizeAuto64(meshBytes),
 		TotalValue:        totalLabel,
@@ -319,9 +336,11 @@ func ComputeOversizedTextureCountGrade(oversizedTextureCount int) PerformanceGra
 }
 
 func ComputeOversizedTextureCountGradeWithThresholds(oversizedTextureCount int, thresholds [6]float64) PerformanceGrade {
-	grade := GradeFromThresholds(float64(oversizedTextureCount), thresholds)
+	gradeValue := float64(oversizedTextureCount)
+	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Oversized Textures",
 		Value:             fmt.Sprintf("%d textures", oversizedTextureCount),
 		Description:       OversizedTextureCountGradeDescription(grade),
@@ -334,9 +353,11 @@ func ComputeDuplicateCountGrade(duplicateCount int64) PerformanceGrade {
 }
 
 func ComputeDuplicateCountGradeWithThresholds(duplicateCount int64, thresholds [6]float64) PerformanceGrade {
-	grade := GradeFromThresholds(float64(duplicateCount), thresholds)
+	gradeValue := float64(duplicateCount)
+	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Duplicates",
 		Value:             format.FormatIntCommas(duplicateCount) + " duplicates",
 		Description:       DuplicateCountGradeDescription(grade),
@@ -358,6 +379,7 @@ func ComputeMeshPartCountGradeWithThresholds(meshPartCount int, percentilePerCel
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "MeshParts",
 		Value:             fmt.Sprintf("%d", meshPartCount),
 		TotalValue:        totalLabel,
@@ -380,6 +402,7 @@ func ComputeDrawCallGradeWithThresholds(drawCallCount int64, percentilePerCell f
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Draw Calls",
 		Value:             fmt.Sprintf("%d est.", drawCallCount),
 		TotalValue:        totalLabel,
@@ -402,6 +425,7 @@ func ComputePartCountGradeWithThresholds(partCount int, percentilePerCell float6
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Parts",
 		Value:             fmt.Sprintf("%d", partCount),
 		TotalValue:        totalLabel,
@@ -424,6 +448,7 @@ func ComputeAssetDiversityGradeWithThresholds(uniqueAssetCount int, percentilePe
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Asset Diversity",
 		Value:             fmt.Sprintf("%d unique", uniqueAssetCount),
 		TotalValue:        totalLabel,
@@ -451,6 +476,23 @@ func GradeFromThresholds(value float64, thresholds [6]float64) string {
 	default:
 		return gradeF
 	}
+}
+
+// ContinuousScoreFromThresholds returns a float in [0, 6] that linearly
+// interpolates within each grade bucket, giving a granular score instead
+// of snapping to a discrete integer.
+func ContinuousScoreFromThresholds(value float64, thresholds [6]float64) float64 {
+	if value <= 0 {
+		return 6.0
+	}
+	boundaries := [7]float64{0, thresholds[0], thresholds[1], thresholds[2], thresholds[3], thresholds[4], thresholds[5]}
+	for i := 1; i < len(boundaries); i++ {
+		if value < boundaries[i] {
+			t := (value - boundaries[i-1]) / (boundaries[i] - boundaries[i-1])
+			return float64(7-i) - t
+		}
+	}
+	return 0.0
 }
 
 func CapGradeAtC(grade string) string {

@@ -119,7 +119,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	limitEntry.SetText(strconv.Itoa(maxResultsDefault))
 	limitEntry.SetPlaceHolder(strconv.Itoa(maxResultsDefault))
 	pathWhitelistEntry := widget.NewMultiLineEntry()
-	pathWhitelistEntry.SetText("Workspace.*")
+	pathWhitelistEntry.SetText("Workspace.*\nMaterialService.*")
 	pathWhitelistEntry.Wrapping = fyne.TextWrapOff
 	pathWhitelistEntry.Disable()
 	pathWhitelistCheck := widget.NewCheck("Path Filter", func(checked bool) {
@@ -789,6 +789,20 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			applyImportedResults(nextRows, fmt.Sprintf("Loaded %d results.", len(nextRows)))
 		},
 		AddRecentFile: addRecentLoadedFile,
+		SetPathFilter: func(enabled bool, text string) {
+			pathWhitelistEnabled = enabled
+			pathWhitelistCheck.SetChecked(enabled)
+			if enabled {
+				pathWhitelistText = text
+				pathWhitelistEntry.SetText(text)
+				pathWhitelistEntry.Enable()
+			} else {
+				pathWhitelistEntry.Disable()
+			}
+		},
+		SetLargeTextureThreshold: func(threshold float64) {
+			explorer.SetLargeTextureThreshold(threshold)
+		},
 	}
 	return content, fileActions
 }

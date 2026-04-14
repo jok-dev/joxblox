@@ -431,6 +431,21 @@ func (explorer *ScanResultsExplorer) updateLargeTextureFilterControls() {
 	}
 }
 
+func (explorer *ScanResultsExplorer) SetLargeTextureThreshold(threshold float64) {
+	if explorer == nil {
+		return
+	}
+	if threshold <= 0 {
+		threshold = loader.DefaultLargeTextureThreshold
+	}
+	explorer.largeTextureThreshold = threshold
+	if explorer.largeTextureThresholdEntry != nil {
+		explorer.suppressLargeTextureFilterChange = true
+		explorer.largeTextureThresholdEntry.SetText(loader.FormatLargeTextureThreshold(threshold))
+		explorer.suppressLargeTextureFilterChange = false
+	}
+}
+
 func (explorer *ScanResultsExplorer) buildTable() {
 	baseTable := widget.NewTableWithHeaders(
 		func() (int, int) {
@@ -538,7 +553,7 @@ func (explorer *ScanResultsExplorer) defaultSortField() string {
 
 func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
 	if explorer.variant == ScanResultsExplorerVariantHeatmap {
-		headers := []string{"Asset ID", "Type", "Total Byte Size", "Texture Bytes", "Texture Pixels", "Mesh Bytes", "Mesh Triangles", "Property", "Instance Path", "World Position"}
+		headers := []string{"Asset ID", "Type", "Total Byte Size", "Texture Bytes", "Texture Pixels", "B/stud²", "Mesh Bytes", "Mesh Triangles", "Property", "Instance Path", "World Position"}
 		for _, row := range explorer.allResults {
 			if strings.TrimSpace(row.Side) != "" {
 				return append([]string{"Side"}, headers...)
@@ -547,9 +562,9 @@ func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
 		return headers
 	}
 	if explorer.similarityActive {
-		return []string{"Similarity", "Asset ID", "Use Count", "Type", "Self Size", "Dimensions", "Triangles", "Asset SHA256"}
+		return []string{"Similarity", "Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Asset SHA256"}
 	}
-	return []string{"Asset ID", "Use Count", "Type", "Self Size", "Dimensions", "Triangles", "Asset SHA256"}
+	return []string{"Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Asset SHA256"}
 }
 
 func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
@@ -561,6 +576,7 @@ func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
 			"Total Byte Size": 110,
 			"Texture Bytes":   110,
 			"Texture Pixels":  110,
+			"B/stud²":         120,
 			"Mesh Bytes":      110,
 			"Mesh Triangles":  110,
 			"Property":        120,
@@ -574,6 +590,7 @@ func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
 		"Use Count":    100,
 		"Type":         190,
 		"Self Size":    90,
+		"B/stud²":      120,
 		"Dimensions":   120,
 		"Triangles":    100,
 		"Asset SHA256": 500,
@@ -949,6 +966,8 @@ func (explorer *ScanResultsExplorer) columnValue(row loader.ScanResult, columnNa
 			return format.FormatIntCommas(row.PixelCount)
 		}
 		return "-"
+	case "B/stud²":
+		return loader.FormatLargeTextureScore(row.LargeTextureScore)
 	case "Mesh Bytes":
 		return format.FormatSizeAuto(row.MeshBytes)
 	case "Mesh Triangles", "Triangles":

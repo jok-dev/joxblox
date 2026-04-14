@@ -169,7 +169,7 @@ func NewOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 
 	whitelistCheck := widget.NewCheck("Enable Path Whitelist", nil)
 	whitelistEntry := widget.NewMultiLineEntry()
-	whitelistEntry.SetText("Workspace.*")
+	whitelistEntry.SetText("Workspace.*\nMaterialService.*")
 	whitelistEntry.SetMinRowsVisible(3)
 	whitelistEntry.Wrapping = fyne.TextWrapOff
 	whitelistEntry.Disable()

@@ -27,9 +27,7 @@ import (
 )
 
 const (
-	requestTimeout               = 15 * time.Second
-	assetDeliveryMetadataMaxAge  = 10 * time.Minute
-	thumbnailMetadataCacheMaxAge = 30 * time.Minute
+	requestTimeout = 15 * time.Second
 )
 
 // CacheSettings holds the configuration for the asset download cache.
@@ -812,17 +810,15 @@ func fetchThumbnailInfoWithTrace(assetID int64, trace *AssetRequestTrace) (*Thum
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildAssetThumbnailMetadataCacheKey(assetID)
 		var cachedEntry CachedThumbnailInfo
-		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, thumbnailMetadataCacheMaxAge, &cachedEntry)
+		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, 0, &cachedEntry)
 		if err != nil {
 			debug.Logf("Thumbnail metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
-			trace.MarkDisk()
 			debug.Logf("Thumbnail metadata cache hit for %s", cacheKey)
 			return &cachedEntry.Info, cachedEntry.RawJSON, nil
 		}
 	}
 
-	trace.MarkNetwork()
 	response, err := roblox.DoThumbnailGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, "", err
@@ -873,11 +869,10 @@ func fetchThumbnailInfoForRequestWithTrace(request *RbxThumbRequest, trace *Asse
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildThumbnailRequestMetadataCacheKey(request)
 		var cachedEntry CachedThumbnailInfo
-		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, thumbnailMetadataCacheMaxAge, &cachedEntry)
+		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, 0, &cachedEntry)
 		if err != nil {
 			debug.Logf("Thumbnail request metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
-			trace.MarkDisk()
 			debug.Logf("Thumbnail request metadata cache hit for %s", cacheKey)
 			return &cachedEntry.Info, cachedEntry.RawJSON, nil
 		}
@@ -895,7 +890,6 @@ func fetchThumbnailInfoForRequestWithTrace(request *RbxThumbRequest, trace *Asse
 		return nil, "", err
 	}
 
-	trace.MarkNetwork()
 	response, err := roblox.DoThumbnailBatchPost(bytes.NewReader(requestJSON), requestTimeout)
 	if err != nil {
 		return nil, "", err
@@ -961,17 +955,15 @@ func FetchAssetDeliveryInfoWithTrace(assetID int64, trace *AssetRequestTrace) (*
 	if cacheSettings.Enabled && cacheSettings.Folder != "" {
 		cacheKey := buildAssetDeliveryMetadataCacheKey(assetID)
 		var cachedEntry AssetDeliveryInfo
-		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, assetDeliveryMetadataMaxAge, &cachedEntry)
+		cacheHit, err := readAssetDownloadJSONCacheEntry(cacheSettings.Folder, cacheKey, 0, &cachedEntry)
 		if err != nil {
 			debug.Logf("AssetDelivery metadata cache read failed for %s: %s", cacheKey, err.Error())
 		} else if cacheHit {
-			trace.MarkDisk()
 			debug.Logf("AssetDelivery metadata cache hit for %s", cacheKey)
 			return &cachedEntry, nil
 		}
 	}
 
-	trace.MarkNetwork()
 	response, err := roblox.DoAssetDeliveryGet(assetID, requestTimeout)
 	if err != nil {
 		return nil, err

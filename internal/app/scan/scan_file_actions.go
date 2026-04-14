@@ -17,6 +17,8 @@ type ScanTabFileActions struct {
 	GetResults    func() []loader.ScanResult
 	SetResults    func([]loader.ScanResult)
 	AddRecentFile func(string)
+	SetPathFilter              func(enabled bool, text string)
+	SetLargeTextureThreshold   func(threshold float64)
 }
 
 type ScanTabFileActionsProvider func() *ScanTabFileActions

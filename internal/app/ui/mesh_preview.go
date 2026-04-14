@@ -794,7 +794,12 @@ func startMeshRendererProcess() (*meshRendererProcess, error) {
 	}
 
 	cmd := exec.Command(commandName, commandArgs...)
-	cmd.Stderr = os.Stderr
+	stderrFile, stderrErr := os.OpenFile(filepath.Join(os.TempDir(), "joxblox-mesh-renderer-stderr.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if stderrErr == nil {
+		cmd.Stderr = stderrFile
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -1027,6 +1032,80 @@ func (p *meshRendererProcess) render(width int, height int, cameraX float64, cam
 
 	img := image.NewNRGBA(image.Rect(0, 0, frameWidth, frameHeight))
 	copy(img.Pix, pixels)
+	return img, nil
+}
+
+func (p *meshRendererProcess) renderOrtho(width int, height int, centerX float64, centerZ float64, orthoHalfW float64, orthoHalfH float64, cameraY float64, bgHex string) (image.Image, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.alive {
+		return nil, fmt.Errorf("process not alive")
+	}
+
+	cmd := fmt.Sprintf("RENDERORTHO %d %d %.6f %.6f %.6f %.6f %.6f %s\n", width, height, centerX, centerZ, orthoHalfW, orthoHalfH, cameraY, bgHex)
+	if _, err := io.WriteString(p.stdin, cmd); err != nil {
+		p.alive = false
+		return nil, fmt.Errorf("write renderOrtho: %w", err)
+	}
+
+	line, readErr := p.stdout.ReadString('\n')
+	if readErr != nil {
+		p.alive = false
+		return nil, fmt.Errorf("read header: %w", readErr)
+	}
+	line = strings.TrimSpace(line)
+
+	if strings.HasPrefix(line, "ERR ") {
+		return nil, fmt.Errorf("renderOrtho error: %s", line[4:])
+	}
+	if !strings.HasPrefix(line, "FRAME ") {
+		return nil, fmt.Errorf("unexpected response: %s", line)
+	}
+
+	frameParts := strings.Fields(line)
+	if len(frameParts) < 4 {
+		return nil, fmt.Errorf("invalid FRAME header: %s", line)
+	}
+	frameWidth, _ := strconv.Atoi(frameParts[1])
+	frameHeight, _ := strconv.Atoi(frameParts[2])
+	byteCount, _ := strconv.Atoi(frameParts[3])
+
+	if byteCount <= 0 || byteCount > 256*1024*1024 {
+		return nil, fmt.Errorf("invalid byte count: %d", byteCount)
+	}
+
+	pixels := make([]byte, byteCount)
+	if _, err := io.ReadFull(p.stdout, pixels); err != nil {
+		p.alive = false
+		return nil, fmt.Errorf("read pixels: %w", err)
+	}
+
+	img := image.NewNRGBA(image.Rect(0, 0, frameWidth, frameHeight))
+	copy(img.Pix, pixels)
+	return img, nil
+}
+
+// RenderTopDownMapImage starts a temporary mesh-renderer process, loads the given
+// scene batches, renders an orthographic top-down view covering the given world
+// bounds, and returns the resulting image.
+func RenderTopDownMapImage(batches []MeshPreviewBatchData, centerX float64, centerZ float64, halfWidth float64, halfHeight float64, cameraY float64, renderWidth int, renderHeight int, bgHex string) (image.Image, error) {
+	if len(batches) == 0 {
+		return nil, fmt.Errorf("no scene batches to render")
+	}
+	proc, startErr := startMeshRendererProcess()
+	if startErr != nil {
+		return nil, fmt.Errorf("start mesh renderer: %w", startErr)
+	}
+	defer proc.stop()
+
+	if loadErr := proc.loadScene(batches); loadErr != nil {
+		return nil, fmt.Errorf("load scene: %w", loadErr)
+	}
+
+	img, renderErr := proc.renderOrtho(renderWidth, renderHeight, centerX, centerZ, halfWidth, halfHeight, cameraY, bgHex)
+	if renderErr != nil {
+		return nil, fmt.Errorf("render ortho: %w", renderErr)
+	}
 	return img, nil
 }
 

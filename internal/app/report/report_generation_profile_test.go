@@ -1,6 +1,7 @@
 package report
 
 import (
+	"math"
 	"testing"
 
 	"joxblox/internal/format"
@@ -34,6 +35,80 @@ func TestGradeFromThresholds(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("GradeFromThresholds(%.1f) = %s, want %s", tt.value, got, tt.expected)
 		}
+	}
+}
+
+func TestContinuousScoreFromThresholds(t *testing.T) {
+	thresholds := [6]float64{50, 100, 200, 300, 400, 500}
+
+	tests := []struct {
+		value    float64
+		expected float64
+	}{
+		{0, 6.0},
+		{25, 5.5},
+		{50, 5.0},
+		{75, 4.5},
+		{100, 4.0},
+		{150, 3.5},
+		{200, 3.0},
+		{250, 2.5},
+		{300, 2.0},
+		{350, 1.5},
+		{400, 1.0},
+		{450, 0.5},
+		{500, 0.0},
+		{9999, 0.0},
+	}
+	for _, tt := range tests {
+		got := ContinuousScoreFromThresholds(tt.value, thresholds)
+		if math.Abs(got-tt.expected) > 0.001 {
+			t.Errorf("ContinuousScoreFromThresholds(%.1f) = %.3f, want %.3f", tt.value, got, tt.expected)
+		}
+	}
+}
+
+func TestContinuousScoreMatchesGradeBoundaries(t *testing.T) {
+	thresholds := [6]float64{50, 100, 200, 300, 400, 500}
+
+	boundaryTests := []struct {
+		value         float64
+		expectedGrade string
+		expectedScore float64
+	}{
+		{0, gradeAPlus, 6.0},
+		{50, gradeA, 5.0},
+		{100, gradeB, 4.0},
+		{200, gradeC, 3.0},
+		{300, gradeD, 2.0},
+		{400, gradeE, 1.0},
+		{500, gradeF, 0.0},
+	}
+	for _, tt := range boundaryTests {
+		grade := GradeFromThresholds(tt.value, thresholds)
+		score := ContinuousScoreFromThresholds(tt.value, thresholds)
+		if grade != tt.expectedGrade {
+			t.Errorf("value=%.0f: grade=%s, want %s", tt.value, grade, tt.expectedGrade)
+		}
+		if math.Abs(score-tt.expectedScore) > 0.001 {
+			t.Errorf("value=%.0f: score=%.3f, want %.3f", tt.value, score, tt.expectedScore)
+		}
+	}
+}
+
+func TestOverallPerformanceScorePercentContinuous(t *testing.T) {
+	thresholds := DefaultAssetType().Thresholds
+
+	bareMid := ComputeDownloadSizeGradeWithThresholds(3*format.Megabyte, 0, false, thresholds.TotalSizeMB)
+	bareHigh := ComputeDownloadSizeGradeWithThresholds(4*format.Megabyte, 0, false, thresholds.TotalSizeMB)
+	if bareMid.Grade != bareHigh.Grade {
+		t.Fatal("test expects both values in the same grade bucket")
+	}
+	if bareMid.Score == bareHigh.Score {
+		t.Errorf("continuous scores should differ for different values within same grade: mid=%.3f, high=%.3f", bareMid.Score, bareHigh.Score)
+	}
+	if bareMid.Score <= bareHigh.Score {
+		t.Errorf("lower value should have higher score: mid=%.3f, high=%.3f", bareMid.Score, bareHigh.Score)
 	}
 }
 

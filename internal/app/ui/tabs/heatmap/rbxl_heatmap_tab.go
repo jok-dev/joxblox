@@ -45,9 +45,7 @@ const (
 	rbxlHeatmapMinSpread            = 0.1
 	rbxlHeatmapMaxSpread            = 5.0
 	rbxlHeatmapSpreadStep           = 0.05
-	rbxlHeatmapGeneratedMapAlpha    = 0.88
 	rbxlHeatmapManualUnderlayAlpha  = 0.84
-	rbxlHeatmapShadowPixelScale     = 0.08
 	rbxlHeatmapDefaultGridDivisions = 36
 	rbxlHeatmapMinGridDivisions     = 4
 	rbxlHeatmapMaxGridDivisions     = 256
@@ -199,7 +197,7 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 	selectedMapImagePath := ""
 	mapImageBytes := []byte(nil)
 	pathFilterEnabled := false
-	pathFilterText := "Workspace.*"
+	pathFilterText := "Workspace.*\nMaterialService.*"
 	heatOpacity := rbxlHeatmapDefaultOpacity
 	heatSpread := rbxlHeatmapDefaultSpread
 	gridDivisions := rbxlHeatmapDefaultGridDivisions
@@ -208,6 +206,7 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 	diffMode := false
 	currentOption := blankHeatmapPreviewOption()
 	heatmapReady := false
+	generatedUnderlayBytes := []byte(nil)
 	var currentScene *RBXLHeatmapScene
 	var renderToken atomic.Uint64
 	var loading atomic.Bool
@@ -391,6 +390,9 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		}
 		sceneSnapshot := cloneHeatmapSceneForRerender(currentScene, gridDivisions)
 		underlayBytes := append([]byte(nil), mapImageBytes...)
+		if len(underlayBytes) == 0 {
+			underlayBytes = append([]byte(nil), generatedUnderlayBytes...)
+		}
 		opacity := heatOpacity
 		spread := heatSpread
 		metric := heatMetric
@@ -696,6 +698,28 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 				buildResult = buildRBXLDiffHeatmapResult(buildResult, compareBuildResult)
 			}
 
+			var topDownResult []byte
+			if len(underlayBytes) == 0 && len(mapParts) > 0 {
+				fyne.Do(func() {
+					statusLabel.SetText("Rendering 3D top-down map...")
+				})
+			topDownBytes, topDownErr := RenderTopDownMapImageFromParts(
+				mapParts, refs,
+				rbxlHeatmapImageSize, rbxlHeatmapImageSize,
+					func(done int, total int) {
+						fyne.Do(func() {
+							statusLabel.SetText(fmt.Sprintf("Resolving mesh assets for map... %d/%d", done, total))
+						})
+					},
+				)
+				if topDownErr != nil {
+					debug.Logf("3D top-down render failed, using plain background: %s", topDownErr.Error())
+				} else {
+					underlayBytes = topDownBytes
+					topDownResult = topDownBytes
+				}
+			}
+
 			option, renderErr := renderRBXLHeatmapScene(buildResult.Scene, underlayBytes, heatOpacity, heatSpread, heatMetric, showGrid)
 			if renderErr != nil {
 				fyne.Do(func() {
@@ -705,6 +729,9 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 			}
 
 			fyne.Do(func() {
+				if len(topDownResult) > 0 {
+					generatedUnderlayBytes = topDownResult
+				}
 				currentScene = buildResult.Scene
 				currentOption = option
 				heatmapReady = true
@@ -1146,7 +1173,6 @@ func buildHeatmapBaseImage(width int, height int, scene *RBXLHeatmapScene, backg
 		}
 	}
 	if len(backgroundImageBytes) == 0 {
-		renderGeneratedMapUnderlay(outputImage, scene)
 		return outputImage, nil
 	}
 
@@ -1532,7 +1558,7 @@ func imagePointToHeatmapWorld(imageX float64, imageY float64, width int, height 
 	}
 	normalizedX := (imageX - float64(rbxlHeatmapPadding)) / contentWidth
 	normalizedZ := (float64(height-rbxlHeatmapPadding) - imageY) / contentHeight
-	worldX := scene.MinimumX + normalizedX*(scene.MaximumX-scene.MinimumX)
+	worldX := scene.MaximumX - normalizedX*(scene.MaximumX-scene.MinimumX)
 	worldZ := scene.MinimumZ + normalizedZ*(scene.MaximumZ-scene.MinimumZ)
 	return worldX, worldZ, true
 }
@@ -2059,97 +2085,6 @@ func ConvertRustMapParts(parts []extractor.MapRenderPartResult) []RBXLHeatmapMap
 	return converted
 }
 
-func renderGeneratedMapUnderlay(outputImage *image.NRGBA, scene *RBXLHeatmapScene) {
-	if outputImage == nil || scene == nil || len(scene.MapParts) == 0 {
-		return
-	}
-	sortedParts := append([]RBXLHeatmapMapPart(nil), scene.MapParts...)
-	sort.SliceStable(sortedParts, func(left int, right int) bool {
-		return sortedParts[left].CenterY < sortedParts[right].CenterY
-	})
-	minY, maxY := mapPartHeightBounds(sortedParts)
-	drawGeneratedMapGround(outputImage)
-	for _, part := range sortedParts {
-		drawGeneratedMapShadow(outputImage, scene, part, minY, maxY)
-	}
-	for _, part := range sortedParts {
-		drawGeneratedMapPart(outputImage, scene, part, minY, maxY)
-	}
-}
-
-func drawGeneratedMapPart(outputImage *image.NRGBA, scene *RBXLHeatmapScene, part RBXLHeatmapMapPart, minY float64, maxY float64) {
-	pixelCorners, startX, endX, startY, endY := mapPartPixelPolygon(outputImage, scene, part)
-	if len(pixelCorners) < 3 {
-		return
-	}
-	heightScale := 0.0
-	if maxY > minY {
-		heightScale = (part.CenterY - minY) / (maxY - minY)
-	}
-	fillColor := mapPartVisualColor(part, heightScale)
-	alpha := rbxlHeatmapGeneratedMapAlpha * (1 - part.Transparency*0.85)
-	for y := startY; y <= endY; y++ {
-		for x := startX; x <= endX; x++ {
-			if !pointInConvexPolygon(float64(x)+0.5, float64(y)+0.5, pixelCorners) {
-				continue
-			}
-			base := outputImage.NRGBAAt(x, y)
-			outputImage.SetNRGBA(x, y, blendNRGBA(base, fillColor, alpha))
-		}
-	}
-	drawGeneratedMapPattern(outputImage, pixelCorners, part, heightScale)
-	outlineColor := shadeHeatmapColor(fillColor, 0.52)
-	drawPolygonOutline(outputImage, pixelCorners, outlineColor, 0.9)
-}
-
-func drawGeneratedMapGround(outputImage *image.NRGBA) {
-	if outputImage == nil {
-		return
-	}
-	bounds := outputImage.Bounds()
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		vertical := float64(y-bounds.Min.Y) / float64(max(1, bounds.Dy()-1))
-		baseColor := color.NRGBA{
-			R: uint8(math.Round(38 + 10*vertical)),
-			G: uint8(math.Round(48 + 18*vertical)),
-			B: uint8(math.Round(42 + 8*vertical)),
-			A: 255,
-		}
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			outputImage.SetNRGBA(x, y, baseColor)
-		}
-	}
-}
-
-func drawGeneratedMapShadow(outputImage *image.NRGBA, scene *RBXLHeatmapScene, part RBXLHeatmapMapPart, minY float64, maxY float64) {
-	pixelCorners, startX, endX, startY, endY := mapPartPixelPolygon(outputImage, scene, part)
-	if len(pixelCorners) < 3 {
-		return
-	}
-	heightScale := 0.0
-	if maxY > minY {
-		heightScale = (part.CenterY - minY) / (maxY - minY)
-	}
-	shadowDistance := (part.SizeY*rbxlHeatmapShadowPixelScale + heightScale*14.0 + 2.0) * (1 - part.Transparency*0.65)
-	shadowOffset := heatmapPixelPoint{X: shadowDistance * 0.85, Y: shadowDistance * 0.55}
-	shadowPolygon := offsetPolygon(pixelCorners, shadowOffset)
-	shadowStartX := format.Clamp(startX+int(math.Floor(shadowOffset.X))-2, 0, outputImage.Bounds().Dx()-1)
-	shadowEndX := format.Clamp(endX+int(math.Ceil(shadowOffset.X))+2, 0, outputImage.Bounds().Dx()-1)
-	shadowStartY := format.Clamp(startY+int(math.Floor(shadowOffset.Y))-2, 0, outputImage.Bounds().Dy()-1)
-	shadowEndY := format.Clamp(endY+int(math.Ceil(shadowOffset.Y))+2, 0, outputImage.Bounds().Dy()-1)
-	shadowAlpha := 0.18 + heightScale*0.22
-	shadowColor := color.NRGBA{R: 5, G: 7, B: 10, A: 255}
-	for y := shadowStartY; y <= shadowEndY; y++ {
-		for x := shadowStartX; x <= shadowEndX; x++ {
-			if !pointInConvexPolygon(float64(x)+0.5, float64(y)+0.5, shadowPolygon) {
-				continue
-			}
-			base := outputImage.NRGBAAt(x, y)
-			outputImage.SetNRGBA(x, y, blendNRGBA(base, shadowColor, shadowAlpha))
-		}
-	}
-}
-
 func HeatmapSceneBounds(points []RBXLHeatmapPoint, mapParts []RBXLHeatmapMapPart) (float64, float64, float64, float64) {
 	hasBounds := false
 	minX := 0.0
@@ -2224,7 +2159,7 @@ func mapHeatmapWorldPoint(
 ) (float64, float64) {
 	contentWidth := float64(width - rbxlHeatmapPadding*2)
 	contentHeight := float64(height - rbxlHeatmapPadding*2)
-	normalizedX := format.Clamp((x-minX)/(maxX-minX), 0, 1)
+	normalizedX := format.Clamp((maxX-x)/(maxX-minX), 0, 1)
 	normalizedZ := format.Clamp((z-minZ)/(maxZ-minZ), 0, 1)
 	pixelX := float64(rbxlHeatmapPadding) + normalizedX*contentWidth
 	pixelY := float64(height-rbxlHeatmapPadding) - normalizedZ*contentHeight
@@ -2243,7 +2178,7 @@ func mapHeatmapPoint(
 ) (int, int) {
 	contentWidth := float64(width - rbxlHeatmapPadding*2)
 	contentHeight := float64(height - rbxlHeatmapPadding*2)
-	normalizedX := format.Clamp((x-minX)/(maxX-minX), 0, 1)
+	normalizedX := format.Clamp((maxX-x)/(maxX-minX), 0, 1)
 	normalizedZ := format.Clamp((z-minZ)/(maxZ-minZ), 0, 1)
 	pixelX := int(math.Round(float64(rbxlHeatmapPadding) + normalizedX*contentWidth))
 	pixelY := int(math.Round(float64(height-rbxlHeatmapPadding) - normalizedZ*contentHeight))
@@ -2282,71 +2217,6 @@ func mapPartWorldCorners(part RBXLHeatmapMapPart) []heatmapPixelPoint {
 		})
 	}
 	return worldCorners
-}
-
-func pointInConvexPolygon(x float64, y float64, polygon []heatmapPixelPoint) bool {
-	if len(polygon) < 3 {
-		return false
-	}
-	sign := 0.0
-	for index := 0; index < len(polygon); index++ {
-		current := polygon[index]
-		next := polygon[(index+1)%len(polygon)]
-		cross := (next.X-current.X)*(y-current.Y) - (next.Y-current.Y)*(x-current.X)
-		if math.Abs(cross) < 0.001 {
-			continue
-		}
-		if sign == 0 {
-			sign = math.Copysign(1, cross)
-			continue
-		}
-		if math.Copysign(1, cross) != sign {
-			return false
-		}
-	}
-	return true
-}
-
-func mapPartPixelPolygon(outputImage *image.NRGBA, scene *RBXLHeatmapScene, part RBXLHeatmapMapPart) ([]heatmapPixelPoint, int, int, int, int) {
-	corners := mapPartWorldCorners(part)
-	pixelCorners := make([]heatmapPixelPoint, 0, len(corners))
-	minPixelX := float64(outputImage.Bounds().Dx())
-	maxPixelX := 0.0
-	minPixelY := float64(outputImage.Bounds().Dy())
-	maxPixelY := 0.0
-	for _, corner := range corners {
-		pixelX, pixelY := mapHeatmapWorldPoint(
-			corner.X,
-			corner.Y,
-			scene.MinimumX,
-			scene.MaximumX,
-			scene.MinimumZ,
-			scene.MaximumZ,
-			outputImage.Bounds().Dx(),
-			outputImage.Bounds().Dy(),
-		)
-		pixelCorners = append(pixelCorners, heatmapPixelPoint{X: pixelX, Y: pixelY})
-		minPixelX = math.Min(minPixelX, pixelX)
-		maxPixelX = math.Max(maxPixelX, pixelX)
-		minPixelY = math.Min(minPixelY, pixelY)
-		maxPixelY = math.Max(maxPixelY, pixelY)
-	}
-	startX := format.Clamp(int(math.Floor(minPixelX)), 0, outputImage.Bounds().Dx()-1)
-	endX := format.Clamp(int(math.Ceil(maxPixelX)), 0, outputImage.Bounds().Dx()-1)
-	startY := format.Clamp(int(math.Floor(minPixelY)), 0, outputImage.Bounds().Dy()-1)
-	endY := format.Clamp(int(math.Ceil(maxPixelY)), 0, outputImage.Bounds().Dy()-1)
-	return pixelCorners, startX, endX, startY, endY
-}
-
-func offsetPolygon(points []heatmapPixelPoint, offset heatmapPixelPoint) []heatmapPixelPoint {
-	shifted := make([]heatmapPixelPoint, 0, len(points))
-	for _, point := range points {
-		shifted = append(shifted, heatmapPixelPoint{
-			X: point.X + offset.X,
-			Y: point.Y + offset.Y,
-		})
-	}
-	return shifted
 }
 
 func buildHeatmapKernel(radius int) [][]float64 {
@@ -2476,129 +2346,6 @@ func drawHeatmapGrid(imageData *image.NRGBA, scene *RBXLHeatmapScene) {
 	}
 }
 
-func drawPolygonOutline(imageData *image.NRGBA, polygon []heatmapPixelPoint, lineColor color.NRGBA, alpha float64) {
-	for index := 0; index < len(polygon); index++ {
-		current := polygon[index]
-		next := polygon[(index+1)%len(polygon)]
-		drawLineSegment(imageData, current, next, lineColor, alpha)
-	}
-}
-
-func drawLineSegment(imageData *image.NRGBA, start heatmapPixelPoint, end heatmapPixelPoint, lineColor color.NRGBA, alpha float64) {
-	steps := int(math.Ceil(math.Max(math.Abs(end.X-start.X), math.Abs(end.Y-start.Y))))
-	if steps <= 0 {
-		steps = 1
-	}
-	for step := 0; step <= steps; step++ {
-		progress := float64(step) / float64(steps)
-		x := int(math.Round(start.X + (end.X-start.X)*progress))
-		y := int(math.Round(start.Y + (end.Y-start.Y)*progress))
-		if x < 0 || x >= imageData.Bounds().Dx() || y < 0 || y >= imageData.Bounds().Dy() {
-			continue
-		}
-		base := imageData.NRGBAAt(x, y)
-		imageData.SetNRGBA(x, y, blendNRGBA(base, lineColor, alpha))
-	}
-}
-
-func drawGeneratedMapPattern(imageData *image.NRGBA, polygon []heatmapPixelPoint, part RBXLHeatmapMapPart, heightScale float64) {
-	if imageData == nil || len(polygon) < 3 {
-		return
-	}
-	partType := strings.ToLower(strings.TrimSpace(part.InstanceType))
-	patternColor := shadeHeatmapColor(part.Color, 1.18+heightScale*0.12)
-	switch partType {
-	case "meshpart", "unionoperation":
-		drawPolygonCross(imageData, polygon, patternColor, 0.18)
-	case "trusspart":
-		drawPolygonHatch(imageData, polygon, patternColor, 0.28, 8)
-	case "spawnlocation":
-		drawPolygonCross(imageData, polygon, color.NRGBA{R: 160, G: 255, B: 160, A: 255}, 0.35)
-	case "seat", "vehicleseat":
-		drawPolygonStripe(imageData, polygon, color.NRGBA{R: 180, G: 210, B: 255, A: 255}, 0.28)
-	case "wedgepart", "cornerwedgepart":
-		drawLineSegment(imageData, polygon[0], polygon[2], patternColor, 0.24)
-	}
-}
-
-func drawPolygonCross(imageData *image.NRGBA, polygon []heatmapPixelPoint, lineColor color.NRGBA, alpha float64) {
-	if len(polygon) < 4 {
-		return
-	}
-	drawLineSegment(imageData, polygon[0], polygon[2], lineColor, alpha)
-	drawLineSegment(imageData, polygon[1], polygon[3], lineColor, alpha)
-}
-
-func drawPolygonStripe(imageData *image.NRGBA, polygon []heatmapPixelPoint, lineColor color.NRGBA, alpha float64) {
-	if len(polygon) < 4 {
-		return
-	}
-	midLeft := midpoint(polygon[0], polygon[3])
-	midRight := midpoint(polygon[1], polygon[2])
-	drawLineSegment(imageData, midLeft, midRight, lineColor, alpha)
-}
-
-func drawPolygonHatch(imageData *image.NRGBA, polygon []heatmapPixelPoint, lineColor color.NRGBA, alpha float64, spacing int) {
-	if spacing <= 1 || len(polygon) < 3 {
-		return
-	}
-	minX, maxX, minY, maxY := polygonBounds(polygon)
-	for offset := -int(maxY - minY); offset <= int(maxX-minX); offset += spacing {
-		for step := 0; step < 2; step++ {
-			start := heatmapPixelPoint{X: minX + float64(offset), Y: minY}
-			end := heatmapPixelPoint{X: minX + float64(offset) + (maxY - minY), Y: maxY}
-			if step == 1 {
-				start = heatmapPixelPoint{X: minX + float64(offset), Y: maxY}
-				end = heatmapPixelPoint{X: minX + float64(offset) + (maxY - minY), Y: minY}
-			}
-			drawClippedPatternLine(imageData, polygon, start, end, lineColor, alpha)
-		}
-	}
-}
-
-func drawClippedPatternLine(imageData *image.NRGBA, polygon []heatmapPixelPoint, start heatmapPixelPoint, end heatmapPixelPoint, lineColor color.NRGBA, alpha float64) {
-	steps := int(math.Ceil(math.Max(math.Abs(end.X-start.X), math.Abs(end.Y-start.Y))))
-	if steps <= 0 {
-		steps = 1
-	}
-	for step := 0; step <= steps; step++ {
-		progress := float64(step) / float64(steps)
-		x := start.X + (end.X-start.X)*progress
-		y := start.Y + (end.Y-start.Y)*progress
-		if !pointInConvexPolygon(x, y, polygon) {
-			continue
-		}
-		pixelX := int(math.Round(x))
-		pixelY := int(math.Round(y))
-		if pixelX < 0 || pixelX >= imageData.Bounds().Dx() || pixelY < 0 || pixelY >= imageData.Bounds().Dy() {
-			continue
-		}
-		base := imageData.NRGBAAt(pixelX, pixelY)
-		imageData.SetNRGBA(pixelX, pixelY, blendNRGBA(base, lineColor, alpha))
-	}
-}
-
-func midpoint(left heatmapPixelPoint, right heatmapPixelPoint) heatmapPixelPoint {
-	return heatmapPixelPoint{
-		X: (left.X + right.X) / 2,
-		Y: (left.Y + right.Y) / 2,
-	}
-}
-
-func polygonBounds(polygon []heatmapPixelPoint) (float64, float64, float64, float64) {
-	minX := polygon[0].X
-	maxX := polygon[0].X
-	minY := polygon[0].Y
-	maxY := polygon[0].Y
-	for _, point := range polygon[1:] {
-		minX = math.Min(minX, point.X)
-		maxX = math.Max(maxX, point.X)
-		minY = math.Min(minY, point.Y)
-		maxY = math.Max(maxY, point.Y)
-	}
-	return minX, maxX, minY, maxY
-}
-
 func drawVerticalLine(imageData *image.NRGBA, x int, startY int, endY int, lineColor color.NRGBA) {
 	bounds := imageData.Bounds()
 	if x < bounds.Min.X || x >= bounds.Max.X {
@@ -2645,43 +2392,3 @@ func blankHeatmapPreviewOption() ui.PreviewDownloadOption {
 	}
 }
 
-func mapPartHeightBounds(parts []RBXLHeatmapMapPart) (float64, float64) {
-	if len(parts) == 0 {
-		return 0, 0
-	}
-	minY := parts[0].CenterY
-	maxY := parts[0].CenterY
-	for _, part := range parts[1:] {
-		minY = math.Min(minY, part.CenterY)
-		maxY = math.Max(maxY, part.CenterY)
-	}
-	return minY, maxY
-}
-
-func shadeHeatmapColor(base color.NRGBA, factor float64) color.NRGBA {
-	clamped := format.Clamp(factor, 0, 1.4)
-	return color.NRGBA{
-		R: uint8(math.Round(format.Clamp(float64(base.R)*clamped, 0, 255))),
-		G: uint8(math.Round(format.Clamp(float64(base.G)*clamped, 0, 255))),
-		B: uint8(math.Round(format.Clamp(float64(base.B)*clamped, 0, 255))),
-		A: 255,
-	}
-}
-
-func mapPartVisualColor(part RBXLHeatmapMapPart, heightScale float64) color.NRGBA {
-	base := shadeHeatmapColor(part.Color, 0.82+heightScale*0.26)
-	switch strings.ToLower(strings.TrimSpace(part.InstanceType)) {
-	case "meshpart":
-		return blendNRGBA(base, color.NRGBA{R: 205, G: 215, B: 222, A: 255}, 0.16)
-	case "unionoperation":
-		return shadeHeatmapColor(base, 0.94)
-	case "trusspart":
-		return blendNRGBA(base, color.NRGBA{R: 155, G: 170, B: 180, A: 255}, 0.22)
-	case "spawnlocation":
-		return blendNRGBA(base, color.NRGBA{R: 110, G: 200, B: 120, A: 255}, 0.34)
-	case "seat", "vehicleseat":
-		return blendNRGBA(base, color.NRGBA{R: 110, G: 150, B: 210, A: 255}, 0.28)
-	default:
-		return base
-	}
-}

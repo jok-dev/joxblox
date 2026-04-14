@@ -49,7 +49,7 @@ type reportGenerationInstanceRenderInfo struct {
 
 const reportGenerationCellSizeStuds = 1000.0
 
-func NewReportGenerationTab(window fyne.Window, onViewInScan func(string), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string)) {
+func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, workspaceOnly bool, oversizedTextureThreshold float64), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string)) {
 	selectedFilePath := ""
 	currentSummary := report.Summary{}
 	currentCells := []heatmap.Cell{}
@@ -100,7 +100,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 			return
 		}
 		assetType := currentAssetType
-		if assetType.ID == "" {
+		if assetType.Label == "" {
 			assetType = report.DefaultAssetType()
 		}
 		percentiles := report.ComputeReportCellPercentiles(assetType, currentCells, currentSummary)
@@ -113,7 +113,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 			navButtons := container.NewHBox()
 			if onViewInScan != nil {
 				viewInScanButton := widget.NewButtonWithIcon("View in Scan", theme.SearchIcon(), func() {
-					onViewInScan(selectedFilePath)
+					onViewInScan(selectedFilePath, workspaceOnlyCheck.Checked, currentAssetType.OversizedTextureThreshold)
 				})
 				navButtons.Add(viewInScanButton)
 			}
@@ -149,12 +149,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 			showAssetTypeDialog()
 		}
 	}
-	startReportLoad := func(assetTypeID string) {
-		assetType, found := report.AssetTypeByID(assetTypeID)
-		if !found {
-			statusLabel.SetText("Choose a valid asset type")
-			return
-		}
+	startReportLoad := func(assetType report.AssetTypeConfig) {
 		if strings.TrimSpace(selectedFilePath) == "" {
 			statusLabel.SetText("Drop .rbxl/.rbxm or choose file")
 			return
@@ -272,7 +267,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 			debug.Logf(
 				"Report generation summary for %s (%s): meshparts=%d parts=%d points=%d cells=%d resolved=%d unique-assets=%d",
 				sourcePath,
-				selectedAssetType.ID,
+				selectedAssetType.Label,
 				summary.MeshPartCount,
 				summary.PartCount,
 				len(points),
@@ -312,7 +307,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		for _, assetType := range report.AssetTypeConfigs {
 			assetType := assetType
 			button := widget.NewButton(assetType.Label, func() {
-				startReportLoad(assetType.ID)
+				startReportLoad(assetType)
 			})
 			button.Importance = widget.HighImportance
 			buttons = append(buttons, button)
@@ -624,7 +619,7 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 		if hashCounts[asset.FileSHA256] < 2 {
 			continue
 		}
-		if seenCounts[asset.FileSHA256] >= 1 {
+		if seenCounts[asset.FileSHA256] >= 1 && asset.Stats.TotalBytes >= 10*1024 {
 			summary.DuplicateCount++
 			summary.DuplicateSizeBytes += int64(asset.Stats.TotalBytes)
 		}
@@ -680,10 +675,11 @@ func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, r
 		maxAreaByReferenceKey[referenceKey] = loader.MaxPositiveFloat64(maxAreaByReferenceKey[referenceKey], area)
 	}
 
+	const minOversizedTextureBytes = 100 * 1024
 	oversizedTextureCount := 0
 	for referenceKey, resolvedAsset := range resolved {
 		textureBytes := resolvedAsset.Stats.TextureBytes
-		if textureBytes <= 0 {
+		if textureBytes < minOversizedTextureBytes {
 			continue
 		}
 		if loader.ComputeLargeTextureScore(textureBytes, maxAreaByReferenceKey[referenceKey]) >= threshold {

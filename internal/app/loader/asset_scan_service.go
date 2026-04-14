@@ -88,6 +88,8 @@ func CompareScanResults(leftResult ScanResult, rightResult ScanResult, sortField
 		return CompareInt(leftResult.TextureBytes, rightResult.TextureBytes)
 	case "Texture Pixels":
 		return CompareInt64(leftResult.PixelCount, rightResult.PixelCount)
+	case "B/stud²":
+		return CompareFloat64(leftResult.LargeTextureScore, rightResult.LargeTextureScore)
 	case "Mesh Bytes":
 		return CompareInt(leftResult.MeshBytes, rightResult.MeshBytes)
 	case "Mesh Triangles":
@@ -120,6 +122,16 @@ func CompareInt(left int, right int) int {
 }
 
 func CompareUint32(left uint32, right uint32) int {
+	if left < right {
+		return -1
+	}
+	if left > right {
+		return 1
+	}
+	return 0
+}
+
+func CompareFloat64(left float64, right float64) int {
 	if left < right {
 		return -1
 	}

@@ -8,7 +8,9 @@ import (
 	"joxblox/internal/format"
 )
 
-const DefaultLargeTextureThreshold = 4096.0
+// DefaultLargeTextureThreshold is the default score cutoff (texture bytes per square stud)
+// for the scan tab "large textures" and report oversized-texture logic.
+var DefaultLargeTextureThreshold float64 = 4096
 
 func ParseLargeTextureThreshold(rawValue string) float64 {
 	trimmedValue := strings.TrimSpace(rawValue)

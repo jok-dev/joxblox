@@ -3,35 +3,14 @@ package report
 import (
 	"testing"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/format"
 )
 
-func TestReportGenerationAssetTypeByID(t *testing.T) {
-	mapAssetType, found := AssetTypeByID("map")
-	if !found {
-		t.Fatalf("expected to find map asset type")
-	}
-	if mapAssetType.Label != "Map" {
-		t.Fatalf("expected map label, got %q", mapAssetType.Label)
-	}
-
-	vehicleAssetType, found := AssetTypeByID("vehicle")
-	if !found {
-		t.Fatalf("expected to find vehicle asset type")
-	}
-	if vehicleAssetType.Label != "Vehicle" {
-		t.Fatalf("expected vehicle label, got %q", vehicleAssetType.Label)
-	}
-	if !vehicleAssetType.DisableSpatialMode {
-		t.Fatalf("expected vehicle asset type to disable spatial mode")
-	}
-}
-
 func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T) {
 	customAssetType := AssetTypeConfig{
-		ID:                        "custom",
 		Label:                     "Custom",
-		OversizedTextureThreshold: DefaultOversizedTextureThreshold,
+		OversizedTextureThreshold: loader.DefaultLargeTextureThreshold,
 		Thresholds: GradeThresholds{
 			MeshComplexity:      [6]float64{10_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000, 60_000_000},
 			DuplicationWastePct: [6]float64{100, 200, 300, 400, 500, 600},
@@ -72,7 +51,6 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 
 func TestComputeReportCellPercentilesDisableSpatialMode(t *testing.T) {
 	assetType := AssetTypeConfig{
-		ID:                 "vehicle",
 		Label:              "Vehicle",
 		DisableSpatialMode: true,
 	}

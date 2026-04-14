@@ -79,13 +79,13 @@ func Run() {
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1350, 900))
 
-	var viewInScanCallback func(string)
+	var viewInScanCallback func(string, bool, float64)
 	var viewInHeatmapCallback func(string)
 	reportGenerationContent, loadReportFile := reportgeneration.NewReportGenerationTab(
 		window,
-		func(path string) {
+		func(path string, workspaceOnly bool, oversizedTextureThreshold float64) {
 			if viewInScanCallback != nil {
-				viewInScanCallback(path)
+				viewInScanCallback(path, workspaceOnly, oversizedTextureThreshold)
 			}
 		},
 		func(path string) {
@@ -105,10 +105,17 @@ func Run() {
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, imageuploader.NewImageUploaderTab(window))
 	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, optimizeTab, imageUploaderTab)
 	tabs.Select(reportGenerationTab)
-	viewInScanCallback = func(path string) {
+	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64) {
 		tabs.Select(scanTab)
 		if loadScanRBXLFile != nil {
-			loadScanRBXLFile(path)
+			pathFilter := ""
+			if workspaceOnly {
+				pathFilter = "Workspace.*\nMaterialService.*"
+			}
+			loadScanRBXLFile(path, scan.ScanLoadOptions{
+				PathFilterText:        pathFilter,
+				LargeTextureThreshold: oversizedTextureThreshold,
+			})
 		}
 	}
 	viewInHeatmapCallback = func(path string) {

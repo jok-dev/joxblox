@@ -25,9 +25,14 @@ type scanTabVariant struct {
 	actions *ScanTabFileActions
 }
 
+type ScanLoadOptions struct {
+	PathFilterText         string
+	LargeTextureThreshold  float64
+}
+
 func NewScanTab(
 	window fyne.Window,
-) (fyne.CanvasObject, ScanTabFileActionsProvider, []ScanTabFileActionsProvider, func(string), func(string)) {
+) (fyne.CanvasObject, ScanTabFileActionsProvider, []ScanTabFileActionsProvider, func(string), func(string, ScanLoadOptions)) {
 	folderSingleScan, folderSingleActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:     "No folder selected.",
 		SelectButtonText:         "Select Folder",
@@ -189,10 +194,17 @@ func NewScanTab(
 		contentStack,
 	)
 
-	loadRBXLFile := func(path string) {
+	loadRBXLFile := func(path string, options ScanLoadOptions) {
 		sourceSwitch.SetSelected(scanSourceRBXL)
 		modeSwitch.SetSelected(scanModeSingle)
 		updateVisibleContent()
+		if rbxlSingleActions != nil && rbxlSingleActions.SetPathFilter != nil {
+			filterEnabled := strings.TrimSpace(options.PathFilterText) != ""
+			rbxlSingleActions.SetPathFilter(filterEnabled, options.PathFilterText)
+		}
+		if rbxlSingleActions != nil && rbxlSingleActions.SetLargeTextureThreshold != nil && options.LargeTextureThreshold > 0 {
+			rbxlSingleActions.SetLargeTextureThreshold(options.LargeTextureThreshold)
+		}
 		if rbxlSingleActions != nil && rbxlSingleActions.LoadSource != nil {
 			rbxlSingleActions.LoadSource(path)
 		}

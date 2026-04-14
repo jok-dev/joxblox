@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -192,6 +193,8 @@ func main() {
 			handlePick(parts)
 		case "RENDER":
 			handleRender(parts)
+		case "RENDERORTHO":
+			handleRenderOrtho(parts)
 		case "QUIT":
 			doCleanup()
 			os.Exit(0)
@@ -404,6 +407,7 @@ func createModelFromRawData(positions []float32, indices32 []uint32, colors []ui
 		Vertices:      &modelData.positions[0],
 		Normals:       &modelData.normals[0],
 		Indices:       &modelData.indices[0],
+		Colors:        &modelData.colors[0],
 	}
 	rl.UploadMesh(&mesh, false)
 	modelData.model = rl.LoadModelFromMesh(mesh)
@@ -556,9 +560,10 @@ func handleRender(parts []string) {
 	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
 	rl.BeginMode3D(camera)
 	rl.DisableDepthTest()
+	opacityTint := rl.NewColor(255, 255, 255, uint8(clampFloat64(opacity, 0.1, 1.0)*255.0))
 	for _, batchIndex := range drawOrder {
 		meshModel := loadedScene[batchIndex]
-		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, modelTint(meshModel.baseColor, opacity))
+		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, opacityTint)
 		if batchIndex == selectedBatch {
 			drawSelectedMeshHighlight(meshModel, bgR, bgG, bgB)
 		}
@@ -567,6 +572,91 @@ func handleRender(parts []string) {
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
+	emitFrame(width, height)
+}
+
+func handleRenderOrtho(parts []string) {
+	if len(loadedScene) == 0 {
+		respond("ERR no mesh loaded")
+		return
+	}
+	if len(parts) < 9 {
+		respond("ERR RENDERORTHO requires width height center_x center_z ortho_half_w ortho_half_h camera_y bg_hex")
+		return
+	}
+
+	width, _ := strconv.Atoi(parts[1])
+	height, _ := strconv.Atoi(parts[2])
+	centerX, _ := strconv.ParseFloat(parts[3], 64)
+	centerZ, _ := strconv.ParseFloat(parts[4], 64)
+	orthoHalfW, _ := strconv.ParseFloat(parts[5], 64)
+	orthoHalfH, _ := strconv.ParseFloat(parts[6], 64)
+	cameraY, _ := strconv.ParseFloat(parts[7], 64)
+	bgHex := parts[8]
+
+	if width < 1 || width > 8192 {
+		width = 4096
+	}
+	if height < 1 || height > 8192 {
+		height = 4096
+	}
+	if orthoHalfW <= 0 {
+		orthoHalfW = 1
+	}
+	if orthoHalfH <= 0 {
+		orthoHalfH = 1
+	}
+	if cameraY <= 0 {
+		cameraY = 10000
+	}
+
+	bgR, bgG, bgB := parseHexColor(bgHex)
+	w, h := int32(width), int32(height)
+	if renderWidth != w || renderHeight != h {
+		if renderWidth > 0 {
+			rl.UnloadRenderTexture(renderTarget)
+		}
+		renderTarget = rl.LoadRenderTexture(w, h)
+		renderWidth = w
+		renderHeight = h
+	}
+
+	camera := rl.Camera3D{
+		Position:   rl.Vector3{X: float32(centerX), Y: float32(cameraY), Z: float32(centerZ)},
+		Target:     rl.Vector3{X: float32(centerX), Y: 0, Z: float32(centerZ)},
+		Up:         rl.Vector3{X: 0, Y: 0, Z: 1},
+		Fovy:       float32(orthoHalfH * 2),
+		Projection: rl.CameraOrthographic,
+	}
+
+	rl.SetClipPlanes(1.0, cameraY*2+1000)
+
+	if diagFile, diagErr := os.Create(filepath.Join(os.TempDir(), "joxblox-renderortho-diag.txt")); diagErr == nil {
+		fmt.Fprintf(diagFile, "RENDERORTHO: %d models, cam=(%.1f,%.1f,%.1f) fovy=%.1f near=1 far=%.1f\n",
+			len(loadedScene), centerX, cameraY, centerZ, orthoHalfH*2, cameraY*2+1000)
+		for i, m := range loadedScene {
+			if i < 5 {
+				fmt.Fprintf(diagFile, "  model[%d]: bounds min=(%.1f,%.1f,%.1f) max=(%.1f,%.1f,%.1f)\n",
+					i, m.bounds.Min.X, m.bounds.Min.Y, m.bounds.Min.Z, m.bounds.Max.X, m.bounds.Max.Y, m.bounds.Max.Z)
+			}
+		}
+		diagFile.Close()
+	}
+
+	rl.BeginTextureMode(renderTarget)
+	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
+	rl.BeginMode3D(camera)
+	whiteTint := rl.NewColor(255, 255, 255, 255)
+	for _, meshModel := range loadedScene {
+		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, whiteTint)
+	}
+	rl.EndMode3D()
+	rl.EndTextureMode()
+
+	emitFrame(width, height)
+}
+
+func emitFrame(width int, height int) {
 	imageData := rl.LoadImageFromTexture(renderTarget.Texture)
 	rl.ImageFlipVertical(imageData)
 	byteCount := width * height * 4
