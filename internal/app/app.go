@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"joxblox/internal/app/common"
-	"joxblox/internal/app/heatmaptab"
 	"joxblox/internal/app/loader"
-	"joxblox/internal/app/menu"
 	"joxblox/internal/app/scan"
 	"joxblox/internal/app/ui"
+	"joxblox/internal/app/ui/menu"
+	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/roblox"

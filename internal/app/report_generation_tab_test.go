@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"joxblox/internal/app/heatmaptab"
+	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"

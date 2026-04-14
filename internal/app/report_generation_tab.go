@@ -20,7 +20,7 @@ import (
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
 	"joxblox/internal/app/common"
-	"joxblox/internal/app/heatmaptab"
+	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/app/loader"
 	"joxblox/internal/app/report"
 	"joxblox/internal/app/ui"
