@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 
 	"fyne.io/fyne/v2"
@@ -38,7 +39,7 @@ func newScanTab(
 		ScanContextKey:           scanContextFolder,
 		RecentFilesPreferenceKey: "scan.recent.folder",
 		SelectSource:             pickFolderSource,
-		ExtractHits:              scanFolderForAssetIDs,
+		ExtractHits:              loader.ScanFolderForAssetIDs,
 	})
 	folderDiffScan, folderDiffActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:             "Baseline: no folder selected.",
@@ -55,7 +56,7 @@ func newScanTab(
 		RecentFilesPreferenceKey:         "scan.recent.folder.diff",
 		SelectSource:                     pickFolderBaselineSource,
 		SelectSecondarySource:            pickFolderTargetSource,
-		ExtractHits:                      scanFolderDiffForAssetIDs,
+		ExtractHits:                      loader.ScanFolderDiffForAssetIDs,
 	})
 	rbxlSingleScan, rbxlSingleActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:     "No .rbxl/.rbxm file selected.",

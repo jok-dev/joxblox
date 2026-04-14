@@ -7,9 +7,9 @@ import (
 )
 
 var (
-	ErrCancelled    = errors.New("extractor cancelled")
-	BinaryProvider  func() []byte
-	DefaultLimit    = 5000
+	ErrCancelled   = errors.New("extractor cancelled")
+	BinaryProvider func() []byte
+	DefaultLimit   = 5000
 )
 
 type Result struct {

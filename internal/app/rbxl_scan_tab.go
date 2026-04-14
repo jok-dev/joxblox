@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 
@@ -128,7 +130,7 @@ func pickRBXLFilePath(title string) (string, error) {
 	return "", pickerErr
 }
 
-func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
+func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan struct{}) ([]loader.ScanHit, error) {
 	debug.Logf("RBXL scan started: %s (limit=%d)", filePath, limit)
 	if _, readErr := os.Stat(filePath); readErr != nil {
 		debug.Logf("RBXL scan read failed: %s", readErr.Error())
@@ -137,19 +139,19 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 
 	extractResult, rustScanErr := extractor.ExtractAssetIDsWithCounts(filePath, 0, limit, stopChannel)
 	if errors.Is(rustScanErr, extractor.ErrCancelled) {
-		rustScanErr = errScanStopped
+		rustScanErr = loader.ErrScanStopped
 	}
-	if errors.Is(rustScanErr, errScanStopped) {
+	if errors.Is(rustScanErr, loader.ErrScanStopped) {
 		debug.Logf("RBXL scan stopped during Rust extraction")
-		return nil, errScanStopped
+		return nil, loader.ErrScanStopped
 	}
 	if rustScanErr != nil {
 		debug.Logf("RBXL scan Rust extraction failed: %s", rustScanErr.Error())
 		return nil, rustScanErr
 	}
 	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(filePath, nil, stopChannel)
-	if errors.Is(surfaceErr, errScanStopped) {
-		return nil, errScanStopped
+	if errors.Is(surfaceErr, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
 	}
 
 	hits := buildScanHitsFromRustReferences(extractResult.References, filePath, sceneSurfaceAreasByPath, limit)
@@ -157,24 +159,24 @@ func scanRBXLFileForAssetIDs(filePath string, limit int, stopChannel <-chan stru
 	return hits, nil
 }
 
-func scanRBXLFileForAssetIDsFiltered(filePath string, pathPrefixes []string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
+func scanRBXLFileForAssetIDsFiltered(filePath string, pathPrefixes []string, limit int, stopChannel <-chan struct{}) ([]loader.ScanHit, error) {
 	debug.Logf("RBXL filtered scan started: %s (prefixes=%v, limit=%d)", filePath, pathPrefixes, limit)
 	if _, readErr := os.Stat(filePath); readErr != nil {
 		return nil, readErr
 	}
 	refs, err := extractor.ExtractFilteredRefs(filePath, pathPrefixes, stopChannel)
 	if errors.Is(err, extractor.ErrCancelled) {
-		err = errScanStopped
+		err = loader.ErrScanStopped
 	}
-	if errors.Is(err, errScanStopped) {
-		return nil, errScanStopped
+	if errors.Is(err, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
 	}
 	if err != nil {
 		return nil, err
 	}
 	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(filePath, pathPrefixes, stopChannel)
-	if errors.Is(surfaceErr, errScanStopped) {
-		return nil, errScanStopped
+	if errors.Is(surfaceErr, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
 	}
 
 	hits := buildScanHitsFromRustReferences(refs, filePath, sceneSurfaceAreasByPath, limit)
@@ -182,7 +184,7 @@ func scanRBXLFileForAssetIDsFiltered(filePath string, pathPrefixes []string, lim
 	return hits, nil
 }
 
-func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
+func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan struct{}) ([]loader.ScanHit, error) {
 	sourceParts := strings.SplitN(sourcePath, "\n", 2)
 	if len(sourceParts) != 2 {
 		return nil, fmt.Errorf("invalid file diff source format")
@@ -208,10 +210,10 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	baselineReferenceKeys := map[string]bool{}
 	baselineExtractResult, baselineErr := extractor.ExtractAssetIDsWithCounts(baselineFilePath, 0, 0, stopChannel)
 	if errors.Is(baselineErr, extractor.ErrCancelled) {
-		baselineErr = errScanStopped
+		baselineErr = loader.ErrScanStopped
 	}
-	if errors.Is(baselineErr, errScanStopped) {
-		return nil, errScanStopped
+	if errors.Is(baselineErr, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
 	}
 	if baselineErr != nil {
 		return nil, baselineErr
@@ -223,20 +225,20 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 		baselineReferenceKeys[extractor.AssetReferenceKey(reference.ID, reference.RawContent)] = true
 	}
 
-	results := []scanHit{}
+	results := []loader.ScanHit{}
 	targetExtractResult, targetErr := extractor.ExtractAssetIDsWithCounts(targetFilePath, 0, 0, stopChannel)
 	if errors.Is(targetErr, extractor.ErrCancelled) {
-		targetErr = errScanStopped
+		targetErr = loader.ErrScanStopped
 	}
-	if errors.Is(targetErr, errScanStopped) {
-		return results, errScanStopped
+	if errors.Is(targetErr, loader.ErrScanStopped) {
+		return results, loader.ErrScanStopped
 	}
 	if targetErr != nil {
 		return nil, targetErr
 	}
 	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(targetFilePath, nil, stopChannel)
-	if errors.Is(surfaceErr, errScanStopped) {
-		return nil, errScanStopped
+	if errors.Is(surfaceErr, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
 	}
 	filteredReferences := make([]extractor.Result, 0, len(targetExtractResult.References))
 	for _, reference := range targetExtractResult.References {
@@ -254,36 +256,36 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 	return results, nil
 }
 
-func buildRBXLScanWarning(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error) {
-	return buildRBXLMissingMaterialVariantWarning(sourcePath, pathPrefixes, stopChannel)
+func buildRBXLScanWarning(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (ui.MaterialVariantWarningData, error) {
+	return ui.BuildRBXLMissingMaterialVariantWarning(sourcePath, pathPrefixes, stopChannel)
 }
 
-func buildRBXLScanDiffWarning(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error) {
+func buildRBXLScanDiffWarning(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (ui.MaterialVariantWarningData, error) {
 	sourceParts := strings.SplitN(sourcePath, "\n", 2)
 	if len(sourceParts) != 2 {
-		return materialVariantWarningData{}, fmt.Errorf("invalid file diff source format")
+		return ui.MaterialVariantWarningData{}, fmt.Errorf("invalid file diff source format")
 	}
 	baselineFilePath := strings.TrimSpace(sourceParts[0])
 	targetFilePath := strings.TrimSpace(sourceParts[1])
 	if baselineFilePath == "" || targetFilePath == "" {
-		return materialVariantWarningData{}, fmt.Errorf("both baseline and target files are required")
+		return ui.MaterialVariantWarningData{}, fmt.Errorf("both baseline and target files are required")
 	}
 
-	baselineWarning, baselineErr := buildRBXLMissingMaterialVariantWarning(baselineFilePath, pathPrefixes, stopChannel)
+	baselineWarning, baselineErr := ui.BuildRBXLMissingMaterialVariantWarning(baselineFilePath, pathPrefixes, stopChannel)
 	if baselineErr != nil {
-		return materialVariantWarningData{}, baselineErr
+		return ui.MaterialVariantWarningData{}, baselineErr
 	}
-	targetWarning, targetErr := buildRBXLMissingMaterialVariantWarning(targetFilePath, pathPrefixes, stopChannel)
+	targetWarning, targetErr := ui.BuildRBXLMissingMaterialVariantWarning(targetFilePath, pathPrefixes, stopChannel)
 	if targetErr != nil {
-		return materialVariantWarningData{}, targetErr
+		return ui.MaterialVariantWarningData{}, targetErr
 	}
 
-	return combineMaterialVariantWarnings(baselineWarning, targetWarning), nil
+	return ui.CombineMaterialVariantWarnings(baselineWarning, targetWarning), nil
 }
 
-func buildScanHitsFromRustReferences(references []extractor.Result, filePath string, sceneSurfaceAreasByPath map[string]float64, limit int) []scanHit {
+func buildScanHitsFromRustReferences(references []extractor.Result, filePath string, sceneSurfaceAreasByPath map[string]float64, limit int) []loader.ScanHit {
 	type hitBuilder struct {
-		hit     scanHit
+		hit     loader.ScanHit
 		pathSet map[string]bool
 	}
 
@@ -299,7 +301,7 @@ func buildScanHitsFromRustReferences(references []extractor.Result, filePath str
 		builder, exists := builders[referenceKey]
 		if !exists {
 			builder = &hitBuilder{
-				hit: scanHit{
+				hit: loader.ScanHit{
 					AssetID:          reference.ID,
 					AssetInput:       assetInput,
 					FilePath:         filePath,
@@ -311,7 +313,7 @@ func buildScanHitsFromRustReferences(references []extractor.Result, filePath str
 				},
 				pathSet: map[string]bool{},
 			}
-			builder.hit.SceneSurfaceArea, builder.hit.LargestSurfacePath = estimateSceneSurfaceAreaAndPathForPaths(
+			builder.hit.SceneSurfaceArea, builder.hit.LargestSurfacePath = loader.EstimateSceneSurfaceAreaAndPathForPaths(
 				reference.InstancePath,
 				nil,
 				sceneSurfaceAreasByPath,
@@ -324,7 +326,7 @@ func buildScanHitsFromRustReferences(references []extractor.Result, filePath str
 		addRustReferencePaths(&builder.hit, builder.pathSet, reference, sceneSurfaceAreasByPath)
 	}
 
-	hits := make([]scanHit, 0, len(order))
+	hits := make([]loader.ScanHit, 0, len(order))
 	for _, referenceKey := range order {
 		hits = append(hits, builders[referenceKey].hit)
 		if limit > 0 && len(hits) >= limit {
@@ -341,7 +343,7 @@ func rustReferenceUseCount(reference extractor.Result) int {
 	return 1
 }
 
-func addRustReferencePaths(hit *scanHit, pathSet map[string]bool, reference extractor.Result, sceneSurfaceAreasByPath map[string]float64) {
+func addRustReferencePaths(hit *loader.ScanHit, pathSet map[string]bool, reference extractor.Result, sceneSurfaceAreasByPath map[string]float64) {
 	if hit == nil {
 		return
 	}
@@ -357,7 +359,7 @@ func addRustReferencePaths(hit *scanHit, pathSet map[string]bool, reference extr
 		}
 		pathSet[trimmedPath] = true
 		hit.AllInstancePaths = append(hit.AllInstancePaths, trimmedPath)
-		nextArea, nextPath := estimateSceneSurfaceAreaAndPathForPaths(trimmedPath, nil, sceneSurfaceAreasByPath)
+		nextArea, nextPath := loader.EstimateSceneSurfaceAreaAndPathForPaths(trimmedPath, nil, sceneSurfaceAreasByPath)
 		if nextArea > hit.SceneSurfaceArea {
 			hit.SceneSurfaceArea = nextArea
 			hit.LargestSurfacePath = strings.TrimSpace(nextPath)
@@ -370,14 +372,14 @@ func addRustReferencePaths(hit *scanHit, pathSet map[string]bool, reference extr
 func loadRBXLSceneSurfaceAreas(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) (map[string]float64, error) {
 	mapParts, err := extractor.ExtractMapRenderParts(filePath, pathPrefixes, stopChannel)
 	if errors.Is(err, extractor.ErrCancelled) {
-		err = errScanStopped
+		err = loader.ErrScanStopped
 	}
-	if errors.Is(err, errScanStopped) {
-		return nil, errScanStopped
+	if errors.Is(err, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
 	}
 	if err != nil {
 		debug.Logf("RBXL map render extraction failed for large textures: %s", err.Error())
 		return map[string]float64{}, nil
 	}
-	return buildSceneSurfaceAreaIndex(mapParts), nil
+	return loader.BuildSceneSurfaceAreaIndex(mapParts), nil
 }

@@ -25,7 +25,7 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 	}
 
 	textureBytes := mustEncodePNG(t)
-	view.SetData(assetViewData{
+	view.SetData(loader.AssetViewData{
 		AssetID:       123,
 		AssetTypeID:   1,
 		AssetTypeName: "Image",
@@ -63,7 +63,7 @@ func TestAssetViewSetDataShowsInGameSizeMetric(t *testing.T) {
 
 	view := newAssetView("No image loaded", false)
 	textureBytes := mustEncodePNG(t)
-	view.SetData(assetViewData{
+	view.SetData(loader.AssetViewData{
 		AssetID:            123,
 		AssetTypeID:        1,
 		AssetTypeName:      "Image",

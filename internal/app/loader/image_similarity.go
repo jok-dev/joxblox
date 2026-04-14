@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"bytes"
@@ -19,13 +19,13 @@ const (
 	similarityTopResultsCap = 100
 )
 
-type similarityMatch struct {
+type SimilarityMatch struct {
 	ResultIndex int
 	Distance    int
 	ExactMatch  bool
 }
 
-func computeImageDHash(imageBytes []byte) (uint64, error) {
+func ComputeImageDHash(imageBytes []byte) (uint64, error) {
 	src, _, err := image.Decode(bytes.NewReader(imageBytes))
 	if err != nil {
 		return 0, err
@@ -53,29 +53,29 @@ func dHashHammingDistance(h1, h2 uint64) int {
 	return bits.OnesCount64(h1 ^ h2)
 }
 
-type similaritySorter struct {
-	results  []scanResult
-	indices  []int
-	matchSet map[int]int
+type SimilarityRowSorter struct {
+	Results  []ScanResult
+	Indices  []int
+	MatchSet map[int]int
 }
 
-func (s similaritySorter) Len() int { return len(s.results) }
+func (s SimilarityRowSorter) Len() int { return len(s.Results) }
 
-func (s similaritySorter) Less(a, b int) bool {
-	distA := s.matchSet[s.indices[a]]
-	distB := s.matchSet[s.indices[b]]
+func (s SimilarityRowSorter) Less(a, b int) bool {
+	distA := s.MatchSet[s.Indices[a]]
+	distB := s.MatchSet[s.Indices[b]]
 	if distA != distB {
 		return distA < distB
 	}
-	return s.results[a].AssetID < s.results[b].AssetID
+	return s.Results[a].AssetID < s.Results[b].AssetID
 }
 
-func (s similaritySorter) Swap(a, b int) {
-	s.results[a], s.results[b] = s.results[b], s.results[a]
-	s.indices[a], s.indices[b] = s.indices[b], s.indices[a]
+func (s SimilarityRowSorter) Swap(a, b int) {
+	s.Results[a], s.Results[b] = s.Results[b], s.Results[a]
+	s.Indices[a], s.Indices[b] = s.Indices[b], s.Indices[a]
 }
 
-func scanResultImageBytes(result scanResult) []byte {
+func scanResultImageBytes(result ScanResult) []byte {
 	if len(result.DownloadBytes) > 0 {
 		return result.DownloadBytes
 	}
@@ -87,8 +87,8 @@ func scanResultImageBytes(result scanResult) []byte {
 	return nil
 }
 
-func computeSimilarityScores(queryHash uint64, querySHA256 string, results []scanResult) []similarityMatch {
-	matches := make([]similarityMatch, 0, len(results))
+func ComputeSimilarityScores(queryHash uint64, querySHA256 string, results []ScanResult) []SimilarityMatch {
+	matches := make([]SimilarityMatch, 0, len(results))
 	for i, result := range results {
 		if result.AssetTypeID != roblox.AssetTypeImage {
 			continue
@@ -99,7 +99,7 @@ func computeSimilarityScores(queryHash uint64, querySHA256 string, results []sca
 		}
 
 		if querySHA256 != "" && result.FileSHA256 == querySHA256 {
-			matches = append(matches, similarityMatch{
+			matches = append(matches, SimilarityMatch{
 				ResultIndex: i,
 				Distance:    0,
 				ExactMatch:  true,
@@ -107,12 +107,12 @@ func computeSimilarityScores(queryHash uint64, querySHA256 string, results []sca
 			continue
 		}
 
-		resultHash, err := computeImageDHash(imgBytes)
+		resultHash, err := ComputeImageDHash(imgBytes)
 		if err != nil {
 			continue
 		}
 
-		matches = append(matches, similarityMatch{
+		matches = append(matches, SimilarityMatch{
 			ResultIndex: i,
 			Distance:    dHashHammingDistance(queryHash, resultHash),
 			ExactMatch:  false,

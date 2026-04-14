@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"bufio"
@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 )
 
@@ -27,56 +26,37 @@ var (
 	rawLargeNumberPattern    = regexp.MustCompile(`\b\d{8,}\b`)
 	robloxContextLinePattern = regexp.MustCompile(`(?i)(rbxassetid|assetid|texture|image|decal|thumbnail|meshid|soundid)`)
 	errScanLimitReached      = errors.New("scan limit reached")
-	errScanStopped           = errors.New("scan stopped")
+	ErrScanStopped           = errors.New("scan stopped")
 )
 
-type scanHit struct {
-	AssetID            int64
-	AssetInput         string
-	FilePath           string
-	UseCount           int
-	InstanceType       string
-	InstanceName       string
-	InstancePath       string
-	PropertyName       string
-	AllInstancePaths   []string
-	SceneSurfaceArea   float64
-	LargestSurfacePath string
-}
-
-type extractedScanReference struct {
-	AssetID    int64
-	AssetInput string
-}
-
-type stopSignal struct {
-	channel chan struct{}
+type StopSignal struct {
+	Channel chan struct{}
 	once    sync.Once
 }
 
-func newStopSignal() *stopSignal {
-	return &stopSignal{
-		channel: make(chan struct{}),
+func NewStopSignal() *StopSignal {
+	return &StopSignal{
+		Channel: make(chan struct{}),
 	}
 }
 
-func (signal *stopSignal) Stop() {
+func (signal *StopSignal) Stop() {
 	if signal == nil {
 		return
 	}
 	signal.once.Do(func() {
-		close(signal.channel)
+		close(signal.Channel)
 	})
 }
 
-func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
-	results := []scanHit{}
+func ScanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct{}) ([]ScanHit, error) {
+	results := []ScanHit{}
 	seenReferenceKeys := map[string]bool{}
 
 	walkErr := filepath.WalkDir(rootPath, func(path string, entry os.DirEntry, err error) error {
 		select {
 		case <-stopChannel:
-			return errScanStopped
+			return ErrScanStopped
 		default:
 		}
 
@@ -88,10 +68,10 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 			return nil
 		}
 
-		assetReferences, parseErr := extractAssetReferencesFromFile(path, stopChannel)
+		assetReferences, parseErr := ExtractAssetReferencesFromFile(path, stopChannel)
 		if parseErr != nil {
-			if errors.Is(parseErr, errScanStopped) {
-				return errScanStopped
+			if errors.Is(parseErr, ErrScanStopped) {
+				return ErrScanStopped
 			}
 			return nil
 		}
@@ -99,7 +79,7 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 		for _, assetReference := range assetReferences {
 			select {
 			case <-stopChannel:
-				return errScanStopped
+				return ErrScanStopped
 			default:
 			}
 
@@ -109,7 +89,7 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 			}
 
 			seenReferenceKeys[referenceKey] = true
-			results = append(results, scanHit{
+			results = append(results, ScanHit{
 				AssetID:    assetReference.AssetID,
 				AssetInput: assetReference.AssetInput,
 				FilePath:   path,
@@ -123,25 +103,25 @@ func scanFolderForAssetIDs(rootPath string, limit int, stopChannel <-chan struct
 		return nil
 	})
 
-	if walkErr != nil && !errors.Is(walkErr, errScanLimitReached) && !errors.Is(walkErr, errScanStopped) {
+	if walkErr != nil && !errors.Is(walkErr, errScanLimitReached) && !errors.Is(walkErr, ErrScanStopped) {
 		return nil, walkErr
 	}
 
-	if errors.Is(walkErr, errScanStopped) {
-		return results, errScanStopped
+	if errors.Is(walkErr, ErrScanStopped) {
+		return results, ErrScanStopped
 	}
 
 	return results, nil
 }
 
-func extractAssetReferencesFromFile(filePath string, stopChannel <-chan struct{}) ([]extractedScanReference, error) {
+func ExtractAssetReferencesFromFile(filePath string, stopChannel <-chan struct{}) ([]ExtractedScanReference, error) {
 	fileHandle, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	defer fileHandle.Close()
 
-	assetReferences := []extractedScanReference{}
+	assetReferences := []ExtractedScanReference{}
 	seenReferenceKeys := map[string]bool{}
 
 	fileScanner := bufio.NewScanner(fileHandle)
@@ -149,7 +129,7 @@ func extractAssetReferencesFromFile(filePath string, stopChannel <-chan struct{}
 	for fileScanner.Scan() {
 		select {
 		case <-stopChannel:
-			return nil, errScanStopped
+			return nil, ErrScanStopped
 		default:
 		}
 		extractAssetReferencesFromLine(fileScanner.Text(), seenReferenceKeys, &assetReferences)
@@ -162,10 +142,10 @@ func extractAssetReferencesFromFile(filePath string, stopChannel <-chan struct{}
 	return assetReferences, nil
 }
 
-func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bool, output *[]extractedScanReference) {
+func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bool, output *[]ExtractedScanReference) {
 	thumbMatches := rbxThumbPattern.FindAllString(line, -1)
 	for _, thumbMatch := range thumbMatches {
-		loadRequest, err := loader.ParseSingleAssetLoadRequest(thumbMatch)
+		loadRequest, err := ParseSingleAssetLoadRequest(thumbMatch)
 		if err != nil {
 			continue
 		}
@@ -174,7 +154,7 @@ func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bo
 			continue
 		}
 		seenReferenceKeys[referenceKey] = true
-		*output = append(*output, extractedScanReference{
+		*output = append(*output, ExtractedScanReference{
 			AssetID:    loadRequest.TargetID,
 			AssetInput: strings.TrimSpace(thumbMatch),
 		})
@@ -193,7 +173,7 @@ func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bo
 		}
 
 		seenReferenceKeys[referenceKey] = true
-		*output = append(*output, extractedScanReference{AssetID: assetID})
+		*output = append(*output, ExtractedScanReference{AssetID: assetID})
 	}
 
 	if !robloxContextLinePattern.MatchString(line) {
@@ -209,7 +189,7 @@ func extractAssetReferencesFromLine(line string, seenReferenceKeys map[string]bo
 		}
 
 		seenReferenceKeys[referenceKey] = true
-		*output = append(*output, extractedScanReference{AssetID: assetID})
+		*output = append(*output, ExtractedScanReference{AssetID: assetID})
 	}
 }
 
@@ -235,7 +215,7 @@ func isProbablyBinaryFile(filePath string) bool {
 	return false
 }
 
-func scanFolderDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error) {
+func ScanFolderDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan struct{}) ([]ScanHit, error) {
 	sourceParts := strings.SplitN(sourcePath, "\n", 2)
 	if len(sourceParts) != 2 {
 		return nil, fmt.Errorf("invalid folder diff source format")
@@ -260,17 +240,17 @@ func scanFolderDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan 
 		return nil, fmt.Errorf("target path must be a folder")
 	}
 
-	baselineHits, baselineScanErr := scanFolderForAssetIDs(baselineFolderPath, 0, stopChannel)
-	if errors.Is(baselineScanErr, errScanStopped) {
-		return nil, errScanStopped
+	baselineHits, baselineScanErr := ScanFolderForAssetIDs(baselineFolderPath, 0, stopChannel)
+	if errors.Is(baselineScanErr, ErrScanStopped) {
+		return nil, ErrScanStopped
 	}
 	if baselineScanErr != nil {
 		return nil, baselineScanErr
 	}
 
-	targetHits, targetScanErr := scanFolderForAssetIDs(targetFolderPath, 0, stopChannel)
-	if errors.Is(targetScanErr, errScanStopped) {
-		return nil, errScanStopped
+	targetHits, targetScanErr := ScanFolderForAssetIDs(targetFolderPath, 0, stopChannel)
+	if errors.Is(targetScanErr, ErrScanStopped) {
+		return nil, ErrScanStopped
 	}
 	if targetScanErr != nil {
 		return nil, targetScanErr
@@ -280,7 +260,7 @@ func scanFolderDiffForAssetIDs(sourcePath string, limit int, stopChannel <-chan 
 	for _, hit := range baselineHits {
 		baselineReferenceKeys[extractor.AssetReferenceKey(hit.AssetID, hit.AssetInput)] = true
 	}
-	diffHits := make([]scanHit, 0, len(targetHits))
+	diffHits := make([]ScanHit, 0, len(targetHits))
 	for _, hit := range targetHits {
 		if baselineReferenceKeys[extractor.AssetReferenceKey(hit.AssetID, hit.AssetInput)] {
 			continue

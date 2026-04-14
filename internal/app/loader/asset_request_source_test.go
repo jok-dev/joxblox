@@ -1,14 +1,13 @@
-package app
+package loader
 
 import (
 	"testing"
 
-	"joxblox/internal/app/loader"
 	"joxblox/internal/heatmap"
 )
 
 func TestAssetRequestTraceClassifiesMemoryByDefault(t *testing.T) {
-	trace := &loader.AssetRequestTrace{}
+	trace := &AssetRequestTrace{}
 
 	if got := trace.ClassifyRequestSource(); got != heatmap.SourceMemory {
 		t.Fatalf("expected default trace source to be memory, got %v", got)
@@ -16,7 +15,7 @@ func TestAssetRequestTraceClassifiesMemoryByDefault(t *testing.T) {
 }
 
 func TestAssetRequestTraceClassifiesDiskWhenCacheUsed(t *testing.T) {
-	trace := &loader.AssetRequestTrace{}
+	trace := &AssetRequestTrace{}
 	trace.MarkDisk()
 
 	if got := trace.ClassifyRequestSource(); got != heatmap.SourceDisk {
@@ -25,7 +24,7 @@ func TestAssetRequestTraceClassifiesDiskWhenCacheUsed(t *testing.T) {
 }
 
 func TestAssetRequestTraceClassifiesNetworkWhenAnyNetworkUsed(t *testing.T) {
-	trace := &loader.AssetRequestTrace{}
+	trace := &AssetRequestTrace{}
 	trace.MarkDisk()
 	trace.MarkNetwork()
 

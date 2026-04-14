@@ -520,7 +520,7 @@ func setLabelTextOrDash(label *widget.Label, value string) {
 	label.SetText(trimmedValue)
 }
 
-func (view *assetView) SetData(data assetViewData) {
+func (view *assetView) SetData(data loader.AssetViewData) {
 	view.previewVariantBuildToken.Add(1)
 	view.meshPreviewLoadToken.Add(1)
 	assetID := data.AssetID
@@ -613,8 +613,8 @@ func (view *assetView) SetData(data assetViewData) {
 	if largeTextureScore > 0 && sceneSurfaceArea > 0 {
 		inGameSizeText := fmt.Sprintf(
 			"%s (%s surface)",
-			formatLargeTextureScore(largeTextureScore),
-			formatSceneSurfaceArea(sceneSurfaceArea),
+			loader.FormatLargeTextureScore(largeTextureScore),
+			loader.FormatSceneSurfaceArea(sceneSurfaceArea),
 		)
 		if strings.TrimSpace(largestSurfacePath) != "" {
 			inGameSizeText = fmt.Sprintf("%s at %s", inGameSizeText, strings.TrimSpace(largestSurfacePath))

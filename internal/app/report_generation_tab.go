@@ -21,6 +21,7 @@ import (
 
 	"joxblox/internal/app/loader"
 	"joxblox/internal/app/report"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -58,7 +59,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 
 	filePathLabel := widget.NewLabel("Drop .rbxl/.rbxm or choose file")
 	filePathLabel.Wrapping = fyne.TextTruncate
-	warningBanner := newMaterialVariantWarningBanner(window)
+	warningBanner := ui.NewMaterialVariantWarningBanner(window)
 
 	statusLabel := widget.NewLabel("")
 	statusLabel.Wrapping = fyne.TextWrapWord
@@ -88,7 +89,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 
 	profileContainer := container.NewVBox()
 	profileContainer.Hide()
-	setWarning := func(warningData materialVariantWarningData) { warningBanner.SetWarning(warningData) }
+	setWarning := func(warningData ui.MaterialVariantWarningData) { warningBanner.SetWarning(warningData) }
 
 	refreshProfile := func() {
 		profileContainer.RemoveAll()
@@ -139,7 +140,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		currentSummary = report.Summary{}
 		currentCells = nil
 		profileContainer.Hide()
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		setBusy(false)
 		statusLabel.SetText("Loading canceled")
 		if showRetryDialog {
@@ -166,7 +167,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		currentSummary = report.Summary{}
 		currentCells = nil
 		profileContainer.Hide()
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		statusLabel.SetText(fmt.Sprintf("Loading %s asset...", assetType.Label))
 		setBusy(true)
 
@@ -206,7 +207,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 			if isCanceled() {
 				return
 			}
-			warningData, warningErr := buildRBXLMissingMaterialVariantWarning(sourcePath, prefixes, nil)
+			warningData, warningErr := ui.BuildRBXLMissingMaterialVariantWarning(sourcePath, prefixes, nil)
 			if warningErr != nil {
 				debug.Logf("Report generation material warning extraction failed for %s: %s", sourcePath, warningErr.Error())
 			}
@@ -342,7 +343,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		currentSummary = report.Summary{}
 		currentCells = nil
 		profileContainer.Hide()
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		statusLabel.SetText("Choose an asset type to generate the report")
 		setBusy(false)
 		showAssetTypeDialog()
@@ -370,7 +371,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 		container.NewCenter(container.NewHBox(progressBar, cancelLoadButton)),
 		container.NewCenter(container.NewHBox(browseButton, workspaceOnlyCheck)),
 		filePathLabel,
-		warningBanner.root,
+		warningBanner.BannerRoot(),
 	)
 
 	return container.NewBorder(
@@ -425,7 +426,7 @@ func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgre
 				if previewErr == nil && previewResult != nil {
 					resolvedAsset = reportGenerationResolvedAsset{
 						Stats:      buildReportGenerationStatsFromPreview(reference.AssetID, previewResult),
-						FileSHA256: normalizeHash(previewSHA256(previewResult)),
+						FileSHA256: loader.NormalizeHash(loader.PreviewSHA256(previewResult)),
 					}
 				}
 				resolvedMutex.Lock()
@@ -565,7 +566,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 }
 
 func buildReportGenerationStatsFromPreview(assetID int64, previewResult *loader.AssetPreviewResult) heatmap.AssetStats {
-	return buildAssetStatsFromPreview(assetID, previewResult)
+	return loader.BuildAssetStatsFromPreview(assetID, previewResult)
 }
 
 func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, oversizedTextureThreshold float64) (report.Summary, []rbxlHeatmapPoint) {
@@ -660,21 +661,21 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 
 func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, threshold float64) int {
 	if threshold <= 0 {
-		threshold = defaultLargeTextureThreshold
+		threshold = loader.DefaultLargeTextureThreshold
 	}
 	if len(refs) == 0 || len(resolved) == 0 {
 		return 0
 	}
 
-	areaByPath := buildSceneSurfaceAreaIndex(mapParts)
+	areaByPath := loader.BuildSceneSurfaceAreaIndex(mapParts)
 	maxAreaByReferenceKey := map[string]float64{}
 	for _, ref := range refs {
 		if ref.ID <= 0 {
 			continue
 		}
 		referenceKey := extractor.AssetReferenceKey(ref.ID, ref.RawContent)
-		area := estimateSceneSurfaceAreaForPaths(strings.TrimSpace(ref.InstancePath), nil, areaByPath)
-		maxAreaByReferenceKey[referenceKey] = maxPositiveFloat64(maxAreaByReferenceKey[referenceKey], area)
+		area := loader.EstimateSceneSurfaceAreaForPaths(strings.TrimSpace(ref.InstancePath), nil, areaByPath)
+		maxAreaByReferenceKey[referenceKey] = loader.MaxPositiveFloat64(maxAreaByReferenceKey[referenceKey], area)
 	}
 
 	oversizedTextureCount := 0
@@ -683,7 +684,7 @@ func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, r
 		if textureBytes <= 0 {
 			continue
 		}
-		if computeLargeTextureScore(textureBytes, maxAreaByReferenceKey[referenceKey]) >= threshold {
+		if loader.ComputeLargeTextureScore(textureBytes, maxAreaByReferenceKey[referenceKey]) >= threshold {
 			oversizedTextureCount++
 		}
 	}

@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"fmt"
@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-func buildHashCounts(results []scanResult) map[string]int {
+func BuildHashCounts(results []ScanResult) map[string]int {
 	hashCounts := map[string]int{}
 	for _, result := range results {
-		normalizedHash := normalizeHash(result.FileSHA256)
+		normalizedHash := NormalizeHash(result.FileSHA256)
 		if normalizedHash == "" {
 			continue
 		}
@@ -18,19 +18,19 @@ func buildHashCounts(results []scanResult) map[string]int {
 	return hashCounts
 }
 
-func isDuplicateByHash(result scanResult, hashCounts map[string]int) bool {
-	normalizedHash := normalizeHash(result.FileSHA256)
+func IsDuplicateByHash(result ScanResult, hashCounts map[string]int) bool {
+	normalizedHash := NormalizeHash(result.FileSHA256)
 	if normalizedHash == "" {
 		return false
 	}
 	return hashCounts[normalizedHash] >= 2
 }
 
-func normalizeHash(rawHash string) string {
+func NormalizeHash(rawHash string) string {
 	return strings.ToLower(strings.TrimSpace(rawHash))
 }
 
-func containsString(values []string, candidate string) bool {
+func ContainsString(values []string, candidate string) bool {
 	for _, value := range values {
 		if value == candidate {
 			return true
@@ -39,7 +39,7 @@ func containsString(values []string, candidate string) bool {
 	return false
 }
 
-func scanResultMatchesQuery(result scanResult, query string) bool {
+func ScanResultMatchesQuery(result ScanResult, query string) bool {
 	trimmedQuery := strings.ToLower(strings.TrimSpace(query))
 	if trimmedQuery == "" {
 		return true
@@ -71,15 +71,15 @@ func scanResultMatchesQuery(result scanResult, query string) bool {
 	return false
 }
 
-func scanResultTypeLabel(result scanResult) string {
-	trimmedTypeName := scanResultTypeFilterLabel(result)
+func ScanResultTypeLabel(result ScanResult) string {
+	trimmedTypeName := ScanResultTypeFilterLabel(result)
 	if result.AssetTypeID > 0 {
 		return fmt.Sprintf("%s (%d)", trimmedTypeName, result.AssetTypeID)
 	}
 	return trimmedTypeName
 }
 
-func scanResultTypeFilterLabel(result scanResult) string {
+func ScanResultTypeFilterLabel(result ScanResult) string {
 	trimmedTypeName := strings.TrimSpace(result.AssetTypeName)
 	if trimmedTypeName == "" {
 		trimmedTypeName = "Unknown"
@@ -87,7 +87,7 @@ func scanResultTypeFilterLabel(result scanResult) string {
 	return trimmedTypeName
 }
 
-func scanResultInstanceTypeLabel(result scanResult) string {
+func ScanResultInstanceTypeLabel(result ScanResult) string {
 	trimmedInstanceType := strings.TrimSpace(result.InstanceType)
 	if trimmedInstanceType == "" {
 		return "Unknown"
@@ -95,7 +95,7 @@ func scanResultInstanceTypeLabel(result scanResult) string {
 	return trimmedInstanceType
 }
 
-func scanResultPropertyNameLabel(result scanResult) string {
+func ScanResultPropertyNameLabel(result ScanResult) string {
 	trimmedPropertyName := strings.TrimSpace(result.PropertyName)
 	if trimmedPropertyName == "" {
 		return "Unknown"

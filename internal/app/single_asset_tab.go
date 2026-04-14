@@ -33,7 +33,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	var renderPreview func(selectedAssetID int64, previewResult *loader.AssetPreviewResult)
 	renderPreview = func(selectedAssetID int64, previewResult *loader.AssetPreviewResult) {
 		context := buildExplorerSelectionReferenceContext(explorerState, selectedAssetID)
-		assetDetailsView.SetData(buildAssetViewDataFromPreview(selectedAssetID, previewResult, context))
+		assetDetailsView.SetData(loader.BuildAssetViewDataFromPreview(selectedAssetID, previewResult, context))
 		assetDetailsView.SetHierarchy(explorerState.getRows(), selectedAssetID, func(assetID int64) {
 			if explorerState == nil {
 				return

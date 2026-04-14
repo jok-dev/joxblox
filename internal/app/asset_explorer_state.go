@@ -133,7 +133,7 @@ func (state *assetExplorerState) selectAssetWithRequestSource(assetID int64) (*l
 	}
 
 	trace := &loader.AssetRequestTrace{}
-	loadedPreview, loadErr := loadAssetPreviewWithTrace(assetID, trace)
+	loadedPreview, loadErr := loader.LoadAssetPreviewWithTrace(assetID, trace)
 	if loadErr != nil {
 		return nil, loadErr, trace.ClassifyRequestSource()
 	}

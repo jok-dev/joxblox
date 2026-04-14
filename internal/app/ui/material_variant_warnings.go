@@ -1,4 +1,4 @@
-package app
+package ui
 
 import (
 	"errors"
@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 
@@ -17,22 +18,22 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-type materialVariantWarningData struct {
+type MaterialVariantWarningData struct {
 	Summary     string
 	DetailTitle string
 	DetailText  string
 }
 
-type materialVariantWarningBanner struct {
+type MaterialVariantWarningBanner struct {
 	window     fyne.Window
 	root       *fyne.Container
 	content    *fyne.Container
 	label      *widget.Label
 	viewButton *widget.Button
-	detail     materialVariantWarningData
+	detail     MaterialVariantWarningData
 }
 
-func newMaterialVariantWarningBanner(window fyne.Window) *materialVariantWarningBanner {
+func NewMaterialVariantWarningBanner(window fyne.Window) *MaterialVariantWarningBanner {
 	background := canvas.NewRectangle(color.NRGBA{R: 98, G: 74, B: 0, A: 235})
 	label := widget.NewLabel("")
 	label.Wrapping = fyne.TextWrapWord
@@ -44,7 +45,7 @@ func newMaterialVariantWarningBanner(window fyne.Window) *materialVariantWarning
 		container.NewPadded(container.NewBorder(nil, nil, nil, viewButton, label)),
 	)
 	root := container.NewVBox()
-	banner := &materialVariantWarningBanner{
+	banner := &MaterialVariantWarningBanner{
 		window:     window,
 		root:       root,
 		content:    content,
@@ -69,7 +70,14 @@ func newMaterialVariantWarningBanner(window fyne.Window) *materialVariantWarning
 	return banner
 }
 
-func (banner *materialVariantWarningBanner) SetWarning(data materialVariantWarningData) {
+func (banner *MaterialVariantWarningBanner) BannerRoot() fyne.CanvasObject {
+	if banner == nil {
+		return nil
+	}
+	return banner.root
+}
+
+func (banner *MaterialVariantWarningBanner) SetWarning(data MaterialVariantWarningData) {
 	if banner == nil || banner.root == nil || banner.content == nil || banner.label == nil || banner.viewButton == nil {
 		return
 	}
@@ -79,7 +87,7 @@ func (banner *materialVariantWarningBanner) SetWarning(data materialVariantWarni
 	if trimmedText == "" {
 		banner.label.SetText("")
 		banner.viewButton.Hide()
-		banner.detail = materialVariantWarningData{}
+		banner.detail = MaterialVariantWarningData{}
 		banner.root.Refresh()
 		return
 	}
@@ -93,7 +101,7 @@ func (banner *materialVariantWarningBanner) SetWarning(data materialVariantWarni
 	banner.root.Refresh()
 }
 
-func materialVariantWarningPathPrefixes(pathPrefixes []string) []string {
+func MaterialVariantWarningPathPrefixes(pathPrefixes []string) []string {
 	if len(pathPrefixes) == 0 {
 		return nil
 	}
@@ -115,9 +123,9 @@ func materialVariantWarningPathPrefixes(pathPrefixes []string) []string {
 	return filtered
 }
 
-func buildMissingMaterialVariantWarningData(fileLabel string, missing []extractor.MissingMaterialVariantResult) materialVariantWarningData {
+func BuildMissingMaterialVariantWarningData(fileLabel string, missing []extractor.MissingMaterialVariantResult) MaterialVariantWarningData {
 	if len(missing) == 0 {
-		return materialVariantWarningData{}
+		return MaterialVariantWarningData{}
 	}
 
 	uniqueNames := map[string]struct{}{}
@@ -141,7 +149,7 @@ func buildMissingMaterialVariantWarningData(fileLabel string, missing []extracto
 		variantCount = len(missing)
 	}
 	if variantCount == 0 {
-		return materialVariantWarningData{}
+		return MaterialVariantWarningData{}
 	}
 
 	label := strings.TrimSpace(fileLabel)
@@ -162,7 +170,7 @@ func buildMissingMaterialVariantWarningData(fileLabel string, missing []extracto
 	for _, name := range sampleNames {
 		detailLines = append(detailLines, "- "+name)
 	}
-	return materialVariantWarningData{
+	return MaterialVariantWarningData{
 		Summary:     "Warning: " + format.FormatIntCommas(int64(variantCount)) + " " + variantWord + " missing in MaterialService for " + label + ".",
 		DetailTitle: "Missing MaterialVariants",
 		DetailText: strings.Join(detailLines, "\n") +
@@ -170,19 +178,19 @@ func buildMissingMaterialVariantWarningData(fileLabel string, missing []extracto
 	}
 }
 
-func buildRBXLMissingMaterialVariantWarning(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error) {
-	missingVariants, extractErr := extractor.ExtractMissingMaterialVariants(filePath, materialVariantWarningPathPrefixes(pathPrefixes), stopChannel)
+func BuildRBXLMissingMaterialVariantWarning(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) (MaterialVariantWarningData, error) {
+	missingVariants, extractErr := extractor.ExtractMissingMaterialVariants(filePath, MaterialVariantWarningPathPrefixes(pathPrefixes), stopChannel)
 	if errors.Is(extractErr, extractor.ErrCancelled) {
-		return materialVariantWarningData{}, errScanStopped
+		return MaterialVariantWarningData{}, loader.ErrScanStopped
 	}
 	if extractErr != nil {
-		return materialVariantWarningData{}, extractErr
+		return MaterialVariantWarningData{}, extractErr
 	}
-	return buildMissingMaterialVariantWarningData(filepath.Base(strings.TrimSpace(filePath)), missingVariants), nil
+	return BuildMissingMaterialVariantWarningData(filepath.Base(strings.TrimSpace(filePath)), missingVariants), nil
 }
 
-func combineMaterialVariantWarnings(warnings ...materialVariantWarningData) materialVariantWarningData {
-	filteredWarnings := make([]materialVariantWarningData, 0, len(warnings))
+func CombineMaterialVariantWarnings(warnings ...MaterialVariantWarningData) MaterialVariantWarningData {
+	filteredWarnings := make([]MaterialVariantWarningData, 0, len(warnings))
 	for _, warning := range warnings {
 		if strings.TrimSpace(warning.Summary) == "" {
 			continue
@@ -190,7 +198,7 @@ func combineMaterialVariantWarnings(warnings ...materialVariantWarningData) mate
 		filteredWarnings = append(filteredWarnings, warning)
 	}
 	if len(filteredWarnings) == 0 {
-		return materialVariantWarningData{}
+		return MaterialVariantWarningData{}
 	}
 	if len(filteredWarnings) == 1 {
 		return filteredWarnings[0]
@@ -203,7 +211,7 @@ func combineMaterialVariantWarnings(warnings ...materialVariantWarningData) mate
 			details = append(details, warning.DetailText)
 		}
 	}
-	return materialVariantWarningData{
+	return MaterialVariantWarningData{
 		Summary:     strings.Join(summaries, " "),
 		DetailTitle: "Missing MaterialVariants",
 		DetailText:  strings.Join(details, "\n\n"),

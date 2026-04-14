@@ -67,7 +67,7 @@ func whitelistPatternsToPathPrefixes(patternsText string) []string {
 	return prefixes
 }
 
-func scanHitMatchesPathWhitelist(hit scanHit, patternsText string) bool {
+func scanHitMatchesPathWhitelist(hit loader.ScanHit, patternsText string) bool {
 	if hit.InstancePath != "" && matchesAnyWhitelistPattern(hit.InstancePath, patternsText) {
 		return true
 	}
@@ -127,7 +127,7 @@ func verifyAssetWithRetry(id int64, stopChannel <-chan struct{}) (*loader.AssetD
 	for attempt := 0; attempt <= verifyMaxRetries; attempt++ {
 		select {
 		case <-stopChannel:
-			return nil, errScanStopped
+			return nil, loader.ErrScanStopped
 		default:
 		}
 		deliveryInfo, err := loader.FetchAssetDeliveryInfo(id)
@@ -140,7 +140,7 @@ func verifyAssetWithRetry(id int64, stopChannel <-chan struct{}) (*loader.AssetD
 		debug.Logf("Verify asset %d attempt %d failed: %v (retrying in %v)", id, attempt+1, err, backoff)
 		select {
 		case <-stopChannel:
-			return nil, errScanStopped
+			return nil, loader.ErrScanStopped
 		case <-time.After(backoff):
 		}
 		backoff = min(backoff*2, 15*time.Second)
@@ -186,7 +186,7 @@ func verifyImageAssets(
 				}
 
 				deliveryInfo, err := verifyAssetWithRetry(id, stopChannel)
-				if errors.Is(err, errScanStopped) {
+				if errors.Is(err, loader.ErrScanStopped) {
 					return
 				}
 				if err != nil {
@@ -221,7 +221,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 	var verifiedImageURLs map[int64]string
 	ignoredThumbnailAssets := 0
 	inProgress := false
-	var activeStopSignal *stopSignal
+	var activeStopSignal *loader.StopSignal
 
 	filePathLabel := widget.NewLabel("No file selected")
 	filePathLabel.Wrapping = fyne.TextTruncate
@@ -509,18 +509,18 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 				if useWhitelist {
 					prefixes := whitelistPatternsToPathPrefixes(whitelistText)
 					results, scanErr = extractor.ExtractFilteredRefs(selectedFilePath, prefixes, neverStop)
-			} else {
-				var extractResult extractor.AssetIDsResult
-				extractResult, scanErr = extractor.ExtractAssetIDsWithCounts(selectedFilePath, 0, 0, neverStop)
-				if scanErr == nil {
-					var allReferences []extractor.Result
-					if jsonErr := json.Unmarshal([]byte(extractResult.CommandOutput), &allReferences); jsonErr != nil {
-						scanErr = jsonErr
-					} else {
-						results = allReferences
+				} else {
+					var extractResult extractor.AssetIDsResult
+					extractResult, scanErr = extractor.ExtractAssetIDsWithCounts(selectedFilePath, 0, 0, neverStop)
+					if scanErr == nil {
+						var allReferences []extractor.Result
+						if jsonErr := json.Unmarshal([]byte(extractResult.CommandOutput), &allReferences); jsonErr != nil {
+							scanErr = jsonErr
+						} else {
+							results = allReferences
+						}
 					}
 				}
-			}
 				if scanErr != nil {
 					fyne.Do(func() {
 						scanProgressBar.Stop()
@@ -742,7 +742,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 					}
 
 					inProgress = true
-					localStopSignal := newStopSignal()
+					localStopSignal := loader.NewStopSignal()
 					activeStopSignal = localStopSignal
 					setControlsEnabled(false)
 					progressBar.SetValue(0)
@@ -833,7 +833,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 
 func runOptimization(
 	window fyne.Window,
-	localStopSignal *stopSignal,
+	localStopSignal *loader.StopSignal,
 	assetsToProcess []extractor.Result,
 	assetPaths map[int64][]string,
 	cachedURLs map[int64]string,
@@ -921,7 +921,7 @@ func runOptimization(
 			defer wg.Done()
 			for asset := range jobs {
 				select {
-				case <-localStopSignal.channel:
+				case <-localStopSignal.Channel:
 					return
 				default:
 				}
@@ -976,7 +976,7 @@ func runOptimization(
 	}
 
 	select {
-	case <-localStopSignal.channel:
+	case <-localStopSignal.Channel:
 		fyne.Do(func() {
 			statusLabel.SetText(fmt.Sprintf("Stopped. %d replaced, %d skipped, %d failed out of %d.",
 				completedCount.Load(), skippedCount.Load(), failedCount.Load(), totalAssets))
@@ -1017,7 +1017,7 @@ func runOptimization(
 	outputResultsPath := baseName + "-optimized-results.txt"
 
 	replaceCount, replaceErr := extractor.ReplaceAssetIDs(
-		selectedFilePath, outputRBXLPath, replacementsCopy, localStopSignal.channel,
+		selectedFilePath, outputRBXLPath, replacementsCopy, localStopSignal.Channel,
 	)
 	if replaceErr != nil {
 		fyne.Do(func() {
@@ -1089,7 +1089,7 @@ func processOptimizeAsset(
 	scale float64,
 	scaler xdraw.Interpolator,
 	minSizeBytes int,
-	stop *stopSignal,
+	stop *loader.StopSignal,
 	onRateLimitStart func(),
 	onRateLimitEnd func(),
 	onFatalError func(string),
@@ -1193,7 +1193,7 @@ downloaded:
 			"",
 			uploadFileName,
 			resizedBytes,
-			stop.channel,
+			stop.Channel,
 		)
 		if uploadErr == nil {
 			break
@@ -1210,7 +1210,7 @@ downloaded:
 			debug.Logf("Optimize: asset %d rate limited, backing off %s", asset.ID, rateLimitBackoff)
 			onRateLimitStart()
 			select {
-			case <-stop.channel:
+			case <-stop.Channel:
 				onRateLimitEnd()
 				return fail("stopped")
 			case <-time.After(rateLimitBackoff):
@@ -1225,7 +1225,7 @@ downloaded:
 			break
 		}
 		select {
-		case <-stop.channel:
+		case <-stop.Channel:
 			return fail("stopped")
 		case <-time.After(time.Duration(attempts) * time.Second):
 		}

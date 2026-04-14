@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/heatmap"
@@ -90,7 +91,7 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 		},
 	}
 
-	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, defaultLargeTextureThreshold)
+	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.TotalBytes != 22*format.Megabyte {
 		t.Fatalf("expected total bytes %d, got %d", 22*format.Megabyte, summary.TotalBytes)
@@ -162,7 +163,7 @@ func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
 		},
 	}
 
-	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, defaultLargeTextureThreshold)
+	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.TotalBytes != 5*format.Megabyte {
 		t.Errorf("expected total bytes %d, got %d", 5*format.Megabyte, summary.TotalBytes)
@@ -221,7 +222,7 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 		},
 	}
 
-	summary, _ := buildReportSummaryAndPoints(refs, resolved, nil, defaultLargeTextureThreshold)
+	summary, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.ReferenceCount != 3 {
 		t.Fatalf("expected reference count 3, got %d", summary.ReferenceCount)
@@ -282,7 +283,7 @@ func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T)
 		},
 	}
 
-	summary, _ := buildReportSummaryAndPoints(refs, resolved, nil, defaultLargeTextureThreshold)
+	summary, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.TriangleCount != 246 {
 		t.Fatalf("expected triangle count 246 across two mesh instances, got %d", summary.TriangleCount)
@@ -325,7 +326,7 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 		{InstanceType: "Part", InstancePath: "Workspace.Part2"},
 	}
 
-	summary, _ := buildReportSummaryAndPoints(refs, resolved, mapParts, defaultLargeTextureThreshold)
+	summary, _ := buildReportSummaryAndPoints(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold)
 
 	if summary.MeshPartCount != 3 {
 		t.Fatalf("expected MeshPartCount 3 from raw map parts, got %d", summary.MeshPartCount)
@@ -565,7 +566,7 @@ func TestCountReportGenerationOversizedTextures(t *testing.T) {
 		},
 	}
 
-	count := countReportGenerationOversizedTextures(refs, resolved, mapParts, defaultLargeTextureThreshold)
+	count := countReportGenerationOversizedTextures(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold)
 	if count != 1 {
 		t.Fatalf("expected 1 oversized texture, got %d", count)
 	}

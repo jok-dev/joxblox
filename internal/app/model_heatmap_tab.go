@@ -615,7 +615,7 @@ func uniqueModelHeatmapTextureReferences(instances []modelHeatmapMeshInstance) [
 }
 
 func resolveModelHeatmapMeshes(references []heatmap.AssetReference, onProgress func(done int, total int), shouldCancel func() bool) map[string]modelHeatmapResolvedMesh {
-	return runResolveWorkers(
+	return loader.RunResolveWorkers(
 		references,
 		func(ref heatmap.AssetReference) string {
 			return extractor.AssetReferenceKey(ref.AssetID, ref.AssetInput)
@@ -644,7 +644,7 @@ func resolveModelHeatmapMeshes(references []heatmap.AssetReference, onProgress f
 }
 
 func resolveModelHeatmapTextures(references []heatmap.AssetReference, onProgress func(done int, total int), shouldCancel func() bool) map[string]modelHeatmapResolvedTexture {
-	return runResolveWorkers(
+	return loader.RunResolveWorkers(
 		references,
 		func(ref heatmap.AssetReference) string {
 			return extractor.AssetReferenceKey(ref.AssetID, ref.AssetInput)

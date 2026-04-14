@@ -1,4 +1,4 @@
-package app
+package ui
 
 import (
 	"strings"
@@ -8,7 +8,7 @@ import (
 )
 
 func TestMaterialVariantWarningPathPrefixesIncludesMaterialService(t *testing.T) {
-	prefixes := materialVariantWarningPathPrefixes([]string{"Workspace"})
+	prefixes := MaterialVariantWarningPathPrefixes([]string{"Workspace"})
 	if len(prefixes) != 2 {
 		t.Fatalf("expected 2 prefixes, got %d", len(prefixes))
 	}
@@ -18,7 +18,7 @@ func TestMaterialVariantWarningPathPrefixesIncludesMaterialService(t *testing.T)
 }
 
 func TestBuildMissingMaterialVariantWarning(t *testing.T) {
-	warningData := buildMissingMaterialVariantWarningData("test.rbxl", []extractor.MissingMaterialVariantResult{
+	warningData := BuildMissingMaterialVariantWarningData("test.rbxl", []extractor.MissingMaterialVariantResult{
 		{VariantName: "Mud"},
 		{VariantName: "Snow"},
 	})

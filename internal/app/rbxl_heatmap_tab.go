@@ -26,6 +26,7 @@ import (
 	xdraw "golang.org/x/image/draw"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -213,14 +214,14 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 	filePathLabel.Wrapping = fyne.TextTruncate
 	compareFilePathLabel := widget.NewLabel("No comparison .rbxl/.rbxm file selected.")
 	compareFilePathLabel.Wrapping = fyne.TextTruncate
-	warningBanner := newMaterialVariantWarningBanner(window)
+	warningBanner := ui.NewMaterialVariantWarningBanner(window)
 	statusLabel := widget.NewLabel("Select an .rbxl or .rbxm file and build a heatmap.")
 	statusLabel.Wrapping = fyne.TextWrapWord
 	summaryLabel := widget.NewLabel("No heatmap built.")
 	summaryLabel.Wrapping = fyne.TextWrapWord
 	legendLabel := widget.NewLabel(heatmapLegendText(false))
 	legendLabel.Wrapping = fyne.TextWrapWord
-	setWarning := func(warningData materialVariantWarningData) {
+	setWarning := func(warningData ui.MaterialVariantWarningData) {
 		warningBanner.SetWarning(warningData)
 	}
 	mapImageLabel := widget.NewLabel("Using auto-generated map underlay.")
@@ -422,7 +423,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		pickRBXLSource(window, func(filePath string) {
 			selectedFilePath = strings.TrimSpace(filePath)
 			filePathLabel.SetText(selectedFilePath)
-			setWarning(materialVariantWarningData{})
+			setWarning(ui.MaterialVariantWarningData{})
 			statusLabel.SetText("Ready to build heatmap.")
 		}, func(err error) {
 			statusLabel.SetText(fmt.Sprintf("File selection failed: %s", err.Error()))
@@ -432,7 +433,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		pickRBXLSource(window, func(filePath string) {
 			selectedCompareFilePath = strings.TrimSpace(filePath)
 			compareFilePathLabel.SetText(selectedCompareFilePath)
-			setWarning(materialVariantWarningData{})
+			setWarning(ui.MaterialVariantWarningData{})
 			statusLabel.SetText("Ready to build diff heatmap.")
 		}, func(err error) {
 			statusLabel.SetText(fmt.Sprintf("Comparison file selection failed: %s", err.Error()))
@@ -553,7 +554,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 	showHeatmapFailure = func(message string) {
 		setBusy(false)
 		statusLabel.SetText(message)
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		currentOption = blankHeatmapPreviewOption()
 		currentScene = nil
 		heatmapReady = false
@@ -594,7 +595,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		placeholderLabel.Show()
 		legendLabel.SetText(heatmapLegendText(diffMode))
 		heatmapReady = false
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		setBusy(true)
 
 		backgroundBytes := append([]byte(nil), mapImageBytes...)
@@ -613,14 +614,14 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 				})
 				return
 			}
-			baseWarningText, warningErr := buildRBXLMissingMaterialVariantWarning(filePath, prefixes, nil)
+			baseWarningText, warningErr := ui.BuildRBXLMissingMaterialVariantWarning(filePath, prefixes, nil)
 			if warningErr != nil {
 				debug.Logf("Heatmap material warning extraction failed for %s: %s", filePath, warningErr.Error())
 			}
 
 			compareRefs := []extractor.PositionedResult(nil)
 			compareMapParts := []extractor.MapRenderPartResult(nil)
-			compareWarningText := materialVariantWarningData{}
+			compareWarningText := ui.MaterialVariantWarningData{}
 			if diffEnabled {
 				fyne.Do(func() {
 					statusLabel.SetText("Extracting comparison RBXL/RBXM...")
@@ -639,7 +640,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 					})
 					return
 				}
-				compareWarningText, warningErr = buildRBXLMissingMaterialVariantWarning(comparePath, prefixes, nil)
+				compareWarningText, warningErr = ui.BuildRBXLMissingMaterialVariantWarning(comparePath, prefixes, nil)
 				if warningErr != nil {
 					debug.Logf("Heatmap material warning extraction failed for %s: %s", comparePath, warningErr.Error())
 				}
@@ -710,7 +711,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 				placeholderLabel.Hide()
 				saveButton.Enable()
 				hideTooltip()
-				setWarning(combineMaterialVariantWarnings(baseWarningText, compareWarningText))
+				setWarning(ui.CombineMaterialVariantWarnings(baseWarningText, compareWarningText))
 				summaryLabel.SetText(formatHeatmapBuildSummary(buildResult))
 				statusLabel.SetText(heatmapReadyStatus(buildResult.DiffMode))
 				setBusy(false)
@@ -784,7 +785,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 			metricSelect,
 		),
 		container.NewHBox(buildButton, saveButton, layout.NewSpacer(), progressBar),
-		warningBanner.root,
+		warningBanner.BannerRoot(),
 		summaryLabel,
 		legendLabel,
 	)
@@ -799,7 +800,7 @@ func newRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		}
 		selectedFilePath = trimmedPath
 		filePathLabel.SetText(selectedFilePath)
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		statusLabel.SetText("Ready to build heatmap.")
 		if buildButton.OnTapped != nil {
 			buildButton.OnTapped()
@@ -1183,7 +1184,7 @@ func getHeatmapAssetStats(assetID int64, assetInput string) (heatmap.AssetStats,
 		return stats, trace.ClassifyRequestSource()
 	}
 
-	stats = buildAssetStatsFromPreview(assetID, previewResult)
+	stats = loader.BuildAssetStatsFromPreview(assetID, previewResult)
 
 	heatmapAssetStatsCache.mutex.Lock()
 	heatmapAssetStatsCache.statsByAsset[cacheKey] = stats
@@ -1411,7 +1412,7 @@ func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell heatmap.Cell, baseFi
 	}
 	rows := make([]heatmapSquareAssetRow, 0)
 	rowIndexByKey := map[string]int{}
-	sceneSurfaceAreasByPath := buildSceneSurfaceAreaIndex(scene.MapParts)
+	sceneSurfaceAreasByPath := loader.BuildSceneSurfaceAreaIndex(scene.MapParts)
 	appendRows := func(points []rbxlHeatmapPoint, side string, filePath string) {
 		for _, point := range points {
 			if !heatmapPointCellMatches(scene, point, cell.Row, cell.Column) {
@@ -1420,7 +1421,7 @@ func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell heatmap.Cell, baseFi
 			rowKey := fmt.Sprintf("%s:%d", side, point.AssetID)
 			if existingIndex, found := rowIndexByKey[rowKey]; found {
 				rows[existingIndex].UseCount++
-				nextArea, nextPath := estimateSceneSurfaceAreaAndPathForPaths(point.InstancePath, nil, sceneSurfaceAreasByPath)
+				nextArea, nextPath := loader.EstimateSceneSurfaceAreaAndPathForPaths(point.InstancePath, nil, sceneSurfaceAreasByPath)
 				if nextArea > rows[existingIndex].SceneSurfaceArea {
 					rows[existingIndex].SceneSurfaceArea = nextArea
 					rows[existingIndex].LargestSurfacePath = strings.TrimSpace(nextPath)
@@ -1429,7 +1430,7 @@ func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell heatmap.Cell, baseFi
 				}
 				continue
 			}
-			sceneSurfaceArea, largestSurfacePath := estimateSceneSurfaceAreaAndPathForPaths(point.InstancePath, nil, sceneSurfaceAreasByPath)
+			sceneSurfaceArea, largestSurfacePath := loader.EstimateSceneSurfaceAreaAndPathForPaths(point.InstancePath, nil, sceneSurfaceAreasByPath)
 			rowIndexByKey[rowKey] = len(rows)
 			rows = append(rows, heatmapSquareAssetRow{
 				Side:               side,
@@ -1474,8 +1475,8 @@ func heatmapSquareRowsForCell(scene *rbxlHeatmapScene, cell heatmap.Cell, baseFi
 	return rows
 }
 
-func heatmapSquareRowsToScanResults(rows []heatmapSquareAssetRow) []scanResult {
-	results := make([]scanResult, 0, len(rows))
+func heatmapSquareRowsToScanResults(rows []heatmapSquareAssetRow) []loader.ScanResult {
+	results := make([]loader.ScanResult, 0, len(rows))
 	for _, row := range rows {
 		meshTriangles := uint32(0)
 		if row.Triangles > 0 {
@@ -1485,7 +1486,7 @@ func heatmapSquareRowsToScanResults(rows []heatmapSquareAssetRow) []scanResult {
 		if assetTypeName == "" {
 			assetTypeName = "Unknown"
 		}
-		results = append(results, refreshLargeTextureMetrics(scanResult{
+		results = append(results, loader.RefreshLargeTextureMetrics(loader.ScanResult{
 			AssetID:            row.AssetID,
 			AssetInput:         row.AssetInput,
 			Side:               row.Side,
@@ -1931,15 +1932,15 @@ func compareHeatmapSquareRows(left heatmapSquareAssetRow, right heatmapSquareAss
 	case "Side":
 		return strings.Compare(left.Side, right.Side)
 	case "Asset ID":
-		return compareInt64(left.AssetID, right.AssetID)
+		return loader.CompareInt64(left.AssetID, right.AssetID)
 	case "Texture Bytes":
-		return compareInt64(left.TextureBytes, right.TextureBytes)
+		return loader.CompareInt64(left.TextureBytes, right.TextureBytes)
 	case "Texture Pixels":
-		return compareInt64(left.Pixels, right.Pixels)
+		return loader.CompareInt64(left.Pixels, right.Pixels)
 	case "Mesh Bytes":
-		return compareInt64(left.MeshBytes, right.MeshBytes)
+		return loader.CompareInt64(left.MeshBytes, right.MeshBytes)
 	case "Mesh Triangles":
-		return compareInt64(left.Triangles, right.Triangles)
+		return loader.CompareInt64(left.Triangles, right.Triangles)
 	case "Instance Type":
 		return strings.Compare(left.InstanceType, right.InstanceType)
 	case "Property":
@@ -1951,7 +1952,7 @@ func compareHeatmapSquareRows(left heatmapSquareAssetRow, right heatmapSquareAss
 		rightPosition := fmt.Sprintf("%.4f:%.4f:%.4f", right.WorldX, right.WorldY, right.WorldZ)
 		return strings.Compare(leftPosition, rightPosition)
 	default:
-		return compareInt64(left.TotalBytes, right.TotalBytes)
+		return loader.CompareInt64(left.TotalBytes, right.TotalBytes)
 	}
 }
 

@@ -1,9 +1,8 @@
-package app
+package loader
 
 import (
 	"strings"
 
-	"joxblox/internal/app/loader"
 	"joxblox/internal/extractor"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/mesh"
@@ -11,48 +10,7 @@ import (
 	"fyne.io/fyne/v2"
 )
 
-type assetReferenceContext struct {
-	FilePath              string
-	FileSHA256            string
-	UseCount              int
-	SceneSurfaceArea      float64
-	LargestSurfacePath    string
-	LargeTextureScore     float64
-	ReferenceInstanceType string
-	ReferencePropertyName string
-	ReferenceInstancePath string
-}
-
-type assetViewData struct {
-	AssetID               int64
-	FilePath              string
-	FileSHA256            string
-	UseCount              int
-	SceneSurfaceArea      float64
-	LargestSurfacePath    string
-	LargeTextureScore     float64
-	PreviewImageInfo      *loader.ImageInfo
-	StatsInfo             *loader.ImageInfo
-	TotalBytesSize        int
-	SourceDescription     string
-	StateDescription      string
-	WarningMessage        string
-	AssetDeliveryRawJSON  string
-	ThumbnailRawJSON      string
-	EconomyRawJSON        string
-	RustyAssetToolRawJSON string
-	ReferencedAssetIDs    []int64
-	ReferenceInstanceType string
-	ReferencePropertyName string
-	ReferenceInstancePath string
-	AssetTypeID           int
-	AssetTypeName         string
-	DownloadBytes         []byte
-	DownloadFileName      string
-	DownloadIsOriginal    bool
-}
-
-func previewSHA256(previewResult *loader.AssetPreviewResult) string {
+func PreviewSHA256(previewResult *AssetPreviewResult) string {
 	if previewResult == nil {
 		return ""
 	}
@@ -65,8 +23,8 @@ func previewSHA256(previewResult *loader.AssetPreviewResult) string {
 	return ""
 }
 
-func buildBaseScanResultFromHit(hit scanHit) scanResult {
-	return scanResult{
+func BuildBaseScanResultFromHit(hit ScanHit) ScanResult {
+	return ScanResult{
 		AssetID:            hit.AssetID,
 		AssetInput:         strings.TrimSpace(hit.AssetInput),
 		UseCount:           hit.UseCount,
@@ -80,10 +38,10 @@ func buildBaseScanResultFromHit(hit scanHit) scanResult {
 	}
 }
 
-func buildFailedScanResultFromHit(hit scanHit, loadErr error) scanResult {
-	result := buildBaseScanResultFromHit(hit)
-	result.Source = failedScanRowSource
-	result.State = failedScanRowState
+func BuildFailedScanResultFromHit(hit ScanHit, loadErr error) ScanResult {
+	result := BuildBaseScanResultFromHit(hit)
+	result.Source = FailedScanRowSource
+	result.State = FailedScanRowState
 	result.Format = "-"
 	result.ContentType = "-"
 	result.Warning = true
@@ -97,13 +55,13 @@ func buildFailedScanResultFromHit(hit scanHit, loadErr error) scanResult {
 	return result
 }
 
-func applyPreviewToScanResult(result scanResult, previewResult *loader.AssetPreviewResult) scanResult {
+func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResult) ScanResult {
 	statsInfo := previewResult.Stats
 	if statsInfo == nil {
 		statsInfo = previewResult.Image
 	}
 	if statsInfo == nil {
-		statsInfo = &loader.ImageInfo{}
+		statsInfo = &ImageInfo{}
 	}
 	resource := (*fyne.StaticResource)(nil)
 	if previewResult.Image != nil {
@@ -159,13 +117,13 @@ func applyPreviewToScanResult(result scanResult, previewResult *loader.AssetPrev
 	result.DownloadBytes = append([]byte(nil), previewResult.DownloadBytes...)
 	result.DownloadFileName = previewResult.DownloadFileName
 	result.DownloadIsOriginal = previewResult.DownloadIsOriginal
-	return refreshLargeTextureMetrics(result)
+	return RefreshLargeTextureMetrics(result)
 }
 
-func scanResultToPreviewResult(result scanResult) *loader.AssetPreviewResult {
-	return &loader.AssetPreviewResult{
-		Image: &loader.ImageInfo{Resource: result.Resource, SHA256: result.FileSHA256},
-		Stats: &loader.ImageInfo{
+func ScanResultToPreviewResult(result ScanResult) *AssetPreviewResult {
+	return &AssetPreviewResult{
+		Image: &ImageInfo{Resource: result.Resource, SHA256: result.FileSHA256},
+		Stats: &ImageInfo{
 			Width:                    result.Width,
 			Height:                   result.Height,
 			Duration:                 result.Duration,
@@ -194,15 +152,15 @@ func scanResultToPreviewResult(result scanResult) *loader.AssetPreviewResult {
 	}
 }
 
-func buildAssetViewDataFromPreview(assetID int64, previewResult *loader.AssetPreviewResult, context assetReferenceContext) assetViewData {
+func BuildAssetViewDataFromPreview(assetID int64, previewResult *AssetPreviewResult, context AssetReferenceContext) AssetViewData {
 	if previewResult == nil {
-		previewResult = &loader.AssetPreviewResult{}
+		previewResult = &AssetPreviewResult{}
 	}
 	fileSHA256 := strings.TrimSpace(context.FileSHA256)
 	if fileSHA256 == "" {
-		fileSHA256 = previewSHA256(previewResult)
+		fileSHA256 = PreviewSHA256(previewResult)
 	}
-	return assetViewData{
+	return AssetViewData{
 		AssetID:               assetID,
 		FilePath:              strings.TrimSpace(context.FilePath),
 		FileSHA256:            fileSHA256,
@@ -232,30 +190,8 @@ func buildAssetViewDataFromPreview(assetID int64, previewResult *loader.AssetPre
 	}
 }
 
-func buildExplorerSelectionReferenceContext(state *assetExplorerState, selectedAssetID int64) assetReferenceContext {
-	if state == nil {
-		return assetReferenceContext{}
-	}
-	selectedRow, found := state.getRow(selectedAssetID)
-	if !found {
-		return assetReferenceContext{}
-	}
-	referenceInstancePath := state.getInstancePath(selectedAssetID)
-	if referenceInstancePath == "" {
-		referenceInstancePath = selectedRow.InstancePath
-	}
-	if referenceInstancePath == "" {
-		referenceInstancePath = selectedRow.InstanceName
-	}
-	return assetReferenceContext{
-		ReferenceInstanceType: selectedRow.InstanceType,
-		ReferencePropertyName: selectedRow.PropertyName,
-		ReferenceInstancePath: referenceInstancePath,
-	}
-}
-
-func buildRootScanReferenceContext(rows []scanResult, selectedAssetID int64, selectedAssetInput string, selectedFilePath string, fallbackFileSHA string) assetReferenceContext {
-	context := assetReferenceContext{
+func BuildRootScanReferenceContext(rows []ScanResult, selectedAssetID int64, selectedAssetInput string, selectedFilePath string, fallbackFileSHA string) AssetReferenceContext {
+	context := AssetReferenceContext{
 		FilePath:   selectedFilePath,
 		FileSHA256: strings.TrimSpace(fallbackFileSHA),
 	}
@@ -272,7 +208,7 @@ func buildRootScanReferenceContext(rows []scanResult, selectedAssetID int64, sel
 		context.LargeTextureScore = row.LargeTextureScore
 		context.ReferenceInstanceType = row.InstanceType
 		context.ReferencePropertyName = row.PropertyName
-		context.ReferenceInstancePath = loader.FirstNonEmptyString(row.InstancePath, row.InstanceName)
+		context.ReferenceInstancePath = FirstNonEmptyString(row.InstancePath, row.InstanceName)
 		if strings.TrimSpace(row.FileSHA256) != "" {
 			context.FileSHA256 = strings.TrimSpace(row.FileSHA256)
 		}

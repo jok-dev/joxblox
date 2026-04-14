@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/debug"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/opencloud"
@@ -225,7 +226,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 	stopButton := widget.NewButton("Stop", nil)
 	stopButton.Disable()
 
-	var activeStopSignal *stopSignal
+	var activeStopSignal *loader.StopSignal
 	updateUploadControls := func() {
 		uploadEnabled := uploadToRobloxCheck.Checked && !inProgress
 		if uploadEnabled {
@@ -282,14 +283,14 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		activeStopSignal = nil
 		localStopSignal.Stop()
 	}
-	finishGeneration := func(localStopSignal *stopSignal, statusText string) {
+	finishGeneration := func(localStopSignal *loader.StopSignal, statusText string) {
 		updateButtons(false)
 		if activeStopSignal == localStopSignal {
 			activeStopSignal = nil
 		}
 		statusLabel.SetText(statusText)
 	}
-	failGeneration := func(localStopSignal *stopSignal, statusText string, err error) {
+	failGeneration := func(localStopSignal *loader.StopSignal, statusText string, err error) {
 		finishGeneration(localStopSignal, statusText)
 		if err != nil {
 			fyneDialog.ShowError(err, window)
@@ -390,7 +391,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		}
 
 		generatedPathsEntry.SetText("")
-		localStopSignal := newStopSignal()
+		localStopSignal := loader.NewStopSignal()
 		activeStopSignal = localStopSignal
 		updateButtons(true)
 		if uploadEnabled {
@@ -443,7 +444,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 
 			for imageIdx := 0; imageIdx < totalCount; imageIdx++ {
 				select {
-				case <-localStopSignal.channel:
+				case <-localStopSignal.Channel:
 					fyne.Do(func() {
 						finishGeneration(localStopSignal, stoppedImageUploadStatus(fileIndex, uploadedCount, totalFiles, enableUpload))
 					})
@@ -470,7 +471,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 
 				for _, spec := range samples {
 					select {
-					case <-localStopSignal.channel:
+					case <-localStopSignal.Channel:
 						fyne.Do(func() {
 							finishGeneration(localStopSignal, stoppedImageUploadStatus(fileIndex, uploadedCount, totalFiles, enableUpload))
 						})
@@ -524,7 +525,7 @@ func newImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 							assetDescription,
 							fileName,
 							imageBytes,
-							localStopSignal.channel,
+							localStopSignal.Channel,
 						)
 						if uploadErr != nil {
 							if errors.Is(uploadErr, opencloud.ErrUploadCancelled) {

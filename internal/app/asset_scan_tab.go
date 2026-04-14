@@ -27,9 +27,6 @@ import (
 const (
 	defaultAssetScanLimit   = 100
 	scanTableEmojiTextSize  = 18
-	failedScanRowState      = "Failed"
-	failedScanRowSource     = "Load Failed"
-	scanFilterAllOption     = "All"
 	minScanLoadWorkers      = 4
 	maxScanLoadWorkers      = 16
 	scanLoadUIBatchSize     = 25
@@ -53,9 +50,9 @@ type assetScanTabOptions struct {
 	RecentFilesPreferenceKey         string
 	SelectSource                     func(window fyne.Window, onSelected func(string), onError func(error))
 	SelectSecondarySource            func(window fyne.Window, onSelected func(string), onError func(error))
-	ExtractHits                      func(sourcePath string, limit int, stopChannel <-chan struct{}) ([]scanHit, error)
-	PathFilteredExtractHits          func(sourcePath string, pathPrefixes []string, limit int, stopChannel <-chan struct{}) ([]scanHit, error)
-	BuildWarning                     func(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (materialVariantWarningData, error)
+	ExtractHits                      func(sourcePath string, limit int, stopChannel <-chan struct{}) ([]loader.ScanHit, error)
+	PathFilteredExtractHits          func(sourcePath string, pathPrefixes []string, limit int, stopChannel <-chan struct{}) ([]loader.ScanHit, error)
+	BuildWarning                     func(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (ui.MaterialVariantWarningData, error)
 }
 
 type secondaryTappableTable struct {
@@ -116,7 +113,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		secondarySourceText = "No secondary source selected."
 	}
 	secondarySourceLabel := widget.NewLabel(secondarySourceText)
-	warningBanner := newMaterialVariantWarningBanner(window)
+	warningBanner := ui.NewMaterialVariantWarningBanner(window)
 	limitEntry := widget.NewEntry()
 	limitEntry.SetText(strconv.Itoa(maxResultsDefault))
 	limitEntry.SetPlaceHolder(strconv.Itoa(maxResultsDefault))
@@ -158,7 +155,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}
 		explorer.SetStatus(options.ReadyStatusText)
 	}
-	setWarning := func(warningData materialVariantWarningData) {
+	setWarning := func(warningData ui.MaterialVariantWarningData) {
 		warningBanner.SetWarning(warningData)
 	}
 
@@ -166,7 +163,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		options.SelectSource(window, func(selectedPath string) {
 			selectedSourcePath = selectedPath
 			sourceLabel.SetText(selectedSourcePath)
-			setWarning(materialVariantWarningData{})
+			setWarning(ui.MaterialVariantWarningData{})
 			updateReadyStatus()
 		}, func(err error) {
 			if err != nil {
@@ -186,7 +183,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		options.SelectSecondarySource(window, func(selectedPath string) {
 			selectedSecondarySourcePath = selectedPath
 			secondarySourceLabel.SetText(selectedSecondarySourcePath)
-			setWarning(materialVariantWarningData{})
+			setWarning(ui.MaterialVariantWarningData{})
 			updateReadyStatus()
 		}, func(err error) {
 			if err != nil {
@@ -232,7 +229,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			explorer.SetStatus(fmt.Sprintf("Failed to read image: %s", readErr.Error()))
 			return
 		}
-		queryHash, hashErr := computeImageDHash(queryBytes)
+		queryHash, hashErr := loader.ComputeImageDHash(queryBytes)
 		if hashErr != nil {
 			explorer.SetStatus(fmt.Sprintf("Failed to decode image: %s", hashErr.Error()))
 			return
@@ -243,8 +240,8 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		similarityFileLabel.Show()
 		similarityClearButton.Show()
 		similarityStatusLabel.Show()
-		go func(results []scanResult) {
-			matches := computeSimilarityScores(queryHash, querySHA, results)
+		go func(results []loader.ScanResult) {
+			matches := loader.ComputeSimilarityScores(queryHash, querySHA, results)
 			matchSet := make(map[int]int, len(matches))
 			exactCount := 0
 			for _, match := range matches {
@@ -266,7 +263,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	})
 
 	var scanInProgress bool
-	var activeStopSignal *stopSignal
+	var activeStopSignal *loader.StopSignal
 	scanButton := widget.NewButton("Start Scan", nil)
 	updateScanControls := func(inProgress bool) {
 		scanInProgress = inProgress
@@ -305,7 +302,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		activeStopSignal = nil
 		localStopSignal.Stop()
 	}
-	finishScan := func(localStopSignal *stopSignal) {
+	finishScan := func(localStopSignal *loader.StopSignal) {
 		updateScanControls(false)
 		if activeStopSignal == localStopSignal {
 			activeStopSignal = nil
@@ -331,8 +328,8 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		recentLoadedFiles = nextRecent
 		saveRecentFilesToPreferences(options.RecentFilesPreferenceKey, recentLoadedFiles)
 	}
-	applyImportedResults := func(importedResults []scanResult, statusMessage string) {
-		setWarning(materialVariantWarningData{})
+	applyImportedResults := func(importedResults []loader.ScanResult, statusMessage string) {
+		setWarning(ui.MaterialVariantWarningData{})
 		explorer.SetResults(importedResults)
 		if strings.TrimSpace(statusMessage) != "" {
 			explorer.SetStatus(statusMessage)
@@ -353,7 +350,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				})
 				return
 			}
-			var importedResults []scanResult
+			var importedResults []loader.ScanResult
 			importFormat := detectScanImportFormat(importBytes)
 			progress.Update(0.3, "Parsing scan results...")
 			switch importFormat {
@@ -520,32 +517,32 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			explorer.SetStatus("Max results must be a positive number.")
 			return
 		}
-		explorer.SetResults([]scanResult{})
+		explorer.SetResults([]loader.ScanResult{})
 		clearSimilaritySearch()
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		debug.Logf("Scan started for source: %s (limit=%d)", combinedSourcePath(), limitValue)
 		explorer.SetStatus(options.ScanningStatusText)
-		localStopSignal := newStopSignal()
+		localStopSignal := loader.NewStopSignal()
 		activeStopSignal = localStopSignal
 		updateScanControls(true)
 		go func() {
-			var hits []scanHit
+			var hits []loader.ScanHit
 			var scanErr error
-			warningData := materialVariantWarningData{}
+			warningData := ui.MaterialVariantWarningData{}
 			useFilteredExtraction := pathWhitelistEnabled &&
 				strings.TrimSpace(pathWhitelistText) != "" &&
 				options.PathFilteredExtractHits != nil
 			var activePrefixes []string
 			if useFilteredExtraction {
 				activePrefixes = whitelistPatternsToPathPrefixes(pathWhitelistText)
-				hits, scanErr = options.PathFilteredExtractHits(combinedSourcePath(), activePrefixes, limitValue, localStopSignal.channel)
+				hits, scanErr = options.PathFilteredExtractHits(combinedSourcePath(), activePrefixes, limitValue, localStopSignal.Channel)
 			} else {
-				hits, scanErr = options.ExtractHits(combinedSourcePath(), limitValue, localStopSignal.channel)
+				hits, scanErr = options.ExtractHits(combinedSourcePath(), limitValue, localStopSignal.Channel)
 			}
 			if options.BuildWarning != nil {
-				nextWarning, warningErr := options.BuildWarning(combinedSourcePath(), activePrefixes, localStopSignal.channel)
-				if errors.Is(warningErr, errScanStopped) {
-					scanErr = errScanStopped
+				nextWarning, warningErr := options.BuildWarning(combinedSourcePath(), activePrefixes, localStopSignal.Channel)
+				if errors.Is(warningErr, loader.ErrScanStopped) {
+					scanErr = loader.ErrScanStopped
 				} else if warningErr != nil {
 					debug.Logf("Scan warning build failed: %s", warningErr.Error())
 				} else {
@@ -555,7 +552,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			if scanErr != nil {
 				fyne.Do(func() {
 					finishScan(localStopSignal)
-					if errors.Is(scanErr, errScanStopped) {
+					if errors.Is(scanErr, loader.ErrScanStopped) {
 						explorer.SetStatus(fmt.Sprintf("Stopped. %d results loaded.", len(explorer.GetResults())))
 						return
 					}
@@ -565,7 +562,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				return
 			}
 			if !useFilteredExtraction && pathWhitelistEnabled && strings.TrimSpace(pathWhitelistText) != "" {
-				filteredHits := make([]scanHit, 0, len(hits))
+				filteredHits := make([]loader.ScanHit, 0, len(hits))
 				for _, hit := range hits {
 					if scanHitMatchesPathWhitelist(hit, pathWhitelistText) {
 						filteredHits = append(filteredHits, hit)
@@ -585,12 +582,12 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			loadFailureCount := 0
 			var firstLoadErr error
 			type scanLoadOutcome struct {
-				row           scanResult
+				row           loader.ScanResult
 				loadErr       error
 				requestSource heatmap.RequestSource
 			}
 			workerCount := determineScanLoadWorkerCount(len(hits))
-			hitJobs := make(chan scanHit)
+			hitJobs := make(chan loader.ScanHit)
 			loadOutcomes := make(chan scanLoadOutcome, workerCount*2)
 			var workerGroup sync.WaitGroup
 			for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
@@ -598,10 +595,10 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				go func() {
 					defer workerGroup.Done()
 					for hit := range hitJobs {
-						scanRow, loadErr, requestSource := loadScanResultWithRequestSource(hit)
+						scanRow, loadErr, requestSource := loader.LoadScanResultWithRequestSource(hit)
 						if loadErr != nil {
 							debug.Logf("Scan result load failed for asset %d (file=%s, useCount=%d): %s", hit.AssetID, hit.FilePath, hit.UseCount, loadErr.Error())
-							scanRow = buildFailedScanResultFromHit(hit, loadErr)
+							scanRow = loader.BuildFailedScanResultFromHit(hit, loadErr)
 						}
 						loadOutcomes <- scanLoadOutcome{row: scanRow, loadErr: loadErr, requestSource: requestSource}
 					}
@@ -611,7 +608,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				defer close(hitJobs)
 				for _, hit := range hits {
 					select {
-					case <-localStopSignal.channel:
+					case <-localStopSignal.Channel:
 						return
 					case hitJobs <- hit:
 					}
@@ -622,7 +619,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				close(loadOutcomes)
 			}()
 			completedCount := 0
-			pendingRows := make([]scanResult, 0, scanLoadUIBatchSize)
+			pendingRows := make([]loader.ScanResult, 0, scanLoadUIBatchSize)
 			lastUIFlushAt := time.Now()
 			lastScheduledResultsRefreshAt := time.Time{}
 			lastScheduledFilterRefreshAt := time.Time{}
@@ -637,7 +634,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 				if !force && len(pendingRows) < scanLoadUIBatchSize && time.Since(lastUIFlushAt) < scanLoadUIFlushDelay {
 					return
 				}
-				rowsToPublish := append([]scanResult(nil), pendingRows...)
+				rowsToPublish := append([]loader.ScanResult(nil), pendingRows...)
 				publishedCount := completedCount
 				pendingRows = pendingRows[:0]
 				lastUIFlushAt = time.Now()
@@ -682,7 +679,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 			flushPendingRows(true)
 			select {
-			case <-localStopSignal.channel:
+			case <-localStopSignal.Channel:
 				fyne.Do(func() {
 					finishScan(localStopSignal)
 					explorer.SetStatus(fmt.Sprintf("Stopped. %d results loaded.", len(explorer.GetResults())))
@@ -745,7 +742,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		container.NewHBox(controlButtons...),
 		pathWhitelistRow,
 		container.NewVBox(sourceLabels...),
-		warningBanner.root,
+		warningBanner.BannerRoot(),
 	)
 	content := container.NewBorder(topControls, nil, nil, nil, explorer.Content())
 	loadSourceAndScan := func(path string) {
@@ -758,7 +755,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}
 		selectedSourcePath = trimmedPath
 		sourceLabel.SetText(selectedSourcePath)
-		setWarning(materialVariantWarningData{})
+		setWarning(ui.MaterialVariantWarningData{})
 		updateReadyStatus()
 		if scanButton.OnTapped != nil {
 			scanButton.OnTapped()
@@ -782,11 +779,11 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 			importResultsFromPath(path)
 		},
-		GetResults: func() []scanResult {
+		GetResults: func() []loader.ScanResult {
 			return explorer.GetResults()
 		},
-		SetResults: func(rows []scanResult) {
-			nextRows := make([]scanResult, len(rows))
+		SetResults: func(rows []loader.ScanResult) {
+			nextRows := make([]loader.ScanResult, len(rows))
 			copy(nextRows, rows)
 			applyImportedResults(nextRows, fmt.Sprintf("Loaded %d results.", len(nextRows)))
 		},

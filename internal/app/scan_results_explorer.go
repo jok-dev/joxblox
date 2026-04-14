@@ -44,8 +44,8 @@ type scanResultsExplorer struct {
 	variant                          scanResultsExplorerVariant
 	content                          fyne.CanvasObject
 	statusLabel                      *widget.Label
-	allResults                       []scanResult
-	displayResults                   []scanResult
+	allResults                       []loader.ScanResult
+	displayResults                   []loader.ScanResult
 	columnHeaders                    []string
 	displayDistances                 []int
 	showOnlyDuplicates               bool
@@ -106,26 +106,26 @@ func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptio
 		window:                     window,
 		variant:                    options.Variant,
 		statusLabel:                widget.NewLabel(options.InitialStatusText),
-		typeFilterValue:            scanFilterAllOption,
-		typeDisplayToValue:         map[string]string{scanFilterAllOption: scanFilterAllOption},
-		instanceTypeFilterValue:    scanFilterAllOption,
-		instanceTypeDisplayToValue: map[string]string{scanFilterAllOption: scanFilterAllOption},
-		propertyNameFilterValue:    scanFilterAllOption,
-		propertyNameDisplayToValue: map[string]string{scanFilterAllOption: scanFilterAllOption},
+		typeFilterValue:            loader.ScanFilterAllOption,
+		typeDisplayToValue:         map[string]string{loader.ScanFilterAllOption: loader.ScanFilterAllOption},
+		instanceTypeFilterValue:    loader.ScanFilterAllOption,
+		instanceTypeDisplayToValue: map[string]string{loader.ScanFilterAllOption: loader.ScanFilterAllOption},
+		propertyNameFilterValue:    loader.ScanFilterAllOption,
+		propertyNameDisplayToValue: map[string]string{loader.ScanFilterAllOption: loader.ScanFilterAllOption},
 		selectedTableColumn:        0,
 		similarityMatchSet:         map[int]int{},
-		largeTextureThreshold:      defaultLargeTextureThreshold,
+		largeTextureThreshold:      loader.DefaultLargeTextureThreshold,
 		controlsEnabled:            true,
 	}
 	explorer.assetDetailsView = newAssetView(previewPlaceholder, options.IncludeFileRow)
 	explorer.searchEntry = widget.NewEntry()
 	explorer.searchEntry.SetPlaceHolder(searchPlaceholder)
-	explorer.typeFilterSelect = widget.NewSelect([]string{scanFilterAllOption}, nil)
-	explorer.typeFilterSelect.SetSelected(scanFilterAllOption)
-	explorer.instanceTypeFilterSelect = widget.NewSelect([]string{scanFilterAllOption}, nil)
-	explorer.instanceTypeFilterSelect.SetSelected(scanFilterAllOption)
-	explorer.propertyNameFilterSelect = widget.NewSelect([]string{scanFilterAllOption}, nil)
-	explorer.propertyNameFilterSelect.SetSelected(scanFilterAllOption)
+	explorer.typeFilterSelect = widget.NewSelect([]string{loader.ScanFilterAllOption}, nil)
+	explorer.typeFilterSelect.SetSelected(loader.ScanFilterAllOption)
+	explorer.instanceTypeFilterSelect = widget.NewSelect([]string{loader.ScanFilterAllOption}, nil)
+	explorer.instanceTypeFilterSelect.SetSelected(loader.ScanFilterAllOption)
+	explorer.propertyNameFilterSelect = widget.NewSelect([]string{loader.ScanFilterAllOption}, nil)
+	explorer.propertyNameFilterSelect.SetSelected(loader.ScanFilterAllOption)
 	explorer.statsRowsLabel = widget.NewLabel("Rows: 0")
 	explorer.statsShownLabel = widget.NewLabel("Shown: 0")
 	explorer.statsFailedLabel = widget.NewLabel("Failed: 0")
@@ -149,13 +149,13 @@ func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptio
 	})
 	explorer.showOnlyLargeTexturesCheck.SetChecked(false)
 	explorer.largeTextureThresholdEntry = widget.NewEntry()
-	explorer.largeTextureThresholdEntry.SetPlaceHolder(formatLargeTextureThreshold(defaultLargeTextureThreshold))
-	explorer.largeTextureThresholdEntry.SetText(formatLargeTextureThreshold(defaultLargeTextureThreshold))
+	explorer.largeTextureThresholdEntry.SetPlaceHolder(loader.FormatLargeTextureThreshold(loader.DefaultLargeTextureThreshold))
+	explorer.largeTextureThresholdEntry.SetText(loader.FormatLargeTextureThreshold(loader.DefaultLargeTextureThreshold))
 	explorer.largeTextureThresholdEntry.OnChanged = func(nextValue string) {
 		if explorer.suppressLargeTextureFilterChange {
 			return
 		}
-		explorer.largeTextureThreshold = parseLargeTextureThreshold(nextValue)
+		explorer.largeTextureThreshold = loader.ParseLargeTextureThreshold(nextValue)
 		explorer.applySortAndFilters()
 		explorer.clearPreview()
 	}
@@ -178,7 +178,7 @@ func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptio
 			return
 		}
 		if strings.TrimSpace(nextFilterValue) == "" {
-			explorer.typeFilterValue = scanFilterAllOption
+			explorer.typeFilterValue = loader.ScanFilterAllOption
 		} else if mappedValue, found := explorer.typeDisplayToValue[nextFilterValue]; found {
 			explorer.typeFilterValue = mappedValue
 		} else {
@@ -192,7 +192,7 @@ func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptio
 			return
 		}
 		if strings.TrimSpace(nextFilterValue) == "" {
-			explorer.instanceTypeFilterValue = scanFilterAllOption
+			explorer.instanceTypeFilterValue = loader.ScanFilterAllOption
 		} else if mappedValue, found := explorer.instanceTypeDisplayToValue[nextFilterValue]; found {
 			explorer.instanceTypeFilterValue = mappedValue
 		} else {
@@ -206,7 +206,7 @@ func newScanResultsExplorer(window fyne.Window, options scanResultsExplorerOptio
 			return
 		}
 		if strings.TrimSpace(nextFilterValue) == "" {
-			explorer.propertyNameFilterValue = scanFilterAllOption
+			explorer.propertyNameFilterValue = loader.ScanFilterAllOption
 		} else if mappedValue, found := explorer.propertyNameDisplayToValue[nextFilterValue]; found {
 			explorer.propertyNameFilterValue = mappedValue
 		} else {
@@ -239,17 +239,17 @@ func (explorer *scanResultsExplorer) SetStatus(text string) {
 	explorer.statusLabel.SetText(text)
 }
 
-func (explorer *scanResultsExplorer) GetResults() []scanResult {
-	rows := make([]scanResult, len(explorer.allResults))
+func (explorer *scanResultsExplorer) GetResults() []loader.ScanResult {
+	rows := make([]loader.ScanResult, len(explorer.allResults))
 	copy(rows, explorer.allResults)
 	return rows
 }
 
-func (explorer *scanResultsExplorer) SetResults(rows []scanResult) {
+func (explorer *scanResultsExplorer) SetResults(rows []loader.ScanResult) {
 	if explorer == nil {
 		return
 	}
-	nextRows := make([]scanResult, len(rows))
+	nextRows := make([]loader.ScanResult, len(rows))
 	copy(nextRows, rows)
 	explorer.allResults = nextRows
 	explorer.selectedAssetID = 0
@@ -258,7 +258,7 @@ func (explorer *scanResultsExplorer) SetResults(rows []scanResult) {
 	explorer.applySortAndFilters()
 }
 
-func (explorer *scanResultsExplorer) AppendResults(rows []scanResult, refreshResults bool, refreshFilters bool) {
+func (explorer *scanResultsExplorer) AppendResults(rows []loader.ScanResult, refreshResults bool, refreshFilters bool) {
 	if explorer == nil || len(rows) == 0 {
 		return
 	}
@@ -268,7 +268,7 @@ func (explorer *scanResultsExplorer) AppendResults(rows []scanResult, refreshRes
 		return
 	}
 	if refreshFilters {
-		hashCounts := buildHashCounts(explorer.allResults)
+		hashCounts := loader.BuildHashCounts(explorer.allResults)
 		explorer.duplicateRowsCount = explorer.countDuplicateRows(hashCounts)
 		explorer.duplicateBytesTotal = explorer.countDuplicateBytes(hashCounts)
 		explorer.updateFilterOptions(hashCounts)
@@ -394,7 +394,7 @@ func (explorer *scanResultsExplorer) buildContent(options scanResultsExplorerOpt
 
 func (explorer *scanResultsExplorer) hasLargeTextureMetrics() bool {
 	for _, row := range explorer.allResults {
-		if row.SceneSurfaceArea > 0 && scanResultTextureByteCost(row) > 0 {
+		if row.SceneSurfaceArea > 0 && loader.ScanResultTextureByteCost(row) > 0 {
 			return true
 		}
 	}
@@ -596,8 +596,8 @@ func (explorer *scanResultsExplorer) applySortAndFilters() {
 	previousSelectedFilePath := explorer.selectedResultFilePath
 	previousSelectedAssetInput := explorer.selectedResultAssetInput
 	explorer.updateLargeTextureFilterControls()
-	filteredResults := make([]scanResult, 0, len(explorer.allResults))
-	hashCounts := buildHashCounts(explorer.allResults)
+	filteredResults := make([]loader.ScanResult, 0, len(explorer.allResults))
+	hashCounts := loader.BuildHashCounts(explorer.allResults)
 	explorer.duplicateRowsCount = explorer.countDuplicateRows(hashCounts)
 	explorer.duplicateBytesTotal = explorer.countDuplicateBytes(hashCounts)
 	explorer.updateFilterOptions(hashCounts)
@@ -615,7 +615,7 @@ func (explorer *scanResultsExplorer) applySortAndFilters() {
 		originalIndices = append(originalIndices, index)
 	}
 	if explorer.similarityActive && explorer.variant == scanResultsExplorerVariantScan {
-		sort.Sort(similaritySorter{results: filteredResults, indices: originalIndices, matchSet: explorer.similarityMatchSet})
+		sort.Sort(loader.SimilarityRowSorter{Results: filteredResults, Indices: originalIndices, MatchSet: explorer.similarityMatchSet})
 		distances := make([]int, len(filteredResults))
 		for idx, origIdx := range originalIndices {
 			distances[idx] = explorer.similarityMatchSet[origIdx]
@@ -625,7 +625,7 @@ func (explorer *scanResultsExplorer) applySortAndFilters() {
 		sort.Slice(filteredResults, func(leftIndex int, rightIndex int) bool {
 			leftResult := filteredResults[leftIndex]
 			rightResult := filteredResults[rightIndex]
-			compareResult := compareScanResults(leftResult, rightResult, explorer.sortField)
+			compareResult := loader.CompareScanResults(leftResult, rightResult, explorer.sortField)
 			if compareResult == 0 {
 				return leftResult.AssetID < rightResult.AssetID
 			}
@@ -662,23 +662,23 @@ func (explorer *scanResultsExplorer) applySortAndFilters() {
 	explorer.updateStatsLabels()
 }
 
-func (explorer *scanResultsExplorer) matchesActiveFilters(result scanResult, hashCounts map[string]int, ignoreTypeFilter bool, ignoreInstanceTypeFilter bool, ignorePropertyNameFilter bool) bool {
-	if explorer.showOnlyDuplicates && !isDuplicateByHash(result, hashCounts) {
+func (explorer *scanResultsExplorer) matchesActiveFilters(result loader.ScanResult, hashCounts map[string]int, ignoreTypeFilter bool, ignoreInstanceTypeFilter bool, ignorePropertyNameFilter bool) bool {
+	if explorer.showOnlyDuplicates && !loader.IsDuplicateByHash(result, hashCounts) {
 		return false
 	}
-	if explorer.showOnlyLargeTextures && !isLargeTexture(result, explorer.largeTextureThreshold) {
+	if explorer.showOnlyLargeTextures && !loader.IsLargeTexture(result, explorer.largeTextureThreshold) {
 		return false
 	}
-	if !scanResultMatchesQuery(result, explorer.searchQuery) {
+	if !loader.ScanResultMatchesQuery(result, explorer.searchQuery) {
 		return false
 	}
-	if !ignoreTypeFilter && explorer.typeFilterValue != scanFilterAllOption && !strings.EqualFold(scanResultTypeFilterLabel(result), explorer.typeFilterValue) {
+	if !ignoreTypeFilter && explorer.typeFilterValue != loader.ScanFilterAllOption && !strings.EqualFold(loader.ScanResultTypeFilterLabel(result), explorer.typeFilterValue) {
 		return false
 	}
-	if !ignoreInstanceTypeFilter && explorer.instanceTypeFilterValue != scanFilterAllOption && !strings.EqualFold(scanResultInstanceTypeLabel(result), explorer.instanceTypeFilterValue) {
+	if !ignoreInstanceTypeFilter && explorer.instanceTypeFilterValue != loader.ScanFilterAllOption && !strings.EqualFold(loader.ScanResultInstanceTypeLabel(result), explorer.instanceTypeFilterValue) {
 		return false
 	}
-	if !ignorePropertyNameFilter && explorer.propertyNameFilterValue != scanFilterAllOption && !strings.EqualFold(scanResultPropertyNameLabel(result), explorer.propertyNameFilterValue) {
+	if !ignorePropertyNameFilter && explorer.propertyNameFilterValue != loader.ScanFilterAllOption && !strings.EqualFold(loader.ScanResultPropertyNameLabel(result), explorer.propertyNameFilterValue) {
 		return false
 	}
 	return true
@@ -688,7 +688,7 @@ func (explorer *scanResultsExplorer) countDuplicateRows(hashCounts map[string]in
 	duplicateCount := 0
 	seenCounts := map[string]int{}
 	for _, row := range explorer.allResults {
-		normalizedHash := normalizeHash(row.FileSHA256)
+		normalizedHash := loader.NormalizeHash(row.FileSHA256)
 		if normalizedHash == "" || hashCounts[normalizedHash] < 2 {
 			continue
 		}
@@ -704,7 +704,7 @@ func (explorer *scanResultsExplorer) countDuplicateBytes(hashCounts map[string]i
 	duplicateBytes := 0
 	seenCounts := map[string]int{}
 	for _, row := range explorer.allResults {
-		normalizedHash := normalizeHash(row.FileSHA256)
+		normalizedHash := loader.NormalizeHash(row.FileSHA256)
 		if normalizedHash == "" || hashCounts[normalizedHash] < 2 {
 			continue
 		}
@@ -727,7 +727,7 @@ func (explorer *scanResultsExplorer) updateStatsLabels() {
 	shownBytesTotal := 0
 	shownTrianglesTotal := uint64(0)
 	for _, row := range explorer.displayResults {
-		if row.State == failedScanRowState {
+		if row.State == loader.FailedScanRowState {
 			failedRowsCount++
 		}
 		if explorer.variant == scanResultsExplorerVariantHeatmap {
@@ -755,15 +755,15 @@ func (explorer *scanResultsExplorer) updateFilterOptions(hashCounts map[string]i
 	instanceTypeCounts := map[string]int{}
 	propertyNameCounts := map[string]int{}
 	for _, row := range explorer.allResults {
-		typeLabel := scanResultTypeFilterLabel(row)
+		typeLabel := loader.ScanResultTypeFilterLabel(row)
 		if typeLabel != "" && explorer.matchesActiveFilters(row, hashCounts, true, false, false) {
 			typeCounts[typeLabel]++
 		}
-		instanceTypeLabel := scanResultInstanceTypeLabel(row)
+		instanceTypeLabel := loader.ScanResultInstanceTypeLabel(row)
 		if instanceTypeLabel != "" && explorer.matchesActiveFilters(row, hashCounts, false, true, false) {
 			instanceTypeCounts[instanceTypeLabel]++
 		}
-		propertyNameLabel := scanResultPropertyNameLabel(row)
+		propertyNameLabel := loader.ScanResultPropertyNameLabel(row)
 		if propertyNameLabel != "" && explorer.matchesActiveFilters(row, hashCounts, false, false, true) {
 			propertyNameCounts[propertyNameLabel]++
 		}
@@ -777,13 +777,13 @@ func updateSelectWithCounts(selectWidget *widget.Select, suppress *bool, selecte
 	if selectWidget == nil || suppress == nil || selectedValue == nil || valueMap == nil {
 		return
 	}
-	if *selectedValue != scanFilterAllOption {
+	if *selectedValue != loader.ScanFilterAllOption {
 		if _, found := counts[*selectedValue]; !found {
 			counts[*selectedValue] = 0
 		}
 	}
-	options := []string{scanFilterAllOption}
-	*valueMap = map[string]string{scanFilterAllOption: scanFilterAllOption}
+	options := []string{loader.ScanFilterAllOption}
+	*valueMap = map[string]string{loader.ScanFilterAllOption: loader.ScanFilterAllOption}
 	labels := make([]string, 0, len(counts))
 	for label := range counts {
 		labels = append(labels, label)
@@ -796,16 +796,16 @@ func updateSelectWithCounts(selectWidget *widget.Select, suppress *bool, selecte
 	}
 	*suppress = true
 	selectWidget.SetOptions(options)
-	selectedOption := scanFilterAllOption
+	selectedOption := loader.ScanFilterAllOption
 	for optionLabel, optionValue := range *valueMap {
 		if optionValue == *selectedValue {
 			selectedOption = optionLabel
 			break
 		}
 	}
-	if !containsString(options, selectedOption) {
-		*selectedValue = scanFilterAllOption
-		selectedOption = scanFilterAllOption
+	if !loader.ContainsString(options, selectedOption) {
+		*selectedValue = loader.ScanFilterAllOption
+		selectedOption = loader.ScanFilterAllOption
 	}
 	selectWidget.SetSelected(selectedOption)
 	*suppress = false
@@ -819,20 +819,20 @@ func (explorer *scanResultsExplorer) clearPreview() {
 }
 
 func (explorer *scanResultsExplorer) renderSelectedAsset(selectedAssetID int64, selectedFilePath string, previewResult *loader.AssetPreviewResult) {
-	context := assetReferenceContext{}
+	context := loader.AssetReferenceContext{}
 	if explorer.explorerState != nil && selectedAssetID == explorer.explorerState.rootAssetID {
-		context = buildRootScanReferenceContext(
+		context = loader.BuildRootScanReferenceContext(
 			explorer.allResults,
 			selectedAssetID,
 			explorer.selectedResultAssetInput,
 			selectedFilePath,
-			previewSHA256(previewResult),
+			loader.PreviewSHA256(previewResult),
 		)
 	} else {
 		context = buildExplorerSelectionReferenceContext(explorer.explorerState, selectedAssetID)
-		context.FileSHA256 = previewSHA256(previewResult)
+		context.FileSHA256 = loader.PreviewSHA256(previewResult)
 	}
-	explorer.assetDetailsView.SetData(buildAssetViewDataFromPreview(selectedAssetID, previewResult, context))
+	explorer.assetDetailsView.SetData(loader.BuildAssetViewDataFromPreview(selectedAssetID, previewResult, context))
 	explorer.assetDetailsView.SetHierarchy(explorer.explorerState.getRows(), selectedAssetID, func(assetID int64) {
 		if explorer.explorerState == nil {
 			return
@@ -867,10 +867,10 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 	explorer.selectedAssetID = selectedResult.AssetID
 	explorer.selectedResultFilePath = selectedResult.FilePath
 	explorer.selectedResultAssetInput = selectedResult.AssetInput
-	rootPreview := scanResultToPreviewResult(selectedResult)
+	rootPreview := loader.ScanResultToPreviewResult(selectedResult)
 	explorer.explorerState = newAssetExplorerState(selectedResult.AssetID, rootPreview)
 	explorer.renderSelectedAsset(selectedResult.AssetID, selectedResult.FilePath, rootPreview)
-	needsFullPreview := selectedResult.AssetID > 0 && selectedResult.State != failedScanRowState &&
+	needsFullPreview := selectedResult.AssetID > 0 && selectedResult.State != loader.FailedScanRowState &&
 		(selectedResult.Resource == nil || selectedResult.Source == roblox.SourceNoThumbnail || strings.TrimSpace(selectedResult.Source) == "")
 	if !needsFullPreview {
 		return
@@ -894,8 +894,8 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 			if requestErr != nil || loadErr != nil || fullPreview == nil {
 				return
 			}
-			selectedResult = applyPreviewToScanResult(selectedResult, fullPreview)
-			rootPreview := scanResultToPreviewResult(selectedResult)
+			selectedResult = loader.ApplyPreviewToScanResult(selectedResult, fullPreview)
+			rootPreview := loader.ScanResultToPreviewResult(selectedResult)
 			explorer.explorerState = newAssetExplorerState(assetToLoad, rootPreview)
 			explorer.renderSelectedAsset(assetToLoad, filePathToLoad, rootPreview)
 			explorer.statusLabel.SetText(fmt.Sprintf(
@@ -907,14 +907,14 @@ func (explorer *scanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 	}()
 }
 
-func (explorer *scanResultsExplorer) cellEmoji(row scanResult, columnName string) string {
+func (explorer *scanResultsExplorer) cellEmoji(row loader.ScanResult, columnName string) string {
 	if explorer.variant == scanResultsExplorerVariantScan && columnName == "Type" {
 		return roblox.GetAssetTypeEmoji(row.AssetTypeID)
 	}
 	return ""
 }
 
-func (explorer *scanResultsExplorer) columnValue(row scanResult, columnName string, rowIndex int) string {
+func (explorer *scanResultsExplorer) columnValue(row loader.ScanResult, columnName string, rowIndex int) string {
 	switch columnName {
 	case "Similarity":
 		if rowIndex < len(explorer.displayDistances) {
@@ -936,7 +936,7 @@ func (explorer *scanResultsExplorer) columnValue(row scanResult, columnName stri
 		}
 		return "-"
 	case "Type":
-		return scanResultTypeLabel(row)
+		return loader.ScanResultTypeLabel(row)
 	case "Self Size":
 		return format.FormatSizeAuto(row.BytesSize)
 	case "Total Byte Size":

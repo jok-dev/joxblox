@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"math"
@@ -8,28 +8,28 @@ import (
 	"joxblox/internal/format"
 )
 
-const defaultLargeTextureThreshold = 4096.0
+const DefaultLargeTextureThreshold = 4096.0
 
-func parseLargeTextureThreshold(rawValue string) float64 {
+func ParseLargeTextureThreshold(rawValue string) float64 {
 	trimmedValue := strings.TrimSpace(rawValue)
 	if trimmedValue == "" {
-		return defaultLargeTextureThreshold
+		return DefaultLargeTextureThreshold
 	}
 	parsedValue, err := strconv.ParseFloat(trimmedValue, 64)
 	if err != nil || parsedValue <= 0 {
-		return defaultLargeTextureThreshold
+		return DefaultLargeTextureThreshold
 	}
 	return parsedValue
 }
 
-func formatLargeTextureThreshold(value float64) string {
+func FormatLargeTextureThreshold(value float64) string {
 	if value <= 0 {
-		value = defaultLargeTextureThreshold
+		value = DefaultLargeTextureThreshold
 	}
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-func scanResultTextureByteCost(result scanResult) int {
+func ScanResultTextureByteCost(result ScanResult) int {
 	if result.TextureBytes > 0 {
 		return result.TextureBytes
 	}
@@ -39,30 +39,30 @@ func scanResultTextureByteCost(result scanResult) int {
 	return 0
 }
 
-func computeLargeTextureScore(textureBytes int, sceneSurfaceArea float64) float64 {
+func ComputeLargeTextureScore(textureBytes int, sceneSurfaceArea float64) float64 {
 	if textureBytes <= 0 || sceneSurfaceArea <= 0 {
 		return 0
 	}
 	return float64(textureBytes) / sceneSurfaceArea
 }
 
-func refreshLargeTextureMetrics(result scanResult) scanResult {
-	result.LargeTextureScore = computeLargeTextureScore(scanResultTextureByteCost(result), result.SceneSurfaceArea)
+func RefreshLargeTextureMetrics(result ScanResult) ScanResult {
+	result.LargeTextureScore = ComputeLargeTextureScore(ScanResultTextureByteCost(result), result.SceneSurfaceArea)
 	return result
 }
 
-func isLargeTexture(result scanResult, threshold float64) bool {
+func IsLargeTexture(result ScanResult, threshold float64) bool {
 	if threshold <= 0 {
-		threshold = defaultLargeTextureThreshold
+		threshold = DefaultLargeTextureThreshold
 	}
 	score := result.LargeTextureScore
 	if score <= 0 {
-		score = computeLargeTextureScore(scanResultTextureByteCost(result), result.SceneSurfaceArea)
+		score = ComputeLargeTextureScore(ScanResultTextureByteCost(result), result.SceneSurfaceArea)
 	}
 	return score >= threshold
 }
 
-func formatLargeTextureScore(score float64) string {
+func FormatLargeTextureScore(score float64) string {
 	if score <= 0 {
 		return "-"
 	}
@@ -75,7 +75,7 @@ func formatLargeTextureScore(score float64) string {
 	return strconv.FormatFloat(score, 'f', 2, 64) + " B/stud^2"
 }
 
-func formatSceneSurfaceArea(area float64) string {
+func FormatSceneSurfaceArea(area float64) string {
 	if area <= 0 {
 		return "-"
 	}
@@ -87,7 +87,7 @@ type surfaceAreaPart interface {
 	GetDimensions() (float64, float64, float64)
 }
 
-func buildSceneSurfaceAreaIndex[T surfaceAreaPart](parts []T) map[string]float64 {
+func BuildSceneSurfaceAreaIndex[T surfaceAreaPart](parts []T) map[string]float64 {
 	areaByPath := map[string]float64{}
 	for _, part := range parts {
 		instancePath := strings.TrimSpace(part.GetInstancePath())
@@ -111,12 +111,12 @@ func sceneSurfaceAreaForDimensions(sizeX float64, sizeY float64, sizeZ float64) 
 	return math.Max(sizeX*sizeY, math.Max(sizeX*sizeZ, sizeY*sizeZ))
 }
 
-func estimateSceneSurfaceAreaForPaths(primaryPath string, alternatePaths []string, areaByPath map[string]float64) float64 {
-	bestArea, _ := estimateSceneSurfaceAreaAndPathForPaths(primaryPath, alternatePaths, areaByPath)
+func EstimateSceneSurfaceAreaForPaths(primaryPath string, alternatePaths []string, areaByPath map[string]float64) float64 {
+	bestArea, _ := EstimateSceneSurfaceAreaAndPathForPaths(primaryPath, alternatePaths, areaByPath)
 	return bestArea
 }
 
-func estimateSceneSurfaceAreaAndPathForPaths(primaryPath string, alternatePaths []string, areaByPath map[string]float64) (float64, string) {
+func EstimateSceneSurfaceAreaAndPathForPaths(primaryPath string, alternatePaths []string, areaByPath map[string]float64) (float64, string) {
 	bestArea := resolveSceneSurfaceAreaForPath(primaryPath, areaByPath)
 	bestPath := strings.TrimSpace(primaryPath)
 	for _, instancePath := range alternatePaths {
@@ -166,7 +166,7 @@ func parentInstancePath(instancePath string) string {
 	return strings.TrimSpace(trimmedPath[:splitIndex])
 }
 
-func minPositiveFloat64(left float64, right float64) float64 {
+func MinPositiveFloat64(left float64, right float64) float64 {
 	if left <= 0 {
 		return right
 	}
@@ -176,7 +176,7 @@ func minPositiveFloat64(left float64, right float64) float64 {
 	return math.Min(left, right)
 }
 
-func maxPositiveFloat64(left float64, right float64) float64 {
+func MaxPositiveFloat64(left float64, right float64) float64 {
 	if left <= 0 {
 		return right
 	}

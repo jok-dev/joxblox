@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	"joxblox/internal/app/loader"
+
 	"fyne.io/fyne/v2"
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	nativeDialog "github.com/sqweek/dialog"
@@ -29,7 +31,7 @@ func newFolderScanTab(
 			ScanContextKey:           scanContextFolder,
 			RecentFilesPreferenceKey: "scan.recent.folder",
 			SelectSource:             pickFolderSource,
-			ExtractHits:              scanFolderForAssetIDs,
+			ExtractHits:              loader.ScanFolderForAssetIDs,
 		},
 		DiffOptions: assetScanTabOptions{
 			NoSourceSelectedText:             "Baseline: no folder selected.",
@@ -46,7 +48,7 @@ func newFolderScanTab(
 			RecentFilesPreferenceKey:         "scan.recent.folder.diff",
 			SelectSource:                     pickFolderBaselineSource,
 			SelectSecondarySource:            pickFolderTargetSource,
-			ExtractHits:                      scanFolderDiffForAssetIDs,
+			ExtractHits:                      loader.ScanFolderDiffForAssetIDs,
 		},
 	})
 }

@@ -1,14 +1,13 @@
-package app
+package loader
 
 import (
 	"strings"
 
-	"joxblox/internal/app/loader"
 	"joxblox/internal/heatmap"
 	"joxblox/internal/roblox/mesh"
 )
 
-func buildAssetStatsFromPreview(assetID int64, previewResult *loader.AssetPreviewResult) heatmap.AssetStats {
+func BuildAssetStatsFromPreview(assetID int64, previewResult *AssetPreviewResult) heatmap.AssetStats {
 	stats := heatmap.AssetStats{AssetID: assetID}
 	if previewResult == nil {
 		return stats

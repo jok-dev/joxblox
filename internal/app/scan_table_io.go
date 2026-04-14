@@ -45,43 +45,43 @@ type scanWorkspaceExportPayload struct {
 }
 
 type scanTableExportRow struct {
-	AssetID              int64            `json:"assetId"`
-	AssetInput           string           `json:"assetInput,omitempty"`
-	UseCount             int              `json:"useCount"`
-	FilePath             string           `json:"filePath"`
-	FileSHA256           string           `json:"fileSha256"`
-	InstanceType         string           `json:"instanceType,omitempty"`
-	InstanceName         string           `json:"instanceName,omitempty"`
-	InstancePath         string           `json:"instancePath,omitempty"`
-	PropertyName         string           `json:"propertyName,omitempty"`
-	Source               string           `json:"source"`
-	State                string           `json:"state"`
-	Width                int              `json:"width"`
-	Height               int              `json:"height"`
-	DurationMillis       int64            `json:"durationMillis,omitempty"`
-	BytesSize            int              `json:"bytesSize"`
-	RecompressedPNGSize  int              `json:"recompressedPngSize"`
-	RecompressedJPEGSize int              `json:"recompressedJpegSize"`
-	Format               string           `json:"format"`
-	ContentType          string           `json:"contentType"`
-	AssetTypeID          int              `json:"assetTypeId"`
-	AssetTypeName        string           `json:"assetTypeName"`
-	Warning              bool             `json:"warning"`
-	WarningCause         string           `json:"warningCause"`
-	AssetDeliveryJSON    string           `json:"assetDeliveryJson"`
-	ThumbnailJSON        string           `json:"thumbnailJson"`
-	EconomyJSON          string           `json:"economyJson"`
-	RustyAssetToolJSON   string           `json:"rustExtractorJson"`
-	ReferencedAssetIDs   []int64          `json:"referencedAssetIds"`
+	AssetID              int64                   `json:"assetId"`
+	AssetInput           string                  `json:"assetInput,omitempty"`
+	UseCount             int                     `json:"useCount"`
+	FilePath             string                  `json:"filePath"`
+	FileSHA256           string                  `json:"fileSha256"`
+	InstanceType         string                  `json:"instanceType,omitempty"`
+	InstanceName         string                  `json:"instanceName,omitempty"`
+	InstancePath         string                  `json:"instancePath,omitempty"`
+	PropertyName         string                  `json:"propertyName,omitempty"`
+	Source               string                  `json:"source"`
+	State                string                  `json:"state"`
+	Width                int                     `json:"width"`
+	Height               int                     `json:"height"`
+	DurationMillis       int64                   `json:"durationMillis,omitempty"`
+	BytesSize            int                     `json:"bytesSize"`
+	RecompressedPNGSize  int                     `json:"recompressedPngSize"`
+	RecompressedJPEGSize int                     `json:"recompressedJpegSize"`
+	Format               string                  `json:"format"`
+	ContentType          string                  `json:"contentType"`
+	AssetTypeID          int                     `json:"assetTypeId"`
+	AssetTypeName        string                  `json:"assetTypeName"`
+	Warning              bool                    `json:"warning"`
+	WarningCause         string                  `json:"warningCause"`
+	AssetDeliveryJSON    string                  `json:"assetDeliveryJson"`
+	ThumbnailJSON        string                  `json:"thumbnailJson"`
+	EconomyJSON          string                  `json:"economyJson"`
+	RustyAssetToolJSON   string                  `json:"rustExtractorJson"`
+	ReferencedAssetIDs   []int64                 `json:"referencedAssetIds"`
 	ChildAssets          []loader.ChildAssetInfo `json:"childAssets"`
-	TotalBytesSize       int              `json:"totalBytesSize"`
-	MeshNumFaces         uint32           `json:"meshNumFaces,omitempty"`
-	MeshNumVerts         uint32           `json:"meshNumVerts,omitempty"`
-	SceneSurfaceArea     float64          `json:"sceneSurfaceArea,omitempty"`
-	LargestSurfacePath   string           `json:"largestSurfacePath,omitempty"`
-	LargeTextureScore    float64          `json:"largeTextureScore,omitempty"`
-	ImageResourceName    string           `json:"imageResourceName,omitempty"`
-	ImageBytesBase64     string           `json:"imageBytesBase64,omitempty"`
+	TotalBytesSize       int                     `json:"totalBytesSize"`
+	MeshNumFaces         uint32                  `json:"meshNumFaces,omitempty"`
+	MeshNumVerts         uint32                  `json:"meshNumVerts,omitempty"`
+	SceneSurfaceArea     float64                 `json:"sceneSurfaceArea,omitempty"`
+	LargestSurfacePath   string                  `json:"largestSurfacePath,omitempty"`
+	LargeTextureScore    float64                 `json:"largeTextureScore,omitempty"`
+	ImageResourceName    string                  `json:"imageResourceName,omitempty"`
+	ImageBytesBase64     string                  `json:"imageBytesBase64,omitempty"`
 }
 
 func detectScanImportFormat(payloadBytes []byte) scanImportFormat {
@@ -101,7 +101,7 @@ func detectScanImportFormat(payloadBytes []byte) scanImportFormat {
 	return scanImportFormatUnknown
 }
 
-func marshalScanTable(rows []scanResult, report scanJSONProgressReporter) ([]byte, error) {
+func marshalScanTable(rows []loader.ScanResult, report scanJSONProgressReporter) ([]byte, error) {
 	exportRows := make([]scanTableExportRow, 0, len(rows))
 	reportScanJSONProgress(report, 0.05)
 	for index, row := range rows {
@@ -123,7 +123,7 @@ func marshalScanTable(rows []scanResult, report scanJSONProgressReporter) ([]byt
 	return payloadBytes, nil
 }
 
-func unmarshalScanTable(payloadBytes []byte, report scanJSONProgressReporter) ([]scanResult, error) {
+func unmarshalScanTable(payloadBytes []byte, report scanJSONProgressReporter) ([]loader.ScanResult, error) {
 	payload := scanTableExportPayload{}
 	reportScanJSONProgress(report, 0.05)
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
@@ -136,10 +136,10 @@ func unmarshalScanTable(payloadBytes []byte, report scanJSONProgressReporter) ([
 	}
 	if payload.Rows == nil {
 		reportScanJSONProgress(report, 1)
-		return []scanResult{}, nil
+		return []loader.ScanResult{}, nil
 	}
 
-	importedRows := make([]scanResult, 0, len(payload.Rows))
+	importedRows := make([]loader.ScanResult, 0, len(payload.Rows))
 	for index, row := range payload.Rows {
 		mappedRow, mapErr := mapExportRowToScanResult(row)
 		if mapErr != nil {
@@ -152,7 +152,7 @@ func unmarshalScanTable(payloadBytes []byte, report scanJSONProgressReporter) ([
 	return importedRows, nil
 }
 
-func marshalScanWorkspace(tablesByContext map[string][]scanResult, report scanJSONProgressReporter) ([]byte, error) {
+func marshalScanWorkspace(tablesByContext map[string][]loader.ScanResult, report scanJSONProgressReporter) ([]byte, error) {
 	exportTables := map[string][]scanTableExportRow{}
 	totalRows := countScanWorkspaceRows(tablesByContext)
 	processedRows := 0
@@ -184,7 +184,7 @@ func marshalScanWorkspace(tablesByContext map[string][]scanResult, report scanJS
 	return payloadBytes, nil
 }
 
-func unmarshalScanWorkspace(payloadBytes []byte, report scanJSONProgressReporter) (map[string][]scanResult, error) {
+func unmarshalScanWorkspace(payloadBytes []byte, report scanJSONProgressReporter) (map[string][]loader.ScanResult, error) {
 	payload := scanWorkspaceExportPayload{}
 	reportScanJSONProgress(report, 0.05)
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
@@ -194,7 +194,7 @@ func unmarshalScanWorkspace(payloadBytes []byte, report scanJSONProgressReporter
 	if payload.Version != scanWorkspaceExportVersion {
 		return nil, fmt.Errorf("unsupported scan workspace version: %d", payload.Version)
 	}
-	resultTables := map[string][]scanResult{}
+	resultTables := map[string][]loader.ScanResult{}
 	totalRows := countExportWorkspaceRows(payload.Tables)
 	processedRows := 0
 	for contextKey, rows := range payload.Tables {
@@ -202,7 +202,7 @@ func unmarshalScanWorkspace(payloadBytes []byte, report scanJSONProgressReporter
 		if trimmedContextKey == "" {
 			continue
 		}
-		mappedRows := make([]scanResult, 0, len(rows))
+		mappedRows := make([]loader.ScanResult, 0, len(rows))
 		for _, row := range rows {
 			mappedRow, mapErr := mapExportRowToScanResult(row)
 			if mapErr != nil {
@@ -287,7 +287,7 @@ func writeFileWithProgress(path string, payloadBytes []byte, report scanJSONProg
 	return file.Close()
 }
 
-func countScanWorkspaceRows(tablesByContext map[string][]scanResult) int {
+func countScanWorkspaceRows(tablesByContext map[string][]loader.ScanResult) int {
 	totalRows := 0
 	for contextKey, rows := range tablesByContext {
 		if strings.TrimSpace(contextKey) == "" {
@@ -325,7 +325,7 @@ func reportScanJSONProgress(report scanJSONProgressReporter, progress float64) {
 	report(format.Clamp(progress, 0.0, 1.0))
 }
 
-func mapScanResultToExportRow(row scanResult) scanTableExportRow {
+func mapScanResultToExportRow(row loader.ScanResult) scanTableExportRow {
 	imageResourceName := ""
 	imageBytesBase64 := ""
 	if row.Resource != nil {
@@ -376,12 +376,12 @@ func mapScanResultToExportRow(row scanResult) scanTableExportRow {
 	}
 }
 
-func mapExportRowToScanResult(row scanTableExportRow) (scanResult, error) {
+func mapExportRowToScanResult(row scanTableExportRow) (loader.ScanResult, error) {
 	importedResource := (*fyne.StaticResource)(nil)
 	if strings.TrimSpace(row.ImageBytesBase64) != "" {
 		imageBytes, decodeErr := base64.StdEncoding.DecodeString(row.ImageBytesBase64)
 		if decodeErr != nil {
-			return scanResult{}, fmt.Errorf("failed decoding image bytes for asset %d: %w", row.AssetID, decodeErr)
+			return loader.ScanResult{}, fmt.Errorf("failed decoding image bytes for asset %d: %w", row.AssetID, decodeErr)
 		}
 		resourceName := strings.TrimSpace(row.ImageResourceName)
 		if resourceName == "" {
@@ -389,7 +389,7 @@ func mapExportRowToScanResult(row scanTableExportRow) (scanResult, error) {
 		}
 		importedResource = fyne.NewStaticResource(resourceName, imageBytes)
 	}
-	return scanResult{
+	return loader.ScanResult{
 		AssetID:              row.AssetID,
 		AssetInput:           strings.TrimSpace(row.AssetInput),
 		UseCount:             row.UseCount,

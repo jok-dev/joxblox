@@ -1,6 +1,10 @@
 package app
 
-import "fyne.io/fyne/v2"
+import (
+	"joxblox/internal/app/loader"
+
+	"fyne.io/fyne/v2"
+)
 
 type scanTabFileActions struct {
 	ContextKey    string
@@ -10,8 +14,8 @@ type scanTabFileActions struct {
 	LoadSource    func(string)
 	RecentFiles   func() []string
 	LoadRecent    func(string)
-	GetResults    func() []scanResult
-	SetResults    func([]scanResult)
+	GetResults    func() []loader.ScanResult
+	SetResults    func([]loader.ScanResult)
 	AddRecentFile func(string)
 }
 

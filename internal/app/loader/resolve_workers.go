@@ -1,4 +1,4 @@
-package app
+package loader
 
 import (
 	"runtime"
@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 )
 
-func runResolveWorkers[T any, R any](
+func RunResolveWorkers[T any, R any](
 	items []T,
 	keyFunc func(T) string,
 	workerFunc func(T) R,

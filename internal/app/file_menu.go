@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"joxblox/internal/app/loader"
 	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 
@@ -132,14 +133,14 @@ func collectScanFileActions(providers []scanTabFileActionsProvider) []*scanTabFi
 	return collectedActions
 }
 
-func snapshotScanWorkspace(collectedActions []*scanTabFileActions) map[string][]scanResult {
-	tablesByContext := map[string][]scanResult{}
+func snapshotScanWorkspace(collectedActions []*scanTabFileActions) map[string][]loader.ScanResult {
+	tablesByContext := map[string][]loader.ScanResult{}
 	for _, actions := range collectedActions {
 		if actions.GetResults == nil {
 			continue
 		}
 		rows := actions.GetResults()
-		tablesByContext[actions.ContextKey] = append([]scanResult(nil), rows...)
+		tablesByContext[actions.ContextKey] = append([]loader.ScanResult(nil), rows...)
 	}
 	return tablesByContext
 }
@@ -330,7 +331,7 @@ func loadAllScanResultsFromPathWithActionsAsync(
 				}
 				rows, exists := tablesByContext[actions.ContextKey]
 				if !exists {
-					rows = []scanResult{}
+					rows = []loader.ScanResult{}
 				}
 				actions.SetResults(rows)
 				if len(rows) > 0 && firstContextWithRows == "" {
