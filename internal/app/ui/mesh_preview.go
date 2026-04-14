@@ -41,6 +41,24 @@ var GetPrimaryWindow func() fyne.Window
 var LoadMouseLookSensitivity func() float64
 var GetRepositoryRootPath func() (string, error)
 
+// PrimaryWindow returns GetPrimaryWindow when it is set and non-nil, otherwise the first Fyne window.
+func PrimaryWindow() fyne.Window {
+	if GetPrimaryWindow != nil {
+		if w := GetPrimaryWindow(); w != nil {
+			return w
+		}
+	}
+	currentApp := fyne.CurrentApp()
+	if currentApp == nil {
+		return nil
+	}
+	windows := currentApp.Driver().AllWindows()
+	if len(windows) == 0 {
+		return nil
+	}
+	return windows[0]
+}
+
 const (
 	meshPreviewKeyboardTickInterval        = time.Second / 60
 	meshPreviewKeyboardMovePerSecond       = 1.8

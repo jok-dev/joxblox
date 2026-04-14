@@ -25,7 +25,9 @@ import (
 	nativeDialog "github.com/sqweek/dialog"
 	xdraw "golang.org/x/image/draw"
 
+	"joxblox/internal/app/common"
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -34,67 +36,6 @@ import (
 )
 
 const optimizeMaxRetries = 2
-
-func matchesAnyWhitelistPattern(instancePath string, patternsText string) bool {
-	for _, line := range strings.Split(patternsText, "\n") {
-		pattern := strings.TrimSpace(line)
-		if pattern == "" {
-			continue
-		}
-		if matchesPathWhitelist(instancePath, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-func whitelistPatternsToPathPrefixes(patternsText string) []string {
-	var prefixes []string
-	for _, line := range strings.Split(patternsText, "\n") {
-		pattern := strings.TrimSpace(line)
-		if pattern == "" {
-			continue
-		}
-		lower := strings.ToLower(pattern)
-		if strings.HasSuffix(lower, ".*") {
-			prefixes = append(prefixes, strings.TrimSuffix(lower, "*"))
-		} else if strings.HasSuffix(lower, "*") {
-			prefixes = append(prefixes, strings.TrimSuffix(lower, "*"))
-		} else {
-			prefixes = append(prefixes, lower)
-		}
-	}
-	return prefixes
-}
-
-func scanHitMatchesPathWhitelist(hit loader.ScanHit, patternsText string) bool {
-	if hit.InstancePath != "" && matchesAnyWhitelistPattern(hit.InstancePath, patternsText) {
-		return true
-	}
-	for _, path := range hit.AllInstancePaths {
-		if path != "" && matchesAnyWhitelistPattern(path, patternsText) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchesPathWhitelist(instancePath string, pattern string) bool {
-	normalizedPath := strings.ToLower(strings.TrimSpace(instancePath))
-	normalizedPattern := strings.ToLower(strings.TrimSpace(pattern))
-	if normalizedPattern == "" {
-		return true
-	}
-	if strings.HasSuffix(normalizedPattern, ".*") {
-		prefix := strings.TrimSuffix(normalizedPattern, ".*")
-		return strings.HasPrefix(normalizedPath, prefix+".")
-	}
-	if strings.HasSuffix(normalizedPattern, "*") {
-		prefix := strings.TrimSuffix(normalizedPattern, "*")
-		return strings.HasPrefix(normalizedPath, prefix)
-	}
-	return normalizedPath == normalizedPattern
-}
 
 type optimizeScaleOption struct {
 	Label string
@@ -351,7 +292,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 				}
 			}
 			if whitelistCheck.Checked && strings.TrimSpace(whitelistEntry.Text) != "" {
-				if !matchesAnyWhitelistPattern(result.InstancePath, whitelistEntry.Text) {
+				if !common.MatchesAnyPathWhitelist(result.InstancePath, whitelistEntry.Text) {
 					continue
 				}
 			}
@@ -507,7 +448,7 @@ func newOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 				neverStop := make(chan struct{})
 				var scanErr error
 				if useWhitelist {
-					prefixes := whitelistPatternsToPathPrefixes(whitelistText)
+					prefixes := common.WhitelistPatternsToPathPrefixes(whitelistText)
 					results, scanErr = extractor.ExtractFilteredRefs(selectedFilePath, prefixes, neverStop)
 				} else {
 					var extractResult extractor.AssetIDsResult
@@ -1172,7 +1113,7 @@ downloaded:
 	origWidth := origBounds.Dx()
 	origHeight := origBounds.Dy()
 
-	resizedBytes, resizeErr := encodeScaledPreview(decodedImage, imageFormat, scale, scaler)
+	resizedBytes, resizeErr := ui.EncodeScaledPreview(decodedImage, imageFormat, scale, scaler)
 	if resizeErr != nil {
 		return fail(fmt.Sprintf("resize failed - %s", resizeErr.Error()))
 	}
@@ -1259,7 +1200,7 @@ func collectOptimizableAssetIDs(results []extractor.Result, useWhitelist bool, w
 		if result.ID <= 0 {
 			continue
 		}
-		if useWhitelist && !matchesAnyWhitelistPattern(result.InstancePath, whitelistText) {
+		if useWhitelist && !common.MatchesAnyPathWhitelist(result.InstancePath, whitelistText) {
 			continue
 		}
 		state, exists := candidateStates[result.ID]

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/heatmap"
 	"joxblox/internal/roblox"
@@ -21,7 +22,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 	assetInput.SetPlaceHolder("Paste an asset ID, rbxassetid URL, or rbxthumb URL")
 
 	statusLabel := widget.NewLabel("Enter an asset ID or rbxthumb URL and click Go.")
-	assetDetailsView := newAssetView("No image loaded", false)
+	assetDetailsView := ui.NewAssetView("No image loaded", false)
 	loadingSpinner := widget.NewProgressBarInfinite()
 	loadingSpinner.Hide()
 
@@ -29,12 +30,12 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 		assetDetailsView.PreviewBox,
 		container.NewVBox(loadingSpinner),
 	)
-	var explorerState *assetExplorerState
+	var explorerState *ui.AssetExplorerState
 	var renderPreview func(selectedAssetID int64, previewResult *loader.AssetPreviewResult)
 	renderPreview = func(selectedAssetID int64, previewResult *loader.AssetPreviewResult) {
-		context := buildExplorerSelectionReferenceContext(explorerState, selectedAssetID)
+		context := ui.BuildExplorerSelectionReferenceContext(explorerState, selectedAssetID)
 		assetDetailsView.SetData(loader.BuildAssetViewDataFromPreview(selectedAssetID, previewResult, context))
-		assetDetailsView.SetHierarchy(explorerState.getRows(), selectedAssetID, func(assetID int64) {
+		assetDetailsView.SetHierarchy(explorerState.GetRows(), selectedAssetID, func(assetID int64) {
 			if explorerState == nil {
 				return
 			}
@@ -42,7 +43,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 			loadingSpinner.Show()
 			loadingSpinner.Start()
 			go func() {
-				selectedPreview, selectErr, requestSource := explorerState.selectAssetWithRequestSource(assetID)
+				selectedPreview, selectErr, requestSource := explorerState.SelectAssetWithRequestSource(assetID)
 				fyne.Do(func() {
 					loadingSpinner.Stop()
 					loadingSpinner.Hide()
@@ -114,7 +115,7 @@ func newSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 					return
 				}
 
-				explorerState = newAssetExplorerState(selectedAssetID, previewResult)
+				explorerState = ui.NewAssetExplorerState(selectedAssetID, previewResult)
 				renderPreview(selectedAssetID, previewResult)
 				previewBox.Refresh()
 				requestSourceBreakdown := heatmap.FormatSingleRequestSourceBreakdown(trace.ClassifyRequestSource())

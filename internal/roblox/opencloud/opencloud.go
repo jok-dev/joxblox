@@ -40,7 +40,7 @@ type Creator struct {
 
 type createAssetRequest struct {
 	AssetType       string               `json:"assetType"`
-	CreationContext assetCreationContext  `json:"creationContext"`
+	CreationContext assetCreationContext `json:"creationContext"`
 	Description     string               `json:"description,omitempty"`
 	DisplayName     string               `json:"displayName"`
 }

@@ -7,7 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"joxblox/internal/app/common"
+	"joxblox/internal/app/heatmaptab"
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/menu"
+	"joxblox/internal/app/scan"
 	"joxblox/internal/app/ui"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
@@ -28,6 +32,18 @@ const (
 	previewWidth  = ui.PreviewWidth
 	previewHeight = ui.PreviewHeight
 )
+
+func getPrimaryWindow() fyne.Window {
+	currentApp := fyne.CurrentApp()
+	if currentApp == nil {
+		return nil
+	}
+	windows := currentApp.Driver().AllWindows()
+	if len(windows) == 0 {
+		return nil
+	}
+	return windows[0]
+}
 
 //go:embed app_icon.svg
 var appIconSVG []byte
@@ -76,11 +92,11 @@ func Run() {
 	)
 	reportGenerationTab := container.NewTabItem(tabTitleReportGeneration, reportGenerationContent)
 	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, newSingleAssetTab(window))
-	scanContent, scanFileActions, allScanFileActions, selectScanContext, loadScanRBXLFile := newScanTab(window)
+	scanContent, scanFileActions, allScanFileActions, selectScanContext, loadScanRBXLFile := scan.NewScanTab(window)
 	scanTab := container.NewTabItem(tabTitleScan, scanContent)
-	rbxlHeatmapContent, loadHeatmapRBXLFile := newRBXLHeatmapTab(window)
+	rbxlHeatmapContent, loadHeatmapRBXLFile := heatmaptab.NewRBXLHeatmapTab(window)
 	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, rbxlHeatmapContent)
-	modelHeatmapTab := container.NewTabItem(tabTitleModelHeatmap, newModelHeatmapTab(window))
+	modelHeatmapTab := container.NewTabItem(tabTitleModelHeatmap, heatmaptab.NewModelHeatmapTab(window))
 	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, newOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, newImageUploaderTab(window))
 	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, optimizeTab, imageUploaderTab)
@@ -97,13 +113,24 @@ func Run() {
 			loadHeatmapRBXLFile(path)
 		}
 	}
-	bindMainFileMenu(
+	helpAbout := menu.AboutMeta{
+		DisplayName: appDisplayName,
+		Version:     appVersion,
+		Author:      appAuthorName,
+		LicenseName: appLicenseName,
+		SourceURL:   appSourceURL,
+	}
+	menu.BindMainFileMenu(
 		window,
 		tabs,
 		scanTab,
 		scanFileActions,
 		allScanFileActions,
 		selectScanContext,
+		showSettingsDialog,
+		func(w fyne.Window) *fyne.Menu {
+			return menu.BuildHelpMenu(w, helpAbout, loadChangelogText, loadLicenseText)
+		},
 	)
 	if dropWindow, ok := window.(interface {
 		SetOnDropped(func(position fyne.Position, uris []fyne.URI))
@@ -125,11 +152,11 @@ func Run() {
 						})
 						return
 					}
-					importFormat := detectScanImportFormat(importBytes)
+					importFormat := scan.DetectScanImportFormat(importBytes)
 					fyne.Do(func() {
 						tabs.Select(scanTab)
-						if importFormat == scanImportFormatWorkspace {
-							loadAllScanResultsFromPathAsync(window, allScanFileActions, importPath, func(selectedContext string, loaded bool) {
+						if importFormat == scan.ScanImportFormatWorkspace {
+							menu.LoadAllScanResultsFromPathAsync(window, allScanFileActions, importPath, func(selectedContext string, loaded bool) {
 								if loaded && selectScanContext != nil && selectedContext != "" {
 									selectScanContext(selectedContext)
 								}
@@ -151,7 +178,7 @@ func Run() {
 					continue
 				}
 				candidatePath := strings.TrimSpace(uri.Path())
-				if !isRobloxDOMFilePath(candidatePath) {
+				if !common.IsRobloxDOMFilePath(candidatePath) {
 					continue
 				}
 				fyne.Do(func() {

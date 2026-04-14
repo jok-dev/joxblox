@@ -19,6 +19,8 @@ import (
 	"fyne.io/fyne/v2/widget"
 	ttwidget "github.com/dweymouth/fyne-tooltip/widget"
 
+	"joxblox/internal/app/common"
+	"joxblox/internal/app/heatmaptab"
 	"joxblox/internal/app/loader"
 	"joxblox/internal/app/report"
 	"joxblox/internal/app/ui"
@@ -214,7 +216,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 			if isCanceled() {
 				return
 			}
-			mapParts := convertRustMapParts(mapPartsRaw)
+			mapParts := heatmaptab.ConvertRustMapParts(mapPartsRaw)
 			reportMeshPartCount, reportPartCount := countReportGenerationParts(mapParts, positionedRefs)
 			debug.Logf(
 				"Report generation extracted %d positioned refs and %d map parts for %s (meshparts=%d, parts=%d)",
@@ -350,7 +352,7 @@ func newReportGenerationTab(window fyne.Window, onViewInScan func(string), onVie
 	}
 
 	browseButton := widget.NewButtonWithIcon("Choose File", theme.FolderOpenIcon(), func() {
-		pickRBXLSource(window, loadReportFile, func(err error) {
+		common.PickRBXLSource(window, loadReportFile, func(err error) {
 			statusLabel.SetText(fmt.Sprintf("Pick failed: %s", err.Error()))
 		})
 	})
@@ -456,12 +458,12 @@ func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgre
 	return resolvedByReferenceKey
 }
 
-func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) []heatmap.Cell {
+func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult) []heatmap.Cell {
 	if len(points) == 0 && len(mapParts) == 0 {
 		return nil
 	}
 
-	minX, maxX, minZ, maxZ := heatmapSceneBounds(points, mapParts)
+	minX, maxX, minZ, maxZ := heatmaptab.HeatmapSceneBounds(points, mapParts)
 	rangeX := maxX - minX
 	rangeZ := maxZ - minZ
 	longestRange := math.Max(rangeX, rangeZ)
@@ -471,7 +473,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 
 	gridDivisions := max(1, int(math.Ceil(longestRange/reportGenerationCellSizeStuds)))
 	paddedLongestRange := float64(gridDivisions) * reportGenerationCellSizeStuds
-	scene := &rbxlHeatmapScene{
+	scene := &heatmaptab.RBXLHeatmapScene{
 		Points:   points,
 		MinimumX: minX,
 		MaximumX: maxX,
@@ -484,7 +486,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 		scene.MaximumZ = scene.MinimumZ + paddedLongestRange
 	}
 
-	cells, cellSizeWorld, columnCount, rowCount, _ := buildHeatmapCells(scene, gridDivisions)
+	cells, cellSizeWorld, columnCount, rowCount, _ := heatmaptab.BuildHeatmapCells(scene, gridDivisions)
 	if cellSizeWorld <= 0 {
 		cellSizeWorld = reportGenerationCellSizeStuds
 	}
@@ -498,9 +500,9 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 		}
 		column := format.Clamp(int(math.Floor((renderInfo.X-scene.MinimumX)/cellSizeWorld)), 0, columnCount-1)
 		row := format.Clamp(int(math.Floor((renderInfo.Z-scene.MinimumZ)/cellSizeWorld)), 0, rowCount-1)
-		cellKey := heatmapCellKey(row, column)
+		cellKey := heatmaptab.HeatmapCellKey(row, column)
 		counts := partCountsByCell[cellKey]
-		switch normalizeReportGenerationInstanceType(renderInfo.InstanceType) {
+		switch report.NormalizeInstanceType(renderInfo.InstanceType) {
 		case "meshpart":
 			counts.MeshPartCount++
 			drawCallKey := estimateMeshPartDrawCallKey(renderInfo)
@@ -531,7 +533,7 @@ func buildReportGenerationCells(points []rbxlHeatmapPoint, mapParts []rbxlHeatma
 
 	cellIndexByKey := make(map[string]int, len(cells))
 	for index, cell := range cells {
-		cellKey := heatmapCellKey(cell.Row, cell.Column)
+		cellKey := heatmaptab.HeatmapCellKey(cell.Row, cell.Column)
 		cellIndexByKey[cellKey] = index
 	}
 	for cellKey, counts := range partCountsByCell {
@@ -569,7 +571,7 @@ func buildReportGenerationStatsFromPreview(assetID int64, previewResult *loader.
 	return loader.BuildAssetStatsFromPreview(assetID, previewResult)
 }
 
-func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, oversizedTextureThreshold float64) (report.Summary, []rbxlHeatmapPoint) {
+func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []heatmaptab.RBXLHeatmapMapPart, oversizedTextureThreshold float64) (report.Summary, []heatmaptab.RBXLHeatmapPoint) {
 	summary := report.Summary{}
 	uniqueAssetIDs := map[int64]struct{}{}
 	uniqueReferenceKeys := map[string]struct{}{}
@@ -631,7 +633,7 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 	summary.UniqueAssetCount = len(uniqueAssetIDs)
 	summary.OversizedTextureCount = countReportGenerationOversizedTextures(refs, resolved, mapParts, oversizedTextureThreshold)
 
-	points := make([]rbxlHeatmapPoint, 0, len(refs))
+	points := make([]heatmaptab.RBXLHeatmapPoint, 0, len(refs))
 	for _, ref := range refs {
 		if ref.ID <= 0 || ref.WorldX == nil || ref.WorldY == nil || ref.WorldZ == nil {
 			continue
@@ -641,7 +643,7 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 		if !found || asset.Stats.TotalBytes <= 0 {
 			continue
 		}
-		points = append(points, rbxlHeatmapPoint{
+		points = append(points, heatmaptab.RBXLHeatmapPoint{
 			AssetID:      ref.ID,
 			AssetInput:   strings.TrimSpace(ref.RawContent),
 			InstanceType: strings.TrimSpace(ref.InstanceType),
@@ -659,7 +661,7 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 	return summary, points
 }
 
-func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []rbxlHeatmapMapPart, threshold float64) int {
+func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []heatmaptab.RBXLHeatmapMapPart, threshold float64) int {
 	if threshold <= 0 {
 		threshold = loader.DefaultLargeTextureThreshold
 	}
@@ -691,7 +693,7 @@ func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, r
 	return oversizedTextureCount
 }
 
-func countReportGenerationParts(mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) (int, int) {
+func countReportGenerationParts(mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult) (int, int) {
 	if len(mapParts) > 0 {
 		meshPartCount := 0
 		partCount := 0
@@ -734,7 +736,7 @@ func countReportGenerationParts(mapParts []rbxlHeatmapMapPart, refs []extractor.
 	return meshPartCount, partCount
 }
 
-func countEstimatedDrawCalls(mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) int {
+func countEstimatedDrawCalls(mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult) int {
 	renderInfos := buildReportGenerationRenderInfos(mapParts, refs)
 	if len(renderInfos) == 0 {
 		return 0
@@ -742,7 +744,7 @@ func countEstimatedDrawCalls(mapParts []rbxlHeatmapMapPart, refs []extractor.Pos
 	drawCalls := 0
 	meshDrawKeys := map[string]struct{}{}
 	for _, renderInfo := range renderInfos {
-		switch normalizeReportGenerationInstanceType(renderInfo.InstanceType) {
+		switch report.NormalizeInstanceType(renderInfo.InstanceType) {
 		case "meshpart":
 			drawCallKey := estimateMeshPartDrawCallKey(renderInfo)
 			if drawCallKey == "" {
@@ -758,7 +760,7 @@ func countEstimatedDrawCalls(mapParts []rbxlHeatmapMapPart, refs []extractor.Pos
 	return drawCalls + len(meshDrawKeys)
 }
 
-func buildReportGenerationRenderInfos(mapParts []rbxlHeatmapMapPart, refs []extractor.PositionedResult) map[string]reportGenerationInstanceRenderInfo {
+func buildReportGenerationRenderInfos(mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult) map[string]reportGenerationInstanceRenderInfo {
 	renderInfos := map[string]reportGenerationInstanceRenderInfo{}
 	for _, part := range mapParts {
 		instancePath := strings.TrimSpace(part.InstancePath)
@@ -775,7 +777,7 @@ func buildReportGenerationRenderInfos(mapParts []rbxlHeatmapMapPart, refs []extr
 		}
 	}
 	for _, ref := range refs {
-		instancePath, instanceType := reportGenerationRefTarget(ref)
+		instancePath, instanceType := report.PositionedRefTarget(ref)
 		if instancePath == "" {
 			continue
 		}
@@ -802,11 +804,11 @@ func buildReportGenerationRenderInfos(mapParts []rbxlHeatmapMapPart, refs []extr
 		contentKey := reportGenerationAssetContentKey(ref.ID, ref.RawContent)
 		normalizedPropertyName := strings.ToLower(strings.TrimSpace(ref.PropertyName))
 		switch {
-		case isReportGenerationMeshContentProperty(normalizedPropertyName):
+		case report.IsMeshContentProperty(normalizedPropertyName):
 			renderInfo.MeshContentKey = contentKey
-		case isReportGenerationTextureContentProperty(normalizedPropertyName):
+		case report.IsTextureContentProperty(normalizedPropertyName):
 			renderInfo.TextureContentKey = contentKey
-		case isReportGenerationSurfaceAppearanceProperty(normalizedPropertyName, ref.InstanceType):
+		case report.IsSurfaceAppearanceProperty(normalizedPropertyName, ref.InstanceType):
 			if renderInfo.SurfaceAppearanceProps == nil {
 				renderInfo.SurfaceAppearanceProps = map[string]string{}
 			}
@@ -817,66 +819,25 @@ func buildReportGenerationRenderInfos(mapParts []rbxlHeatmapMapPart, refs []extr
 	return renderInfos
 }
 
-func reportGenerationRefTarget(ref extractor.PositionedResult) (string, string) {
-	instancePath := strings.TrimSpace(ref.InstancePath)
-	instanceType := strings.TrimSpace(ref.InstanceType)
-	if strings.EqualFold(instanceType, "SurfaceAppearance") {
-		parentPath := parentReportGenerationInstancePath(instancePath)
-		if parentPath != "" {
-			return parentPath, "MeshPart"
-		}
-	}
-	return instancePath, instanceType
-}
-
 func reportGenerationMeshTriangleInstanceKey(ref extractor.PositionedResult) string {
-	if !isReportGenerationMeshContentProperty(strings.ToLower(strings.TrimSpace(ref.PropertyName))) {
+	if !report.IsMeshContentProperty(strings.ToLower(strings.TrimSpace(ref.PropertyName))) {
 		return ""
 	}
-	instancePath, _ := reportGenerationRefTarget(ref)
+	instancePath, _ := report.PositionedRefTarget(ref)
 	return strings.TrimSpace(instancePath)
-}
-
-func parentReportGenerationInstancePath(instancePath string) string {
-	trimmedPath := strings.TrimSpace(instancePath)
-	if trimmedPath == "" {
-		return ""
-	}
-	lastDotIndex := strings.LastIndex(trimmedPath, ".")
-	if lastDotIndex <= 0 {
-		return ""
-	}
-	return strings.TrimSpace(trimmedPath[:lastDotIndex])
 }
 
 func reportGenerationAssetContentKey(assetID int64, rawContent string) string {
 	return extractor.AssetReferenceKey(assetID, rawContent)
 }
 
-func normalizeReportGenerationInstanceType(instanceType string) string {
-	return strings.ToLower(strings.TrimSpace(instanceType))
-}
-
 func isReportGenerationFallbackRenderableType(instanceType string) bool {
-	switch normalizeReportGenerationInstanceType(instanceType) {
+	switch report.NormalizeInstanceType(instanceType) {
 	case "meshpart", "part":
 		return true
 	default:
 		return false
 	}
-}
-
-func isReportGenerationMeshContentProperty(propertyName string) bool {
-	return propertyName == "meshid" || propertyName == "meshcontent"
-}
-
-func isReportGenerationTextureContentProperty(propertyName string) bool {
-	return propertyName == "textureid" || propertyName == "texturecontent"
-}
-
-func isReportGenerationSurfaceAppearanceProperty(propertyName string, instanceType string) bool {
-	normalizedInstanceType := normalizeReportGenerationInstanceType(instanceType)
-	return normalizedInstanceType == "surfaceappearance" || strings.Contains(propertyName, "mapcontent")
 }
 
 func estimateMeshPartDrawCallKey(renderInfo reportGenerationInstanceRenderInfo) string {
