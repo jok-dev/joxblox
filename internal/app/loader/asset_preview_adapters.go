@@ -56,23 +56,19 @@ func BuildFailedScanResultFromHit(hit ScanHit, loadErr error) ScanResult {
 }
 
 func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResult) ScanResult {
-	statsInfo := previewResult.Stats
-	if statsInfo == nil {
-		statsInfo = previewResult.Image
-	}
-	if statsInfo == nil {
-		statsInfo = &ImageInfo{}
-	}
+	statsInfo := ResolveStatsInfo(previewResult.Stats, previewResult.Image)
 	resource := (*fyne.StaticResource)(nil)
 	if previewResult.Image != nil {
 		resource = previewResult.Image.Resource
 	}
 
 	var meshFaces, meshVerts uint32
+	var meshVersion string
 	if mesh.IsMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
 		if meshInfo, meshErr := mesh.ParseHeader(previewResult.DownloadBytes); meshErr == nil {
 			meshFaces = meshInfo.NumFaces
 			meshVerts = meshInfo.NumVerts
+			meshVersion = meshInfo.Version
 		}
 	}
 
@@ -101,6 +97,7 @@ func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResu
 	result.TotalBytesSize = previewResult.TotalBytesSize
 	result.MeshNumFaces = meshFaces
 	result.MeshNumVerts = meshVerts
+	result.MeshVersion = meshVersion
 	result.MeshBytes = 0
 	if meshFaces > 0 && result.TotalBytesSize > 0 {
 		result.MeshBytes = result.TotalBytesSize
@@ -160,7 +157,7 @@ func BuildAssetViewDataFromPreview(assetID int64, previewResult *AssetPreviewRes
 	if fileSHA256 == "" {
 		fileSHA256 = PreviewSHA256(previewResult)
 	}
-	return AssetViewData{
+	data := AssetViewData{
 		AssetID:               assetID,
 		FilePath:              strings.TrimSpace(context.FilePath),
 		FileSHA256:            fileSHA256,
@@ -188,6 +185,7 @@ func BuildAssetViewDataFromPreview(assetID int64, previewResult *AssetPreviewRes
 		DownloadFileName:      previewResult.DownloadFileName,
 		DownloadIsOriginal:    previewResult.DownloadIsOriginal,
 	}
+	return data
 }
 
 func BuildRootScanReferenceContext(rows []ScanResult, selectedAssetID int64, selectedAssetInput string, selectedFilePath string, fallbackFileSHA string) AssetReferenceContext {

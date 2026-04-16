@@ -1205,6 +1205,32 @@ func BuildMeshPreviewData(positions []float32, indices []uint32, triangleCount u
 	return BuildMeshPreviewDataWithColors(positions, indices, nil, triangleCount, previewTriangleCount)
 }
 
+// BuildMeshPreviewDataForLodRange builds preview data showing only the
+// triangles whose triangle-indexed range is [triangleStart, triangleEnd).
+// `positions` and `indices` come from an unlimited mesh preview
+// (`ExtractMeshPreviewFromBytesFull`) so that triangle boundaries are
+// preserved.
+func BuildMeshPreviewDataForLodRange(positions []float32, indices []uint32, triangleStart uint32, triangleEnd uint32) (MeshPreviewData, error) {
+	if triangleEnd < triangleStart {
+		return MeshPreviewData{}, fmt.Errorf("mesh preview LOD range is invalid")
+	}
+	totalTriangles := uint32(len(indices) / 3)
+	if triangleEnd > totalTriangles {
+		triangleEnd = totalTriangles
+	}
+	if triangleStart >= totalTriangles {
+		return MeshPreviewData{}, fmt.Errorf("mesh preview LOD range is empty")
+	}
+	indexStart := int(triangleStart) * 3
+	indexEnd := int(triangleEnd) * 3
+	if indexEnd > len(indices) {
+		indexEnd = len(indices)
+	}
+	lodIndices := indices[indexStart:indexEnd]
+	lodTriangleCount := uint32(len(lodIndices) / 3)
+	return BuildMeshPreviewDataWithColors(positions, lodIndices, nil, lodTriangleCount, lodTriangleCount)
+}
+
 func BuildMeshPreviewDataWithColors(positions []float32, indices []uint32, colors []uint8, triangleCount uint32, previewTriangleCount uint32) (MeshPreviewData, error) {
 	if err := validateMeshPreviewBatch(positions, indices, colors); err != nil {
 		return MeshPreviewData{}, err
@@ -1515,6 +1541,13 @@ func ExtractMeshPreviewFromBytesWithLimit(fileBytes []byte, maxTriangles int) (M
 		return MeshPreviewData{}, err
 	}
 	return BuildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
+}
+
+// ExtractMeshPreviewRawFromBytesFull returns the full (uncapped) mesh preview
+// with per-LOD triangle ranges populated. Use this variant whenever the
+// caller needs to render individual LODs separately.
+func ExtractMeshPreviewRawFromBytesFull(fileBytes []byte) (extractor.MeshPreviewRawResult, error) {
+	return extractor.ExtractMeshPreviewRawFromBytesFull(fileBytes)
 }
 
 func ExtractMeshPreviewFromFile(filePath string) (MeshPreviewData, error) {

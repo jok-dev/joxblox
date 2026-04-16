@@ -86,7 +86,7 @@ func TestAssetViewSetDataShowsInGameSizeMetric(t *testing.T) {
 		},
 	})
 
-	if got := view.InGameSizeValue.Text; got != "4.00 KB/stud^2 (2 stud^2 surface) at Workspace.Building.Wall.Decal" {
+	if got := view.MetadataValueText("ingamesize"); got != "4.00 KB/stud^2 (2 stud^2 surface) at Workspace.Building.Wall.Decal" {
 		t.Fatalf("expected in-game size text, got %q", got)
 	}
 }

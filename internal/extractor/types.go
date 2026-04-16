@@ -79,13 +79,23 @@ type MissingMaterialVariantResult struct {
 }
 
 type MeshPreviewRawResult struct {
-	FormatVersion        string    `json:"formatVersion"`
-	DecoderSource        string    `json:"decoderSource"`
-	VertexCount          uint32    `json:"vertexCount"`
-	TriangleCount        uint32    `json:"triangleCount"`
-	PreviewTriangleCount uint32    `json:"previewTriangleCount"`
-	Positions            []float32 `json:"positions"`
-	Indices              []uint32  `json:"indices"`
+	FormatVersion        string             `json:"formatVersion"`
+	DecoderSource        string             `json:"decoderSource"`
+	VertexCount          uint32             `json:"vertexCount"`
+	TriangleCount        uint32             `json:"triangleCount"`
+	PreviewTriangleCount uint32             `json:"previewTriangleCount"`
+	Positions            []float32          `json:"positions"`
+	Indices              []uint32           `json:"indices"`
+	Lods                 []MeshLodRangeInfo `json:"lods,omitempty"`
+}
+
+// MeshLodRangeInfo describes the triangle range for a single LOD entry.
+// Triangle i in LOD k covers indices [TriangleStart*3 + i*3 ..
+// TriangleStart*3 + (i+1)*3) of MeshPreviewRawResult.Indices, provided the
+// preview was requested without a triangle cap.
+type MeshLodRangeInfo struct {
+	TriangleStart uint32 `json:"triangleStart"`
+	TriangleEnd   uint32 `json:"triangleEnd"`
 }
 
 type meshStatsRawResult struct {

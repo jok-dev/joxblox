@@ -140,6 +140,20 @@ struct MeshPreviewResult {
     preview_triangle_count: u32,
     positions: Vec<f32>,
     indices: Vec<u32>,
+    /// Triangle ranges for each LOD into the `indices` array. LOD i covers
+    /// triangles `[triangle_start .. triangle_end)`, i.e. indices
+    /// `[triangle_start*3 .. triangle_end*3)`. Empty when no LOD metadata is
+    /// available; always present with at least one entry when the mesh has
+    /// any geometry.
+    #[serde(default)]
+    lods: Vec<MeshLodInfo>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MeshLodInfo {
+    triangle_start: u32,
+    triangle_end: u32,
 }
 
 fn main() {
@@ -319,14 +333,178 @@ fn parse_mesh_version_and_body(data: &[u8]) -> Result<(String, &[u8]), String> {
     Ok((version, &data[13..]))
 }
 
-struct V4MeshData {
+struct MeshGeometry {
     num_verts: u32,
+    /// LOD0 face count (preserved for stats callers that only care about the
+    /// highest-detail LOD).
     num_faces: u32,
+    /// Total face count across every LOD combined.
+    total_faces: u32,
     positions: Vec<f32>,
+    /// Full index buffer covering every LOD (LOD0 first, then fallback LODs).
     indices: Vec<u32>,
+    /// Cumulative triangle offsets read from the trailing LOD table, describing
+    /// the per-LOD triangle ranges `[offsets[i] .. offsets[i + 1])`. Empty
+    /// when no usable LOD table is present (treated as a single LOD by
+    /// callers).
+    lod_triangle_offsets: Vec<u32>,
 }
 
-fn parse_v4_mesh_body(body: &[u8], version: &str) -> Result<V4MeshData, String> {
+/// Extract the first three f32 components (XYZ position) of each vertex out
+/// of a variable-stride vertex buffer. The remaining vertex attributes
+/// (normal, UV, tangent, colour, etc.) are ignored — the preview only needs
+/// positions.
+fn extract_mesh_positions(
+    body: &[u8],
+    vertex_start: usize,
+    num_verts: u32,
+    vertex_stride: usize,
+    version: &str,
+) -> Result<Vec<f32>, String> {
+    const POSITION_BYTES: usize = 12;
+    if vertex_stride < POSITION_BYTES {
+        return Err(format!(
+            "v{} mesh vertex stride {} is smaller than the 12-byte XYZ position",
+            version, vertex_stride,
+        ));
+    }
+    let mut positions = Vec::with_capacity(num_verts as usize * 3);
+    for i in 0..num_verts as usize {
+        let off = vertex_start + i * vertex_stride;
+        let x = f32::from_le_bytes(body[off..off + 4].try_into().unwrap());
+        let y = f32::from_le_bytes(body[off + 4..off + 8].try_into().unwrap());
+        let z = f32::from_le_bytes(body[off + 8..off + 12].try_into().unwrap());
+        positions.push(x);
+        positions.push(y);
+        positions.push(z);
+    }
+    Ok(positions)
+}
+
+/// Extract the first three u32 indices of each face out of a variable-stride
+/// face buffer. Any trailing face metadata (material ids, etc.) is ignored.
+fn extract_mesh_indices(
+    body: &[u8],
+    face_start: usize,
+    num_faces: u32,
+    face_stride: usize,
+    version: &str,
+) -> Result<Vec<u32>, String> {
+    const INDEX_BYTES: usize = 12;
+    if face_stride < INDEX_BYTES {
+        return Err(format!(
+            "v{} mesh face stride {} is smaller than the 12-byte index triplet",
+            version, face_stride,
+        ));
+    }
+    let mut indices = Vec::with_capacity(num_faces as usize * 3);
+    for i in 0..num_faces as usize {
+        let off = face_start + i * face_stride;
+        let a = u32::from_le_bytes(body[off..off + 4].try_into().unwrap());
+        let b = u32::from_le_bytes(body[off + 4..off + 8].try_into().unwrap());
+        let c = u32::from_le_bytes(body[off + 8..off + 12].try_into().unwrap());
+        indices.push(a);
+        indices.push(b);
+        indices.push(c);
+    }
+    Ok(indices)
+}
+
+/// Parse a trailing LOD offset table (shared between v3 and v4/v5): a sequence
+/// of `num_lod_offsets` u32 values representing cumulative face-end
+/// boundaries. Returns an empty vector when the table is absent, truncated,
+/// or fails sanity checks — callers treat that as a single-LOD mesh.
+fn parse_mesh_lod_offset_table(
+    body: &[u8],
+    lod_table_start: usize,
+    num_lod_offsets: usize,
+    num_faces: u32,
+) -> Vec<u32> {
+    if num_lod_offsets < 2 {
+        return Vec::new();
+    }
+    let lod_table_byte_count = num_lod_offsets.saturating_mul(4);
+    if body.len() < lod_table_start + lod_table_byte_count {
+        return Vec::new();
+    }
+    let mut offsets = Vec::with_capacity(num_lod_offsets);
+    for i in 0..num_lod_offsets {
+        let off = lod_table_start + i * 4;
+        let value = u32::from_le_bytes(body[off..off + 4].try_into().unwrap());
+        offsets.push(value);
+    }
+    let trusted = offsets[0] == 0
+        && offsets.windows(2).all(|w| w[0] <= w[1])
+        && *offsets.last().unwrap() <= num_faces;
+    if trusted {
+        offsets
+    } else {
+        Vec::new()
+    }
+}
+
+fn parse_v3_mesh_body(body: &[u8], version: &str) -> Result<MeshGeometry, String> {
+    // v3 mesh header layout (body starts immediately after the
+    // `version 3.xx\n` prefix):
+    //   +0..+1 : u16 sizeof_header (absolute offset where vertex data starts)
+    //   +2     : u8  sizeof_vertex (variable, typically 36 or 40 bytes)
+    //   +3     : u8  sizeof_face   (variable, typically 12 bytes)
+    //   +4..+5 : u16 unknown / padding
+    //   +6..+7 : u16 num_lod_offsets
+    //   +8..+11: u32 num_verts
+    //   +12..15: u32 num_faces
+    if body.len() < 16 {
+        return Err(format!("v{} mesh body too short for header", version));
+    }
+    let sizeof_header = u16::from_le_bytes([body[0], body[1]]) as usize;
+    let sizeof_vertex = body[2] as usize;
+    let sizeof_face = body[3] as usize;
+    let num_lod_offsets = u16::from_le_bytes([body[6], body[7]]) as usize;
+    let num_verts = u32::from_le_bytes([body[8], body[9], body[10], body[11]]);
+    let num_faces = u32::from_le_bytes([body[12], body[13], body[14], body[15]]);
+
+    if sizeof_header == 0 {
+        return Err(format!("v{} mesh sizeof_header is zero", version));
+    }
+    if sizeof_vertex == 0 || sizeof_face == 0 {
+        return Err(format!("v{} mesh reports zero-byte vertex or face stride", version));
+    }
+
+    let vertex_start = sizeof_header;
+    let vertex_end = vertex_start + (num_verts as usize) * sizeof_vertex;
+    let face_start = vertex_end;
+    let face_end = face_start + (num_faces as usize) * sizeof_face;
+    if body.len() < face_end {
+        return Err(format!(
+            "v{} mesh data truncated: need {} bytes, have {}",
+            version,
+            face_end,
+            body.len()
+        ));
+    }
+
+    let lod_triangle_offsets =
+        parse_mesh_lod_offset_table(body, face_end, num_lod_offsets, num_faces);
+    let lod0_faces = lod_triangle_offsets
+        .get(1)
+        .copied()
+        .filter(|&value| value > 0 && value <= num_faces)
+        .unwrap_or(num_faces);
+
+    let positions = extract_mesh_positions(body, vertex_start, num_verts, sizeof_vertex, version)?;
+    let indices = extract_mesh_indices(body, face_start, num_faces, sizeof_face, version)?;
+
+    Ok(MeshGeometry {
+        num_verts,
+        num_faces: lod0_faces,
+        total_faces: num_faces,
+        positions,
+        indices,
+        lod_triangle_offsets,
+    })
+}
+
+fn parse_v4_mesh_body(body: &[u8], version: &str) -> Result<MeshGeometry, String> {
     if body.len() < 16 {
         return Err(format!("v{} mesh body too short for header", version));
     }
@@ -355,58 +533,31 @@ fn parse_v4_mesh_body(body: &[u8], version: &str) -> Result<V4MeshData, String> 
         ));
     }
 
-    let lod0_faces = if num_lod_offsets >= 2 && sizeof_header >= 24 {
-        let lod_table_start = face_end;
-        if body.len() >= lod_table_start + 8 {
-            let lod0_start = u32::from_le_bytes(
-                body[lod_table_start..lod_table_start + 4]
-                    .try_into()
-                    .unwrap(),
-            );
-            let lod0_end = u32::from_le_bytes(
-                body[lod_table_start + 4..lod_table_start + 8]
-                    .try_into()
-                    .unwrap(),
-            );
-            if lod0_start == 0 && lod0_end > 0 && lod0_end <= num_faces {
-                lod0_end
-            } else {
-                num_faces
-            }
-        } else {
-            num_faces
-        }
+    // v4+ gates the LOD table behind a minimum header size (24 bytes) to
+    // distinguish it from older variants that reused the same preamble but
+    // did not write the table; v3 does not need this check because the LOD
+    // offset count itself is enough.
+    let lod_triangle_offsets = if sizeof_header >= 24 {
+        parse_mesh_lod_offset_table(body, face_end, num_lod_offsets, num_faces)
     } else {
-        num_faces
+        Vec::new()
     };
+    let lod0_faces = lod_triangle_offsets
+        .get(1)
+        .copied()
+        .filter(|&value| value > 0 && value <= num_faces)
+        .unwrap_or(num_faces);
 
-    let mut positions = Vec::with_capacity(num_verts as usize * 3);
-    for i in 0..num_verts as usize {
-        let off = vertex_start + i * VERTEX_STRIDE;
-        let x = f32::from_le_bytes(body[off..off + 4].try_into().unwrap());
-        let y = f32::from_le_bytes(body[off + 4..off + 8].try_into().unwrap());
-        let z = f32::from_le_bytes(body[off + 8..off + 12].try_into().unwrap());
-        positions.push(x);
-        positions.push(y);
-        positions.push(z);
-    }
+    let positions = extract_mesh_positions(body, vertex_start, num_verts, VERTEX_STRIDE, version)?;
+    let indices = extract_mesh_indices(body, face_start, num_faces, FACE_STRIDE, version)?;
 
-    let mut indices = Vec::with_capacity(lod0_faces as usize * 3);
-    for i in 0..lod0_faces as usize {
-        let off = face_start + i * FACE_STRIDE;
-        let a = u32::from_le_bytes(body[off..off + 4].try_into().unwrap());
-        let b = u32::from_le_bytes(body[off + 4..off + 8].try_into().unwrap());
-        let c = u32::from_le_bytes(body[off + 8..off + 12].try_into().unwrap());
-        indices.push(a);
-        indices.push(b);
-        indices.push(c);
-    }
-
-    Ok(V4MeshData {
+    Ok(MeshGeometry {
         num_verts,
         num_faces: lod0_faces,
+        total_faces: num_faces,
         positions,
         indices,
+        lod_triangle_offsets,
     })
 }
 
@@ -414,26 +565,72 @@ fn parse_mesh_stats(data: &[u8]) -> Result<MeshStatsResult, String> {
     let (version, body) = parse_mesh_version_and_body(data)?;
 
     if version == "7.00" && body.starts_with(b"COREMESH") {
-        let draco_start =
-            find_draco_payload_start(body).ok_or_else(|| "missing Draco payload".to_string())?;
-        let draco_payload = &body[draco_start..];
-        let decode_result = decode_mesh_with_config_sync(draco_payload)
-            .ok_or_else(|| "Draco decode failed".to_string())?;
-        let vertex_count = decode_result.config.vertex_count() as u32;
-        let triangle_count = (decode_result.config.index_count() / 3) as u32;
+        // v7.00 CoreMesh files concatenate every LOD into one geometry buffer
+        // and describe them with a "LODS" footer at the tail. The Draco
+        // decoder returns triangles for every LOD combined; for triangle
+        // counting we only want LOD0 (the highest-detail mesh that Roblox
+        // renders at close range), so we consult the LODS footer when
+        // available.
+        if let Some(draco_start) = find_draco_payload_start(body) {
+            let draco_payload = &body[draco_start..];
+            let decode_result = decode_mesh_with_config_sync(draco_payload)
+                .ok_or_else(|| "Draco decode failed".to_string())?;
+            let vertex_count = decode_result.config.vertex_count() as u32;
+            let draco_triangle_total = (decode_result.config.index_count() / 3) as u32;
+            let triangle_count = parse_v7_lod0_triangle_count(body).unwrap_or(draco_triangle_total);
+            return Ok(MeshStatsResult {
+                format_version: version,
+                decoder_source: "draco".to_string(),
+                vertex_count,
+                triangle_count,
+            });
+        }
+
+        // Uncompressed COREMESH: header followed by vertex + face arrays.
+        let uncompressed = parse_v7_uncompressed_mesh_body(body, &version)?;
         return Ok(MeshStatsResult {
             format_version: version,
-            decoder_source: "draco".to_string(),
-            vertex_count,
-            triangle_count,
+            decoder_source: "binary".to_string(),
+            vertex_count: uncompressed.num_verts,
+            triangle_count: uncompressed.num_faces,
         });
     }
 
-    if matches!(version.as_str(), "4.00" | "4.01" | "5.00") {
+    if matches!(version.as_str(), "4.00" | "4.01" | "5.00" | "6.00") {
         let mesh = parse_v4_mesh_body(body, &version)?;
         return Ok(MeshStatsResult {
             format_version: version,
             decoder_source: "binary".to_string(),
+            vertex_count: mesh.num_verts,
+            triangle_count: mesh.num_faces,
+        });
+    }
+
+    if matches!(version.as_str(), "3.00" | "3.01") {
+        let mesh = parse_v3_mesh_body(body, &version)?;
+        return Ok(MeshStatsResult {
+            format_version: version,
+            decoder_source: "binary".to_string(),
+            vertex_count: mesh.num_verts,
+            triangle_count: mesh.num_faces,
+        });
+    }
+
+    if version == "2.00" {
+        let mesh = parse_v2_mesh_body(body, &version)?;
+        return Ok(MeshStatsResult {
+            format_version: version,
+            decoder_source: "binary".to_string(),
+            vertex_count: mesh.num_verts,
+            triangle_count: mesh.num_faces,
+        });
+    }
+
+    if matches!(version.as_str(), "1.00" | "1.01") {
+        let mesh = parse_v1_mesh_body(body, &version)?;
+        return Ok(MeshStatsResult {
+            format_version: version,
+            decoder_source: "text".to_string(),
             vertex_count: mesh.num_verts,
             triangle_count: mesh.num_faces,
         });
@@ -445,6 +642,306 @@ fn parse_mesh_stats(data: &[u8]) -> Result<MeshStatsResult, String> {
     ))
 }
 
+/// Parse a v7.00 uncompressed CoreMesh body into a full [`MeshGeometry`].
+///
+/// Layout (after the `COREMESH` marker):
+/// ```text
+///   +0..+15  header (16 bytes of metadata we don't use for geometry)
+///   +16..+19 u32 num_verts
+///   +20..    num_verts × 40-byte vertices  (first 12 bytes = XYZ position)
+///   ...      u32 num_faces
+///   ...      num_faces × 12-byte indices   (3 × u32 per face)
+///   tail     optional "LODS" footer describing cumulative per-LOD offsets
+/// ```
+fn parse_v7_uncompressed_mesh_body(body: &[u8], version: &str) -> Result<MeshGeometry, String> {
+    if body.len() < 20 {
+        return Err("v7 uncompressed COREMESH header truncated".to_string());
+    }
+    let num_verts = u32::from_le_bytes(body[16..20].try_into().unwrap());
+
+    const VERTEX_STRIDE: usize = 40;
+    const FACE_STRIDE: usize = 12;
+
+    let vertex_start = 20usize;
+    let vertex_end = vertex_start
+        .checked_add((num_verts as usize).saturating_mul(VERTEX_STRIDE))
+        .ok_or_else(|| "v7 uncompressed vertex range overflow".to_string())?;
+    if body.len() < vertex_end + 4 {
+        return Err("v7 uncompressed COREMESH faces truncated".to_string());
+    }
+    let num_faces = u32::from_le_bytes(body[vertex_end..vertex_end + 4].try_into().unwrap());
+    let face_start = vertex_end + 4;
+    let face_end = face_start
+        .checked_add((num_faces as usize).saturating_mul(FACE_STRIDE))
+        .ok_or_else(|| "v7 uncompressed face range overflow".to_string())?;
+    if body.len() < face_end {
+        return Err(format!(
+            "v7 uncompressed COREMESH face data truncated: need {} bytes, have {}",
+            face_end,
+            body.len()
+        ));
+    }
+
+    let positions = extract_mesh_positions(body, vertex_start, num_verts, VERTEX_STRIDE, version)?;
+    let indices = extract_mesh_indices(body, face_start, num_faces, FACE_STRIDE, version)?;
+
+    // Re-use the v7 CoreMesh LODS footer parser: uncompressed files use the
+    // exact same trailing footer when multi-LOD data is present.
+    let lod_triangle_offsets = parse_v7_lod_triangle_offsets(body).unwrap_or_default();
+    let lod0_faces = lod_triangle_offsets
+        .get(1)
+        .copied()
+        .filter(|&value| value > 0 && value <= num_faces)
+        .unwrap_or(num_faces);
+
+    Ok(MeshGeometry {
+        num_verts,
+        num_faces: lod0_faces,
+        total_faces: num_faces,
+        positions,
+        indices,
+        lod_triangle_offsets,
+    })
+}
+
+fn parse_v2_mesh_body(body: &[u8], version: &str) -> Result<MeshGeometry, String> {
+    // v2 binary layout: u16 sizeof_header, u8 sizeof_vertex, u8 sizeof_face,
+    // u32 num_verts, u32 num_faces, then vertex + face arrays. v2 does not
+    // ship an LOD offset table — the mesh is always single-LOD.
+    if body.len() < 12 {
+        return Err(format!("v{} mesh header truncated", version));
+    }
+    let sizeof_header = u16::from_le_bytes([body[0], body[1]]) as usize;
+    let sizeof_vertex = body[2] as usize;
+    let sizeof_face = body[3] as usize;
+    let num_verts = u32::from_le_bytes([body[4], body[5], body[6], body[7]]);
+    let num_faces = u32::from_le_bytes([body[8], body[9], body[10], body[11]]);
+
+    if sizeof_header < 12 {
+        return Err(format!(
+            "v{} mesh header size too small: {}",
+            version, sizeof_header
+        ));
+    }
+    if sizeof_vertex == 0 || sizeof_face == 0 {
+        return Err(format!(
+            "v{} mesh reports zero-byte vertex or face stride",
+            version
+        ));
+    }
+
+    let vertex_start = sizeof_header;
+    let vertex_end = vertex_start + (num_verts as usize) * sizeof_vertex;
+    let face_start = vertex_end;
+    let face_end = face_start + (num_faces as usize) * sizeof_face;
+    if body.len() < face_end {
+        return Err(format!(
+            "v{} mesh data truncated: need {} bytes, have {}",
+            version,
+            face_end,
+            body.len()
+        ));
+    }
+
+    let positions = extract_mesh_positions(body, vertex_start, num_verts, sizeof_vertex, version)?;
+    let indices = extract_mesh_indices(body, face_start, num_faces, sizeof_face, version)?;
+
+    Ok(MeshGeometry {
+        num_verts,
+        num_faces,
+        total_faces: num_faces,
+        positions,
+        indices,
+        lod_triangle_offsets: Vec::new(),
+    })
+}
+
+/// Parse a v1.00 / v1.01 ASCII mesh body.
+///
+/// The body layout is:
+/// ```text
+///   num_faces\n
+///   [x,y,z][nx,ny,nz][u,v,w]\n      (repeated 3 * num_faces times; one line per vertex)
+/// ```
+///
+/// v1 meshes do not share vertices between triangles and have no index
+/// buffer — every triangle has three freshly-listed vertices. We synthesise
+/// the index buffer as `[0, 1, 2, 3, ...]` so downstream preview code can
+/// treat the result uniformly.
+fn parse_v1_mesh_body(body: &[u8], version: &str) -> Result<MeshGeometry, String> {
+    let text = std::str::from_utf8(body)
+        .map_err(|err| format!("v{} mesh body is not UTF-8: {}", version, err))?;
+    let mut lines = text.lines();
+
+    let num_faces_line = lines
+        .next()
+        .ok_or_else(|| format!("v{} mesh missing face count line", version))?;
+    let num_faces: u32 = num_faces_line.trim().parse().map_err(|err| {
+        format!(
+            "v{} mesh invalid face count \"{}\": {}",
+            version,
+            num_faces_line.trim(),
+            err
+        )
+    })?;
+    let expected_vertices = (num_faces as usize).saturating_mul(3);
+
+    let mut positions = Vec::with_capacity(expected_vertices * 3);
+    let mut vertex_count = 0usize;
+    for line in lines {
+        if vertex_count >= expected_vertices {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let position = parse_v1_vertex_position(trimmed).map_err(|err| {
+            format!("v{} mesh malformed vertex line {:?}: {}", version, trimmed, err)
+        })?;
+        positions.extend_from_slice(&position);
+        vertex_count += 1;
+    }
+
+    if vertex_count < expected_vertices {
+        return Err(format!(
+            "v{} mesh has {} vertex lines, expected {} (= 3 × {} faces)",
+            version, vertex_count, expected_vertices, num_faces
+        ));
+    }
+
+    let indices: Vec<u32> = (0..expected_vertices as u32).collect();
+
+    Ok(MeshGeometry {
+        num_verts: expected_vertices as u32,
+        num_faces,
+        total_faces: num_faces,
+        positions,
+        indices,
+        lod_triangle_offsets: Vec::new(),
+    })
+}
+
+/// Extract the `[x,y,z]` position tuple from a v1 vertex line. Subsequent
+/// `[normal]` and `[uv]` groups on the line are ignored — the preview only
+/// uses positions.
+fn parse_v1_vertex_position(line: &str) -> Result<[f32; 3], String> {
+    let open = line
+        .find('[')
+        .ok_or_else(|| "missing '[' before position tuple".to_string())?;
+    let close = line[open..]
+        .find(']')
+        .ok_or_else(|| "missing ']' closing position tuple".to_string())?;
+    let body = &line[open + 1..open + close];
+    let parts: Vec<&str> = body.split(',').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "position tuple has {} components, expected 3",
+            parts.len()
+        ));
+    }
+    let mut result = [0f32; 3];
+    for (i, part) in parts.iter().enumerate() {
+        result[i] = part
+            .trim()
+            .parse()
+            .map_err(|err| format!("component {} parse error: {}", i, err))?;
+    }
+    Ok(result)
+}
+
+// Parse the trailing "LODS" footer of a v7.00 CoreMesh body and return the
+// cumulative triangle offsets (length `num_lods + 1`) that describe the
+// triangle range for each LOD. LOD `i` covers triangles
+// `[offsets[i] .. offsets[i + 1])`. Observed footer layout:
+//   +0..+3   : "LODS"
+//   +4..+7   : u32 reserved (0)
+//   +8..+11  : u32 unknown (typically 1)
+//   +12..+15 : u32 header size (typically 31)
+//   +16..+17 : u16 num_lods
+//   +18..+22 : 5 bytes of flags / render-fidelity metadata
+//   +23..    : (num_lods + 1) little-endian u32 values -- cumulative triangle
+//              end offsets for each LOD.
+fn parse_v7_lod_triangle_offsets(body: &[u8]) -> Option<Vec<u32>> {
+    let lods_off = find_lods_marker(body)?;
+    let tail = &body[lods_off..];
+    if tail.len() < 31 {
+        return None;
+    }
+    let num_lods = u16::from_le_bytes(tail[16..18].try_into().ok()?) as usize;
+    if num_lods == 0 || num_lods > 16 {
+        return None;
+    }
+    const ARRAY_OFFSET: usize = 23;
+    let required_len = ARRAY_OFFSET + (num_lods + 1) * 4;
+    if tail.len() < required_len {
+        return None;
+    }
+    let mut offsets = Vec::with_capacity(num_lods + 1);
+    for i in 0..=num_lods {
+        let start = ARRAY_OFFSET + i * 4;
+        let value = u32::from_le_bytes(tail[start..start + 4].try_into().ok()?);
+        offsets.push(value);
+    }
+    if offsets[0] != 0 {
+        return None;
+    }
+    // Offsets should be monotonically non-decreasing.
+    if offsets.windows(2).any(|w| w[0] > w[1]) {
+        return None;
+    }
+    Some(offsets)
+}
+
+fn parse_v7_lod0_triangle_count(body: &[u8]) -> Option<u32> {
+    parse_v7_lod_triangle_offsets(body).and_then(|offsets| {
+        let end = *offsets.get(1)?;
+        if end == 0 {
+            None
+        } else {
+            Some(end)
+        }
+    })
+}
+
+fn triangle_offsets_to_lods(offsets: &[u32], max_triangles: u32) -> Vec<MeshLodInfo> {
+    let mut lods = Vec::new();
+    for pair in offsets.windows(2) {
+        let start = pair[0].min(max_triangles);
+        let mut end = pair[1].min(max_triangles);
+        if end < start {
+            end = start;
+        }
+        // Drop clearly empty trailing LOD entries that result from a
+        // truncated mesh payload. Always keep at least one entry.
+        if start == end && !lods.is_empty() {
+            continue;
+        }
+        lods.push(MeshLodInfo {
+            triangle_start: start,
+            triangle_end: end,
+        });
+    }
+    lods
+}
+
+fn find_lods_marker(body: &[u8]) -> Option<usize> {
+    // Scan from the tail of the file -- the LODS footer lives at the very end.
+    if body.len() < 4 {
+        return None;
+    }
+    let mut i = body.len() - 4;
+    loop {
+        if &body[i..i + 4] == b"LODS" {
+            return Some(i);
+        }
+        if i == 0 {
+            return None;
+        }
+        i -= 1;
+    }
+}
+
 fn parse_mesh_preview(
     data: &[u8],
     max_triangles: Option<usize>,
@@ -452,43 +949,120 @@ fn parse_mesh_preview(
     let (version, body) = parse_mesh_version_and_body(data)?;
 
     if version == "7.00" && body.starts_with(b"COREMESH") {
-        let draco_start =
-            find_draco_payload_start(body).ok_or_else(|| "missing Draco payload".to_string())?;
-        let draco_payload = &body[draco_start..];
-        let decode_result = decode_mesh_with_config_sync(draco_payload)
-            .ok_or_else(|| "Draco decode failed".to_string())?;
-        let positions = extract_position_components(&decode_result)?;
-        let all_indices = extract_triangle_indices(&decode_result)?;
-        let preview_indices = limit_triangle_indices(&all_indices, max_triangles);
-        return Ok(MeshPreviewResult {
-            format_version: version,
-            decoder_source: "draco".to_string(),
-            vertex_count: decode_result.config.vertex_count(),
-            triangle_count: (all_indices.len() / 3) as u32,
-            preview_triangle_count: (preview_indices.len() / 3) as u32,
-            positions,
-            indices: preview_indices,
-        });
+        if let Some(draco_start) = find_draco_payload_start(body) {
+            let draco_payload = &body[draco_start..];
+            let decode_result = decode_mesh_with_config_sync(draco_payload)
+                .ok_or_else(|| "Draco decode failed".to_string())?;
+            let positions = extract_position_components(&decode_result)?;
+            let all_indices = extract_triangle_indices(&decode_result)?;
+            let total_triangles = (all_indices.len() / 3) as u32;
+            let lods = build_lods_for_preview(
+                parse_v7_lod_triangle_offsets(body),
+                total_triangles,
+                max_triangles,
+            );
+            let preview_indices = limit_triangle_indices(&all_indices, max_triangles);
+            return Ok(MeshPreviewResult {
+                format_version: version,
+                decoder_source: "draco".to_string(),
+                vertex_count: decode_result.config.vertex_count(),
+                triangle_count: total_triangles,
+                preview_triangle_count: (preview_indices.len() / 3) as u32,
+                positions,
+                indices: preview_indices,
+                lods,
+            });
+        }
+
+        // Uncompressed v7 CoreMesh: fall through to the binary parser so we
+        // can still preview meshes whose payload is not Draco-encoded.
+        let mesh = parse_v7_uncompressed_mesh_body(body, &version)?;
+        return Ok(mesh_geometry_to_preview(version, mesh, max_triangles));
     }
 
-    if matches!(version.as_str(), "4.00" | "4.01" | "5.00") {
+    if matches!(version.as_str(), "4.00" | "4.01" | "5.00" | "6.00") {
+        // v6.00 is extremely rare in the wild; its header is structurally
+        // identical to v4/v5 (u16 sizeof_header + u32 num_verts + u32
+        // num_faces + ...), so we route it through the same parser. If real
+        // v6 samples turn out to diverge we'll iterate here with a dedicated
+        // parser.
         let mesh = parse_v4_mesh_body(body, &version)?;
-        let preview_indices = limit_triangle_indices(&mesh.indices, max_triangles);
-        return Ok(MeshPreviewResult {
-            format_version: version,
-            decoder_source: "binary".to_string(),
-            vertex_count: mesh.num_verts,
-            triangle_count: mesh.num_faces,
-            preview_triangle_count: (preview_indices.len() / 3) as u32,
-            positions: mesh.positions,
-            indices: preview_indices,
-        });
+        return Ok(mesh_geometry_to_preview(version, mesh, max_triangles));
+    }
+
+    if matches!(version.as_str(), "3.00" | "3.01") {
+        let mesh = parse_v3_mesh_body(body, &version)?;
+        return Ok(mesh_geometry_to_preview(version, mesh, max_triangles));
+    }
+
+    if version == "2.00" {
+        let mesh = parse_v2_mesh_body(body, &version)?;
+        return Ok(mesh_geometry_to_preview(version, mesh, max_triangles));
+    }
+
+    if matches!(version.as_str(), "1.00" | "1.01") {
+        let mesh = parse_v1_mesh_body(body, &version)?;
+        let mut preview = mesh_geometry_to_preview(version, mesh, max_triangles);
+        preview.decoder_source = "text".to_string();
+        return Ok(preview);
     }
 
     Err(format!(
         "unsupported mesh preview format: version {}",
         version
     ))
+}
+
+/// Shared adapter that converts a fully-decoded [`MeshGeometry`] (produced by
+/// the v3/v4/v5 binary parsers) into a [`MeshPreviewResult`].
+fn mesh_geometry_to_preview(
+    version: String,
+    mesh: MeshGeometry,
+    max_triangles: Option<usize>,
+) -> MeshPreviewResult {
+    let total_triangles = mesh.total_faces;
+    let lod_offsets = if mesh.lod_triangle_offsets.is_empty() {
+        None
+    } else {
+        Some(mesh.lod_triangle_offsets.clone())
+    };
+    let lods = build_lods_for_preview(lod_offsets, total_triangles, max_triangles);
+    let preview_indices = limit_triangle_indices(&mesh.indices, max_triangles);
+    MeshPreviewResult {
+        format_version: version,
+        decoder_source: "binary".to_string(),
+        vertex_count: mesh.num_verts,
+        triangle_count: total_triangles,
+        preview_triangle_count: (preview_indices.len() / 3) as u32,
+        positions: mesh.positions,
+        indices: preview_indices,
+        lods,
+    }
+}
+
+// `lods` always reflects the real per-LOD triangle ranges from the mesh file
+// (not clipped by `max_triangles`) so callers can display accurate triangle
+// counts. Callers that intend to render a specific LOD from the returned
+// `indices` slice must request an unlimited preview, because a capped
+// preview sub-samples across the whole mesh and is no longer sliceable by
+// LOD range.
+fn build_lods_for_preview(
+    lod_triangle_offsets: Option<Vec<u32>>,
+    total_triangles: u32,
+    _max_triangles: Option<usize>,
+) -> Vec<MeshLodInfo> {
+    let offsets = match lod_triangle_offsets {
+        Some(mut offsets) if offsets.len() >= 2 => {
+            if let Some(last) = offsets.last_mut() {
+                if *last > total_triangles {
+                    *last = total_triangles;
+                }
+            }
+            offsets
+        }
+        _ => vec![0, total_triangles],
+    };
+    triangle_offsets_to_lods(&offsets, total_triangles)
 }
 
 fn extract_position_components(
@@ -2184,11 +2758,41 @@ mod tests {
     }
 
     #[test]
-    fn parse_v4_mesh_preview_respects_lod0() {
+    fn parse_v4_mesh_preview_reports_all_lods() {
+        // LOD table [0, 2, 3] means two LODs: LOD 0 covers faces [0..2) (2
+        // triangles) and LOD 1 covers faces [2..3) (1 triangle). The preview
+        // now returns the full geometry (all 3 triangles) plus per-LOD
+        // triangle ranges so the UI can render each LOD independently.
         let data = build_v4_mesh(9, 3, 0, &[0, 2, 3]);
         let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.triangle_count, 3);
+        assert_eq!(result.indices.len(), 9);
+        assert_eq!(result.lods.len(), 2);
+        assert_eq!(result.lods[0].triangle_start, 0);
+        assert_eq!(result.lods[0].triangle_end, 2);
+        assert_eq!(result.lods[1].triangle_start, 2);
+        assert_eq!(result.lods[1].triangle_end, 3);
+    }
+
+    #[test]
+    fn parse_v4_mesh_preview_single_lod_fallback_when_no_table() {
+        // Empty LOD table -> the parser synthesises a single LOD covering
+        // every triangle so downstream UIs always see at least one entry.
+        let data = build_v4_mesh(3, 1, 0, &[]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.lods.len(), 1);
+        assert_eq!(result.lods[0].triangle_start, 0);
+        assert_eq!(result.lods[0].triangle_end, 1);
+    }
+
+    #[test]
+    fn parse_v4_mesh_stats_still_reports_lod0_count() {
+        // Regression: `parse_mesh_stats` must continue to report only the
+        // LOD 0 face count so that asset reports / heatmap totals match
+        // what Roblox would actually render at full detail.
+        let data = build_v4_mesh(9, 3, 0, &[0, 2, 3]);
+        let result = parse_mesh_stats(&data).expect("parse_mesh_stats failed");
         assert_eq!(result.triangle_count, 2);
-        assert_eq!(result.indices.len(), 6);
     }
 
     #[test]
@@ -2206,5 +2810,278 @@ mod tests {
         assert_eq!(result.vertex_count, 3);
         assert_eq!(result.triangle_count, 1);
         assert_eq!(result.indices, vec![0, 1, 2]);
+    }
+
+    /// Build a synthetic v3 mesh with an explicit vertex/face stride so we
+    /// exercise the "variable stride" path. When `lod_offsets` is empty no
+    /// LOD table is appended.
+    fn build_v3_mesh(
+        version: &str,
+        num_verts: u32,
+        num_faces: u32,
+        sizeof_vertex: u8,
+        sizeof_face: u8,
+        lod_offsets: &[u32],
+    ) -> Vec<u8> {
+        assert!(sizeof_vertex as usize >= 12, "vertex stride must fit XYZ");
+        assert!(sizeof_face as usize >= 12, "face stride must fit index triplet");
+        let mut data = Vec::new();
+        data.extend_from_slice(format!("version {}\n", version).as_bytes());
+        let sizeof_header: u16 = 16;
+        let num_lod_offsets = lod_offsets.len() as u16;
+        data.extend_from_slice(&sizeof_header.to_le_bytes());
+        data.push(sizeof_vertex);
+        data.push(sizeof_face);
+        data.extend_from_slice(&0u16.to_le_bytes()); // lodType / padding at +4
+        data.extend_from_slice(&num_lod_offsets.to_le_bytes()); // +6
+        data.extend_from_slice(&num_verts.to_le_bytes()); // +8
+        data.extend_from_slice(&num_faces.to_le_bytes()); // +12
+        for i in 0..num_verts {
+            let x = (i as f32) * 0.25;
+            let y = (i as f32) * 0.5;
+            let z = (i as f32) * -0.25;
+            data.extend_from_slice(&x.to_le_bytes());
+            data.extend_from_slice(&y.to_le_bytes());
+            data.extend_from_slice(&z.to_le_bytes());
+            let padding = sizeof_vertex as usize - 12;
+            data.extend(std::iter::repeat(0u8).take(padding));
+        }
+        for i in 0..num_faces {
+            let base = i * 3;
+            data.extend_from_slice(&base.to_le_bytes());
+            data.extend_from_slice(&(base + 1).to_le_bytes());
+            data.extend_from_slice(&(base + 2).to_le_bytes());
+            let padding = sizeof_face as usize - 12;
+            data.extend(std::iter::repeat(0u8).take(padding));
+        }
+        for offset in lod_offsets {
+            data.extend_from_slice(&offset.to_le_bytes());
+        }
+        data
+    }
+
+    #[test]
+    fn parse_v3_mesh_preview_extracts_positions_and_indices() {
+        let data = build_v3_mesh("3.01", 3, 1, 36, 12, &[]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.format_version, "3.01");
+        assert_eq!(result.decoder_source, "binary");
+        assert_eq!(result.vertex_count, 3);
+        assert_eq!(result.triangle_count, 1);
+        assert_eq!(result.positions.len(), 9);
+        assert_eq!(result.indices, vec![0, 1, 2]);
+        assert!((result.positions[0] - 0.0).abs() < 1e-6);
+        assert!((result.positions[3] - 0.25).abs() < 1e-6);
+        assert!((result.positions[6] - 0.5).abs() < 1e-6);
+        assert_eq!(result.lods.len(), 1);
+        assert_eq!(result.lods[0].triangle_start, 0);
+        assert_eq!(result.lods[0].triangle_end, 1);
+    }
+
+    #[test]
+    fn parse_v3_mesh_preview_reports_all_lods() {
+        // LOD table [0, 2, 3] -> two LODs (LOD 0 faces [0..2), LOD 1 face
+        // [2..3)). The preview returns the full geometry plus per-LOD
+        // ranges so the LOD viewer can render each LOD independently.
+        let data = build_v3_mesh("3.00", 9, 3, 36, 12, &[0, 2, 3]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.format_version, "3.00");
+        assert_eq!(result.triangle_count, 3);
+        assert_eq!(result.indices.len(), 9);
+        assert_eq!(result.lods.len(), 2);
+        assert_eq!(result.lods[0].triangle_start, 0);
+        assert_eq!(result.lods[0].triangle_end, 2);
+        assert_eq!(result.lods[1].triangle_start, 2);
+        assert_eq!(result.lods[1].triangle_end, 3);
+    }
+
+    #[test]
+    fn parse_v3_mesh_preview_handles_40byte_vertex_stride() {
+        // Older v3 exports ship with a 40-byte vertex (includes per-vertex
+        // colour). The parser must read positions from the first 12 bytes
+        // and skip the remaining 28.
+        let data = build_v3_mesh("3.00", 3, 1, 40, 12, &[]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.vertex_count, 3);
+        assert_eq!(result.indices, vec![0, 1, 2]);
+        assert!((result.positions[3] - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_v3_mesh_stats_reports_lod0_count() {
+        // parse_mesh_stats should report the LOD 0 face count (2) not the
+        // total face count (3) for consistency with v4 stats behaviour.
+        let data = build_v3_mesh("3.01", 9, 3, 36, 12, &[0, 2, 3]);
+        let result = parse_mesh_stats(&data).expect("parse_mesh_stats failed");
+        assert_eq!(result.format_version, "3.01");
+        assert_eq!(result.vertex_count, 9);
+        assert_eq!(result.triangle_count, 2);
+    }
+
+    #[test]
+    fn parse_v1_mesh_preview_parses_ascii_triangles() {
+        let data = b"version 1.00\n2\n[0,0,0][0,1,0][0,0]\n[1,0,0][0,1,0][1,0]\n[0,1,0][0,1,0][0,1]\n[1,1,1][0,1,0][1,1]\n[2,1,1][0,1,0][1,0]\n[1,2,1][0,1,0][0,1]\n";
+        let result = parse_mesh_preview(data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.format_version, "1.00");
+        assert_eq!(result.decoder_source, "text");
+        assert_eq!(result.triangle_count, 2);
+        assert_eq!(result.vertex_count, 6);
+        assert_eq!(result.indices, (0..6).collect::<Vec<u32>>());
+        assert_eq!(result.positions.len(), 18);
+        assert!((result.positions[3] - 1.0).abs() < 1e-6); // 2nd vertex x
+        assert!((result.positions[9] - 1.0).abs() < 1e-6); // 4th vertex x (triangle 2 start)
+        assert_eq!(result.lods.len(), 1);
+        assert_eq!(result.lods[0].triangle_end, 2);
+    }
+
+    #[test]
+    fn parse_v1_mesh_preview_rejects_truncated_face_list() {
+        let data = b"version 1.01\n2\n[0,0,0][0,1,0][0,0]\n[1,0,0][0,1,0][1,0]\n[0,1,0][0,1,0][0,1]\n";
+        match parse_mesh_preview(data, None) {
+            Ok(_) => panic!("expected truncated mesh error, got Ok"),
+            Err(err) => assert!(err.contains("expected 6"), "error was: {}", err),
+        }
+    }
+
+    #[test]
+    fn parse_v1_mesh_stats_reports_counts() {
+        let data = b"version 1.00\n1\n[0,0,0][0,1,0][0,0]\n[1,0,0][0,1,0][1,0]\n[0,1,0][0,1,0][0,1]\n";
+        let result = parse_mesh_stats(data).expect("parse_mesh_stats failed");
+        assert_eq!(result.format_version, "1.00");
+        assert_eq!(result.decoder_source, "text");
+        assert_eq!(result.vertex_count, 3);
+        assert_eq!(result.triangle_count, 1);
+    }
+
+    /// Build a synthetic v2 mesh with an explicit vertex/face stride. v2
+    /// never ships an LOD offset table.
+    fn build_v2_mesh(num_verts: u32, num_faces: u32, sizeof_vertex: u8, sizeof_face: u8) -> Vec<u8> {
+        assert!(sizeof_vertex as usize >= 12);
+        assert!(sizeof_face as usize >= 12);
+        let mut data = Vec::new();
+        data.extend_from_slice(b"version 2.00\n");
+        let sizeof_header: u16 = 12;
+        data.extend_from_slice(&sizeof_header.to_le_bytes());
+        data.push(sizeof_vertex);
+        data.push(sizeof_face);
+        data.extend_from_slice(&num_verts.to_le_bytes());
+        data.extend_from_slice(&num_faces.to_le_bytes());
+        for i in 0..num_verts {
+            let x = (i as f32) * 0.125;
+            let y = (i as f32) * 0.25;
+            let z = (i as f32) * -0.125;
+            data.extend_from_slice(&x.to_le_bytes());
+            data.extend_from_slice(&y.to_le_bytes());
+            data.extend_from_slice(&z.to_le_bytes());
+            data.extend(std::iter::repeat(0u8).take(sizeof_vertex as usize - 12));
+        }
+        for i in 0..num_faces {
+            let base = i * 3;
+            data.extend_from_slice(&base.to_le_bytes());
+            data.extend_from_slice(&(base + 1).to_le_bytes());
+            data.extend_from_slice(&(base + 2).to_le_bytes());
+            data.extend(std::iter::repeat(0u8).take(sizeof_face as usize - 12));
+        }
+        data
+    }
+
+    #[test]
+    fn parse_v2_mesh_preview_extracts_geometry() {
+        let data = build_v2_mesh(3, 1, 36, 12);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.format_version, "2.00");
+        assert_eq!(result.decoder_source, "binary");
+        assert_eq!(result.vertex_count, 3);
+        assert_eq!(result.triangle_count, 1);
+        assert_eq!(result.indices, vec![0, 1, 2]);
+        assert_eq!(result.positions.len(), 9);
+        assert!((result.positions[3] - 0.125).abs() < 1e-6);
+        assert_eq!(result.lods.len(), 1);
+    }
+
+    #[test]
+    fn parse_v2_mesh_stats_still_works() {
+        let data = build_v2_mesh(6, 2, 40, 12);
+        let result = parse_mesh_stats(&data).expect("parse_mesh_stats failed");
+        assert_eq!(result.vertex_count, 6);
+        assert_eq!(result.triangle_count, 2);
+    }
+
+    /// Build a synthetic v6.00 mesh. The header layout is identical to v4/v5
+    /// (40-byte vertex stride, 12-byte face stride), so we reuse
+    /// `build_v4_mesh` with a patched version string.
+    fn build_v6_mesh(num_verts: u32, num_faces: u32, lod_offsets: &[u32]) -> Vec<u8> {
+        let mut data = build_v4_mesh(num_verts, num_faces, 0, lod_offsets);
+        // Overwrite the "version 4.01\n" prefix with "version 6.00\n" (both
+        // are exactly 13 bytes).
+        let prefix = b"version 6.00\n";
+        assert_eq!(prefix.len(), 13);
+        data[..prefix.len()].copy_from_slice(prefix);
+        data
+    }
+
+    #[test]
+    fn parse_v6_mesh_preview_uses_v4_layout() {
+        let data = build_v6_mesh(3, 1, &[]);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.format_version, "6.00");
+        assert_eq!(result.triangle_count, 1);
+        assert_eq!(result.indices, vec![0, 1, 2]);
+        assert_eq!(result.lods.len(), 1);
+    }
+
+    /// Build a synthetic v7.00 uncompressed CoreMesh body (no Draco payload).
+    ///
+    /// Layout (relative to body start, i.e. after `version 7.00\n`):
+    ///   +0..+7   "COREMESH"
+    ///   +8..+15  8 bytes of body-header padding
+    ///   +16..+19 u32 num_verts
+    ///   +20..    num_verts × 40-byte vertices, then u32 num_faces, then
+    ///            num_faces × 12-byte indices.
+    fn build_v7_uncompressed_mesh(num_verts: u32, num_faces: u32) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"version 7.00\n");
+        data.extend_from_slice(b"COREMESH");
+        data.extend_from_slice(&[0u8; 8]);
+        data.extend_from_slice(&num_verts.to_le_bytes());
+        for i in 0..num_verts {
+            let x = (i as f32) * 0.5;
+            let y = (i as f32) * 0.25;
+            let z = (i as f32) * -0.5;
+            data.extend_from_slice(&x.to_le_bytes());
+            data.extend_from_slice(&y.to_le_bytes());
+            data.extend_from_slice(&z.to_le_bytes());
+            data.extend_from_slice(&[0u8; 28]);
+        }
+        data.extend_from_slice(&num_faces.to_le_bytes());
+        for i in 0..num_faces {
+            let base = i * 3;
+            data.extend_from_slice(&base.to_le_bytes());
+            data.extend_from_slice(&(base + 1).to_le_bytes());
+            data.extend_from_slice(&(base + 2).to_le_bytes());
+        }
+        data
+    }
+
+    #[test]
+    fn parse_v7_uncompressed_mesh_preview_extracts_geometry() {
+        let data = build_v7_uncompressed_mesh(3, 1);
+        let result = parse_mesh_preview(&data, None).expect("parse_mesh_preview failed");
+        assert_eq!(result.format_version, "7.00");
+        assert_eq!(result.decoder_source, "binary");
+        assert_eq!(result.vertex_count, 3);
+        assert_eq!(result.triangle_count, 1);
+        assert_eq!(result.indices, vec![0, 1, 2]);
+        assert_eq!(result.lods.len(), 1);
+    }
+
+    #[test]
+    fn parse_v7_uncompressed_mesh_stats_reports_counts() {
+        let data = build_v7_uncompressed_mesh(6, 2);
+        let result = parse_mesh_stats(&data).expect("parse_mesh_stats failed");
+        assert_eq!(result.format_version, "7.00");
+        assert_eq!(result.decoder_source, "binary");
+        assert_eq!(result.vertex_count, 6);
+        assert_eq!(result.triangle_count, 2);
     }
 }

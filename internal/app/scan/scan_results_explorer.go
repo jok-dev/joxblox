@@ -89,6 +89,10 @@ type ScanResultsExplorer struct {
 	statsSizeLabel                   *widget.Label
 	statsTrianglesLabel              *widget.Label
 	searchEntry                      *widget.Entry
+	compiledSearchQuery              loader.ScanQuery
+	versionIndex                     []string
+	searchSuggestionsBox             *fyne.Container
+	searchSuggestionsRow             fyne.CanvasObject
 	showOnlyDuplicatesCheck          *widget.Check
 	showOnlyLargeTexturesCheck       *widget.Check
 	largeTextureThresholdEntry       *widget.Entry
@@ -101,7 +105,7 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 	}
 	searchPlaceholder := strings.TrimSpace(options.SearchPlaceholder)
 	if searchPlaceholder == "" {
-		searchPlaceholder = "Search ID, type, source, hash, or path..."
+		searchPlaceholder = `Search: v3.0 · type:mesh · size:>1mb · name:/v\d+\.\d+/`
 	}
 	explorer := &ScanResultsExplorer{
 		window:                     window,
@@ -162,6 +166,8 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 	}
 	explorer.searchEntry.OnChanged = func(nextQuery string) {
 		explorer.searchQuery = strings.TrimSpace(nextQuery)
+		explorer.compiledSearchQuery = loader.CompileScanQuery(explorer.searchQuery)
+		explorer.refreshSearchSuggestions()
 		changeToken := explorer.searchChangeToken.Add(1)
 		go func(expectedToken uint64) {
 			time.Sleep(scanSearchDebounceDelay)
@@ -254,6 +260,8 @@ func (explorer *ScanResultsExplorer) SetResults(rows []loader.ScanResult) {
 	copy(nextRows, rows)
 	explorer.allResults = nextRows
 	explorer.selectedAssetID = 0
+	explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
+	explorer.refreshSearchSuggestions()
 	explorer.clearPreview()
 	explorer.ClearSimilarity()
 	explorer.applySortAndFilters()
@@ -265,6 +273,8 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 	}
 	explorer.allResults = append(explorer.allResults, rows...)
 	if refreshResults {
+		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
+		explorer.refreshSearchSuggestions()
 		explorer.applySortAndFilters()
 		return
 	}
@@ -274,6 +284,8 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 		explorer.duplicateBytesTotal = explorer.countDuplicateBytes(hashCounts)
 		explorer.updateFilterOptions(hashCounts)
 		explorer.updateStatsLabels()
+		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
+		explorer.refreshSearchSuggestions()
 	}
 }
 
@@ -365,9 +377,13 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 	if options.HeaderContent != nil {
 		controlItems = append(controlItems, options.HeaderContent)
 	}
+	explorer.searchSuggestionsBox = container.NewHBox()
+	explorer.searchSuggestionsRow = container.NewHScroll(explorer.searchSuggestionsBox)
+	explorer.searchSuggestionsRow.Hide()
 	controlItems = append(controlItems,
 		widget.NewLabel("Filters"),
 		container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, explorer.searchEntry),
+		explorer.searchSuggestionsRow,
 		filterRow,
 		statsRow,
 	)
@@ -687,7 +703,7 @@ func (explorer *ScanResultsExplorer) matchesActiveFilters(result loader.ScanResu
 	if explorer.showOnlyLargeTextures && !loader.IsLargeTexture(result, explorer.largeTextureThreshold) {
 		return false
 	}
-	if !loader.ScanResultMatchesQuery(result, explorer.searchQuery) {
+	if !loader.ScanResultMatchesCompiledQuery(result, explorer.compiledSearchQuery, loader.ScanQueryContext{HashCounts: hashCounts}) {
 		return false
 	}
 	if !ignoreTypeFilter && explorer.typeFilterValue != loader.ScanFilterAllOption && !strings.EqualFold(loader.ScanResultTypeFilterLabel(result), explorer.typeFilterValue) {
@@ -977,7 +993,7 @@ func (explorer *ScanResultsExplorer) columnValue(row loader.ScanResult, columnNa
 		return "-"
 	case "Dimensions":
 		if row.Width > 0 && row.Height > 0 {
-			return fmt.Sprintf("%dx%d", row.Width, row.Height)
+			return format.FormatDimensions(row.Width, row.Height)
 		}
 		return "-"
 	case "Asset SHA256":
@@ -1000,4 +1016,149 @@ func (explorer *ScanResultsExplorer) columnValue(row loader.ScanResult, columnNa
 	default:
 		return ""
 	}
+}
+
+const maxSearchSuggestions = 8
+
+func (explorer *ScanResultsExplorer) refreshSearchSuggestions() {
+	if explorer == nil || explorer.searchSuggestionsBox == nil {
+		return
+	}
+	suggestions := explorer.computeSearchSuggestions()
+	explorer.searchSuggestionsBox.Objects = explorer.searchSuggestionsBox.Objects[:0]
+	if len(suggestions) == 0 {
+		explorer.searchSuggestionsRow.Hide()
+		explorer.searchSuggestionsBox.Refresh()
+		return
+	}
+	explorer.searchSuggestionsBox.Add(widget.NewLabel("Try:"))
+	for _, suggestion := range suggestions {
+		value := suggestion
+		button := widget.NewButton(value, func() {
+			explorer.applySuggestion(value)
+		})
+		button.Importance = widget.LowImportance
+		explorer.searchSuggestionsBox.Add(button)
+	}
+	explorer.searchSuggestionsRow.Show()
+	explorer.searchSuggestionsBox.Refresh()
+}
+
+func (explorer *ScanResultsExplorer) computeSearchSuggestions() []string {
+	currentText := explorer.searchEntry.Text
+	activeToken := lastToken(currentText)
+	activeLower := strings.ToLower(activeToken)
+	var suggestions []string
+
+	colonIndex := strings.Index(activeToken, ":")
+	if colonIndex > 0 {
+		fieldName := strings.ToLower(strings.TrimPrefix(activeToken[:colonIndex], "-"))
+		prefix := activeToken[:colonIndex+1]
+		valuePart := strings.ToLower(activeToken[colonIndex+1:])
+		if isNameLikeField(fieldName) || fieldName == "" {
+			for _, version := range explorer.versionIndex {
+				if valuePart == "" || strings.Contains(version, valuePart) {
+					suggestions = append(suggestions, prefix+version)
+					if len(suggestions) >= maxSearchSuggestions {
+						break
+					}
+				}
+			}
+		}
+		if fieldName != "" && len(suggestions) < maxSearchSuggestions {
+			distinctValues := loader.DistinctScanFieldValues(fieldName, explorer.allResults, maxSearchSuggestions*3)
+			for _, value := range distinctValues {
+				if valuePart == "" || strings.Contains(strings.ToLower(value), valuePart) {
+					suggestions = append(suggestions, prefix+quoteIfNeeded(value))
+					if len(suggestions) >= maxSearchSuggestions {
+						break
+					}
+				}
+			}
+		}
+		if len(suggestions) == 0 {
+			return nil
+		}
+		return dedupeSuggestions(suggestions, maxSearchSuggestions)
+	}
+
+	for _, field := range loader.ScanQueryFieldNames() {
+		if activeLower == "" || strings.HasPrefix(field, activeLower) {
+			suggestions = append(suggestions, field+":")
+			if len(suggestions) >= maxSearchSuggestions {
+				break
+			}
+		}
+	}
+	if len(suggestions) < maxSearchSuggestions {
+		for _, version := range explorer.versionIndex {
+			if activeLower == "" || strings.Contains(version, activeLower) {
+				suggestions = append(suggestions, version)
+				if len(suggestions) >= maxSearchSuggestions {
+					break
+				}
+			}
+		}
+	}
+	return dedupeSuggestions(suggestions, maxSearchSuggestions)
+}
+
+func (explorer *ScanResultsExplorer) applySuggestion(suggestion string) {
+	currentText := explorer.searchEntry.Text
+	lastSpace := strings.LastIndexAny(currentText, " \t")
+	var nextText string
+	if lastSpace < 0 {
+		nextText = suggestion
+	} else {
+		nextText = currentText[:lastSpace+1] + suggestion
+	}
+	// Trailing colon means the user is still typing a value; leave the cursor
+	// next to it. Completed values get a trailing space for the next token.
+	if !strings.HasSuffix(suggestion, ":") {
+		nextText += " "
+	}
+	explorer.searchEntry.SetText(nextText)
+	explorer.searchEntry.CursorColumn = len(nextText)
+	explorer.searchEntry.Refresh()
+}
+
+func lastToken(raw string) string {
+	trimmed := strings.TrimLeft(raw, " \t")
+	lastSpace := strings.LastIndexAny(trimmed, " \t")
+	if lastSpace < 0 {
+		return trimmed
+	}
+	return trimmed[lastSpace+1:]
+}
+
+func isNameLikeField(name string) bool {
+	switch name {
+	case "name", "input", "assetname", "path", "file", "filepath", "ipath", "instancepath", "iname", "instance", "instancename":
+		return true
+	}
+	return false
+}
+
+func quoteIfNeeded(value string) string {
+	if strings.ContainsAny(value, " \t\"") {
+		escaped := strings.ReplaceAll(value, `"`, `\"`)
+		return `"` + escaped + `"`
+	}
+	return value
+}
+
+func dedupeSuggestions(values []string, limit int) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+		if len(result) >= limit {
+			break
+		}
+	}
+	return result
 }

@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"image/color"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -43,24 +42,7 @@ type AssetView struct {
 	PreviewBox         fyne.CanvasObject
 	HierarchySection   fyne.CanvasObject
 
-	DimensionsLabel            *widget.Label
-	AssetIDValue               *widget.Label
-	DimensionsValue            *widget.Label
-	SelfSizeValue              *widget.Label
-	TotalSizeValue             *widget.Label
-	FormatValue                *widget.Label
-	ContentTypeValue           *widget.Label
-	AssetTypeValue             *widget.Label
-	ReferencedAssetsCountValue *widget.Label
-	ReferenceInstanceTypeValue *widget.Label
-	ReferencePropertyNameValue *widget.Label
-	ReferenceInstancePathValue *widget.Label
-	InGameSizeValue            *widget.Label
-	SourceValue                *widget.Label
-	UseCountValue              *widget.Label
-	FailureReasonValue         *widget.Label
-	FileValue                  *widget.Label
-	FileSHA256Value            *widget.Label
+	metadataRows map[string]*metadataRow
 
 	AssetDeliveryJSONValue  *widget.Entry
 	ThumbnailJSONValue      *widget.Entry
@@ -163,7 +145,6 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 	referencedAssetsValue := newReadOnlyMultilineEntry(6)
 	rustyAssetToolJSONValue := newReadOnlyMultilineEntry(6)
 	saveJSONButton := widget.NewButton("Save Full JSON to File", nil)
-	dimensionsLabel := widget.NewLabel("Dimensions:")
 
 	jsonAccordion := widget.NewAccordion(
 		widget.NewAccordionItem(
@@ -205,24 +186,6 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 		PreviewContainer:           previewContainer,
 		PreviewBox:                 nil,
 		HierarchySection:           nil,
-		DimensionsLabel:            dimensionsLabel,
-		AssetIDValue:               newMetadataValueLabel(),
-		DimensionsValue:            newMetadataValueLabel(),
-		SelfSizeValue:              newMetadataValueLabel(),
-		TotalSizeValue:             newMetadataValueLabel(),
-		FormatValue:                newMetadataValueLabel(),
-		ContentTypeValue:           newMetadataValueLabel(),
-		AssetTypeValue:             newMetadataValueLabel(),
-		ReferencedAssetsCountValue: newMetadataValueLabel(),
-		ReferenceInstanceTypeValue: newMetadataValueLabel(),
-		ReferencePropertyNameValue: newMetadataValueLabel(),
-		ReferenceInstancePathValue: newMetadataValueLabel(),
-		InGameSizeValue:            newMetadataValueLabel(),
-		SourceValue:                newMetadataValueLabel(),
-		UseCountValue:              newMetadataValueLabel(),
-		FailureReasonValue:         newMetadataValueLabel(),
-		FileValue:                  nil,
-		FileSHA256Value:            nil,
 		AssetDeliveryJSONValue:     assetDeliveryJSONValue,
 		ThumbnailJSONValue:         thumbnailJSONValue,
 		EconomyJSONValue:           economyJSONValue,
@@ -374,32 +337,9 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 		hierarchyContent,
 	)
 
-	formItems := []fyne.CanvasObject{
-		newMetadataRow("Dimensions:", view.DimensionsValue),
-		newMetadataRow("Self Size:", view.SelfSizeValue),
-		newMetadataRow("Total Size:", view.TotalSizeValue),
-		newMetadataRow("Format:", view.FormatValue),
-		newMetadataRow("Content-Type:", view.ContentTypeValue),
-		newMetadataRow("Asset Type:", view.AssetTypeValue),
-		newMetadataRow("Referenced Assets:", view.ReferencedAssetsCountValue),
-		newMetadataRow("Reference Instance Type:", view.ReferenceInstanceTypeValue),
-		newMetadataRow("Reference Property Name:", view.ReferencePropertyNameValue),
-		newMetadataRow("Reference Instance Path:", view.ReferenceInstancePathValue),
-		newMetadataRow("In-Game Size:", view.InGameSizeValue),
-		newMetadataRow("Image Source:", view.SourceValue),
-		newMetadataRow("Use Count:", view.UseCountValue),
-		newMetadataRow("Failure Reason:", view.FailureReasonValue),
-	}
-	if includeFileRow {
-		view.FileValue = newMetadataValueLabel()
-		view.FileSHA256Value = newMetadataValueLabel()
-		formItems = append(
-			formItems,
-			newMetadataRow("File:", view.FileValue),
-			newMetadataRow("Downloaded SHA256:", view.FileSHA256Value),
-		)
-	}
-	view.MetadataForm = container.NewVBox(formItems...)
+	form, rows := buildMetadataForm(loader.AssetMetadataSchema(), includeFileRow)
+	view.MetadataForm = form
+	view.metadataRows = rows
 
 	view.Clear()
 	return view
@@ -419,22 +359,7 @@ func (view *AssetView) Clear() {
 	view.currentMeshPreviewData = MeshPreviewData{}
 	view.PreviewPlaceholder.Show()
 	view.PreviewContainer.Refresh()
-	view.AssetIDValue.SetText("-")
-	view.DimensionsLabel.SetText("Dimensions:")
-	view.DimensionsValue.SetText("-")
-	view.SelfSizeValue.SetText("-")
-	view.TotalSizeValue.SetText("-")
-	view.FormatValue.SetText("-")
-	view.ContentTypeValue.SetText("-")
-	view.AssetTypeValue.SetText("-")
-	view.ReferencedAssetsCountValue.SetText("-")
-	view.ReferenceInstanceTypeValue.SetText("-")
-	view.ReferencePropertyNameValue.SetText("-")
-	view.ReferenceInstancePathValue.SetText("-")
-	view.InGameSizeValue.SetText("-")
-	view.SourceValue.SetText("-")
-	view.UseCountValue.SetText("-")
-	view.FailureReasonValue.SetText("-")
+	updateMetadataRows(view.metadataRows, loader.AssetViewData{})
 	view.AssetDeliveryJSONValue.SetText("-")
 	view.ThumbnailJSONValue.SetText("-")
 	view.EconomyJSONValue.SetText("-")
@@ -459,19 +384,7 @@ func (view *AssetView) Clear() {
 	view.hierarchySelectAsset = nil
 	view.hierarchyList.Objects = nil
 	view.hierarchyList.Refresh()
-	if view.FileValue != nil {
-		view.FileValue.SetText("-")
-	}
-	if view.FileSHA256Value != nil {
-		view.FileSHA256Value.SetText("-")
-	}
-	view.SourceValue.Importance = widget.MediumImportance
-	view.SourceValue.Refresh()
-	view.suppressPreviewVariant = true
-	view.previewVariantSelect.ClearSelected()
-	view.previewVariantSelect.SetOptions([]string{})
-	view.suppressPreviewVariant = false
-	view.previewVariantSelect.Disable()
+	view.clearPreviewVariantSelect()
 	view.expandImageButton.Disable()
 	view.downloadImageButton.Disable()
 	view.uploadImageButton.Disable()
@@ -499,157 +412,62 @@ func newMetadataValueLabel() *widget.Label {
 	return label
 }
 
-func newMetadataRow(labelText string, value fyne.CanvasObject) fyne.CanvasObject {
-	labelSlot := container.NewGridWrap(
-		fyne.NewSize(metadataLabelColumnWidth, metadataLabelRowHeight),
-		widget.NewLabel(labelText),
-	)
-	return container.NewBorder(nil, nil, labelSlot, nil, value)
+func (view *AssetView) clearPreviewVariantSelect() {
+	view.suppressPreviewVariant = true
+	view.previewVariantSelect.ClearSelected()
+	view.previewVariantSelect.SetOptions([]string{})
+	view.suppressPreviewVariant = false
+	view.previewVariantSelect.Disable()
 }
 
-func setLabelTextOrDash(label *widget.Label, value string) {
-	if label == nil {
-		return
-	}
-	trimmedValue := strings.TrimSpace(value)
-	if trimmedValue == "" {
-		label.SetText("-")
-		return
-	}
-	label.SetText(trimmedValue)
+func (view *AssetView) setSinglePreviewVariant(label string) {
+	view.suppressPreviewVariant = true
+	view.previewVariantSelect.SetOptions([]string{label})
+	view.previewVariantSelect.SetSelected(label)
+	view.suppressPreviewVariant = false
+	view.previewVariantSelect.Disable()
 }
 
 func (view *AssetView) SetData(data loader.AssetViewData) {
 	view.previewVariantBuildToken.Add(1)
 	view.meshPreviewLoadToken.Add(1)
+	loader.PopulateAssetViewDisplayFields(&data)
+
 	assetID := data.AssetID
-	filePath := data.FilePath
-	fileSHA256 := data.FileSHA256
-	useCount := data.UseCount
-	sceneSurfaceArea := data.SceneSurfaceArea
-	largestSurfacePath := data.LargestSurfacePath
-	largeTextureScore := data.LargeTextureScore
 	previewImageInfo := data.PreviewImageInfo
-	statsInfo := data.StatsInfo
-	totalBytesSize := data.TotalBytesSize
+	statsInfo := loader.ResolveStatsInfo(data.StatsInfo, previewImageInfo)
 	sourceDescription := data.SourceDescription
 	stateDescription := data.StateDescription
 	warningMessage := data.WarningMessage
-	assetDeliveryRawJSON := data.AssetDeliveryRawJSON
-	thumbnailRawJSON := data.ThumbnailRawJSON
-	economyRawJSON := data.EconomyRawJSON
-	rustyAssetToolRawJSON := data.RustyAssetToolRawJSON
 	referencedAssetIDs := data.ReferencedAssetIDs
-	referenceInstanceType := data.ReferenceInstanceType
-	referencePropertyName := data.ReferencePropertyName
-	referenceInstancePath := data.ReferenceInstancePath
 	assetTypeID := data.AssetTypeID
-	assetTypeName := data.AssetTypeName
 	downloadBytes := data.DownloadBytes
 	downloadFileName := data.DownloadFileName
 	downloadIsOriginal := data.DownloadIsOriginal
-	if statsInfo == nil {
-		statsInfo = previewImageInfo
-	}
-	if statsInfo == nil {
-		statsInfo = &loader.ImageInfo{}
-	}
 
 	view.currentAssetID = assetID
-	view.AssetIDValue.SetText(strconv.FormatInt(assetID, 10))
-	if mesh.IsMeshAssetType(assetTypeID) {
-		view.DimensionsLabel.SetText("Mesh Info:")
-		if len(downloadBytes) > 0 {
-			meshInfo, meshErr := mesh.ParseHeader(downloadBytes)
-			if meshErr == nil {
-				view.DimensionsValue.SetText(mesh.FormatInfo(meshInfo))
-			} else {
-				view.DimensionsValue.SetText("-")
-			}
-		} else {
-			view.DimensionsValue.SetText("-")
-		}
-	} else if IsAudioContent(assetTypeID, statsInfo.ContentType) {
-		view.DimensionsLabel.SetText("Dimensions:")
-		view.DimensionsValue.SetText("-")
-	} else {
-		view.DimensionsLabel.SetText("Dimensions:")
-		if statsInfo.Width > 0 && statsInfo.Height > 0 {
-			view.DimensionsValue.SetText(fmt.Sprintf("%dx%d", statsInfo.Width, statsInfo.Height))
-		} else {
-			view.DimensionsValue.SetText("-")
-		}
-	}
-	view.SelfSizeValue.SetText(format.FormatSizeAuto(statsInfo.BytesSize))
-	if totalBytesSize <= 0 {
-		totalBytesSize = statsInfo.BytesSize
-	}
-	view.TotalSizeValue.SetText(format.FormatSizeAuto(totalBytesSize))
-	setLabelTextOrDash(view.FormatValue, statsInfo.Format)
-	setLabelTextOrDash(view.ContentTypeValue, statsInfo.ContentType)
-	if assetTypeID > 0 {
-		view.AssetTypeValue.SetText(fmt.Sprintf("%s (%d)", assetTypeName, assetTypeID))
-	} else {
-		view.AssetTypeValue.SetText(assetTypeName)
-	}
-	setLabelTextOrDash(view.FailureReasonValue, warningMessage)
-	view.pendingAssetDeliveryJSON = assetDeliveryRawJSON
-	view.pendingThumbnailJSON = thumbnailRawJSON
-	view.pendingEconomyJSON = economyRawJSON
-	view.pendingRustyAssetToolJSON = rustyAssetToolRawJSON
+	updateMetadataRows(view.metadataRows, data)
+	applySourceRowImportance(view.metadataRows, sourceDescription)
+
+	view.pendingAssetDeliveryJSON = data.AssetDeliveryRawJSON
+	view.pendingThumbnailJSON = data.ThumbnailRawJSON
+	view.pendingEconomyJSON = data.EconomyRawJSON
+	view.pendingRustyAssetToolJSON = data.RustyAssetToolRawJSON
 	view.pendingReferencedAssetIDs = append([]int64(nil), referencedAssetIDs...)
 	view.assetDownloadBytes = append([]byte(nil), downloadBytes...)
 	view.assetDownloadFileName = strings.TrimSpace(downloadFileName)
 	view.downloadOriginalAsset = downloadIsOriginal && len(downloadBytes) > 0
-	if len(referencedAssetIDs) > 0 {
-		view.ReferencedAssetsCountValue.SetText(strconv.Itoa(len(referencedAssetIDs)))
-	} else {
-		view.ReferencedAssetsCountValue.SetText("0")
-	}
-	setLabelTextOrDash(view.ReferenceInstanceTypeValue, referenceInstanceType)
-	setLabelTextOrDash(view.ReferencePropertyNameValue, referencePropertyName)
-	setLabelTextOrDash(view.ReferenceInstancePathValue, referenceInstancePath)
-	if largeTextureScore > 0 && sceneSurfaceArea > 0 {
-		inGameSizeText := fmt.Sprintf(
-			"%s (%s surface)",
-			loader.FormatLargeTextureScore(largeTextureScore),
-			loader.FormatSceneSurfaceArea(sceneSurfaceArea),
-		)
-		if strings.TrimSpace(largestSurfacePath) != "" {
-			inGameSizeText = fmt.Sprintf("%s at %s", inGameSizeText, strings.TrimSpace(largestSurfacePath))
-		}
-		view.InGameSizeValue.SetText(inGameSizeText)
-	} else {
-		view.InGameSizeValue.SetText("-")
-	}
+
 	if view.isJSONAccordionOpen() {
 		view.renderJSONDetails()
 	} else {
 		view.showLazyJSONPlaceholder()
 	}
-	if view.FileValue != nil {
-		setLabelTextOrDash(view.FileValue, filePath)
-	}
-	if view.FileSHA256Value != nil {
-		setLabelTextOrDash(view.FileSHA256Value, fileSHA256)
-	}
 
-	view.SourceValue.SetText(sourceDescription)
-	view.SourceValue.Importance = widget.MediumImportance
-	if useCount > 0 {
-		view.UseCountValue.SetText(strconv.Itoa(useCount))
-	} else {
-		view.UseCountValue.SetText("-")
-	}
 	view.NoteLabel.Hide()
 	view.NoteLabel.SetText("")
-
 	isThumbnailFallbackSource := roblox.IsThumbnailFallback(sourceDescription)
 	thumbnailStateNotCompleted := isThumbnailFallbackSource && !roblox.IsCompletedState(stateDescription)
-	if isThumbnailFallbackSource {
-		view.SourceValue.SetText(fmt.Sprintf("⚠ %s", sourceDescription))
-		view.SourceValue.Importance = widget.DangerImportance
-	}
 	if warningMessage != "" {
 		view.NoteLabel.SetText(loader.BuildFallbackWarningText(warningMessage))
 		view.NoteLabel.Show()
@@ -657,7 +475,6 @@ func (view *AssetView) SetData(data loader.AssetViewData) {
 		view.NoteLabel.SetText(loader.BuildFallbackWarningText(fmt.Sprintf("thumbnail state was %s", stateDescription)))
 		view.NoteLabel.Show()
 	}
-	view.SourceValue.Refresh()
 	view.configureAudioPlayback(statsInfo, assetTypeID)
 
 	var previewResource fyne.Resource
@@ -684,11 +501,7 @@ func (view *AssetView) SetData(data loader.AssetViewData) {
 		view.downloadImageButton.Enable()
 		view.uploadImageButton.Enable()
 		view.expandImageButton.Enable()
-		view.suppressPreviewVariant = true
-		view.previewVariantSelect.SetOptions([]string{originalPreviewOption.LabelText})
-		view.previewVariantSelect.SetSelected(originalPreviewOption.LabelText)
-		view.suppressPreviewVariant = false
-		view.previewVariantSelect.Disable()
+		view.setSinglePreviewVariant(originalPreviewOption.LabelText)
 		if !view.downloadOriginalAsset {
 			view.interpolationSelect.Enable()
 			view.rebuildPreviewVariants()
@@ -704,11 +517,7 @@ func (view *AssetView) SetData(data loader.AssetViewData) {
 			view.downloadImageButton.Enable()
 			view.uploadImageButton.Enable()
 		} else {
-			view.suppressPreviewVariant = true
-			view.previewVariantSelect.ClearSelected()
-			view.previewVariantSelect.SetOptions([]string{})
-			view.suppressPreviewVariant = false
-			view.previewVariantSelect.Disable()
+			view.clearPreviewVariantSelect()
 			view.downloadImageButton.Disable()
 			view.uploadImageButton.Disable()
 		}
@@ -730,11 +539,7 @@ func (view *AssetView) showMeshPreview(downloadBytes []byte) {
 		view.downloadImageButton.Enable()
 		view.uploadImageButton.Enable()
 	} else {
-		view.suppressPreviewVariant = true
-		view.previewVariantSelect.ClearSelected()
-		view.previewVariantSelect.SetOptions([]string{})
-		view.suppressPreviewVariant = false
-		view.previewVariantSelect.Disable()
+		view.clearPreviewVariantSelect()
 		view.downloadImageButton.Disable()
 		view.uploadImageButton.Disable()
 	}
@@ -787,11 +592,7 @@ func (view *AssetView) showImagePreviewFallback(previewResource fyne.Resource) {
 	view.downloadImageButton.Enable()
 	view.uploadImageButton.Enable()
 	view.expandImageButton.Enable()
-	view.suppressPreviewVariant = true
-	view.previewVariantSelect.SetOptions([]string{originalPreviewOption.LabelText})
-	view.previewVariantSelect.SetSelected(originalPreviewOption.LabelText)
-	view.suppressPreviewVariant = false
-	view.previewVariantSelect.Disable()
+	view.setSinglePreviewVariant(originalPreviewOption.LabelText)
 	if !view.downloadOriginalAsset {
 		view.interpolationSelect.Enable()
 		view.rebuildPreviewVariants()

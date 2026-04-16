@@ -2,7 +2,6 @@ package loader
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -39,36 +38,24 @@ func ContainsString(values []string, candidate string) bool {
 	return false
 }
 
+// ScanResultMatchesQuery is a convenience wrapper that compiles the query on
+// every call. For hot paths (per-row filtering) prefer compiling once and
+// reusing via ScanResultMatchesCompiledQuery.
 func ScanResultMatchesQuery(result ScanResult, query string) bool {
-	trimmedQuery := strings.ToLower(strings.TrimSpace(query))
-	if trimmedQuery == "" {
+	if strings.TrimSpace(query) == "" {
 		return true
 	}
-	searchFields := []string{
-		result.Side,
-		strconv.FormatInt(result.AssetID, 10),
-		result.AssetInput,
-		strconv.Itoa(result.UseCount),
-		result.FilePath,
-		result.FileSHA256,
-		result.Source,
-		result.State,
-		result.AssetTypeName,
-		result.InstanceType,
-		result.PropertyName,
-		result.InstanceName,
-		result.InstancePath,
-		fmt.Sprintf("%.1f %.1f %.1f", result.WorldX, result.WorldY, result.WorldZ),
-		strconv.Itoa(result.AssetTypeID),
-		result.Format,
-		result.ContentType,
+	compiled := CompileScanQuery(query)
+	return compiled.Matches(result, ScanQueryContext{})
+}
+
+// ScanResultMatchesCompiledQuery applies a pre-compiled query to a single row.
+// Use this in the filter loop to avoid re-parsing per row.
+func ScanResultMatchesCompiledQuery(result ScanResult, compiled ScanQuery, ctx ScanQueryContext) bool {
+	if compiled.IsEmpty() {
+		return true
 	}
-	for _, fieldValue := range searchFields {
-		if strings.Contains(strings.ToLower(fieldValue), trimmedQuery) {
-			return true
-		}
-	}
-	return false
+	return compiled.Matches(result, ctx)
 }
 
 func ScanResultTypeLabel(result ScanResult) string {

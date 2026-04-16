@@ -480,6 +480,18 @@ func ExtractMeshStatsFromFile(filePath string) (mesh.HeaderInfo, error) {
 }
 
 func ExtractMeshPreviewRawFromBytes(fileBytes []byte, maxTriangles int) (MeshPreviewRawResult, error) {
+	return extractMeshPreviewRawFromBytes(fileBytes, maxTriangles, false)
+}
+
+// ExtractMeshPreviewRawFromBytesFull extracts the mesh preview without the
+// sub-sampling cap that `ExtractMeshPreviewRawFromBytes` applies. Callers that
+// want to slice the index buffer by LOD range (via the `Lods` field) must use
+// this variant so that triangle boundaries are preserved.
+func ExtractMeshPreviewRawFromBytesFull(fileBytes []byte) (MeshPreviewRawResult, error) {
+	return extractMeshPreviewRawFromBytes(fileBytes, 0, true)
+}
+
+func extractMeshPreviewRawFromBytes(fileBytes []byte, maxTriangles int, unlimited bool) (MeshPreviewRawResult, error) {
 	if len(fileBytes) == 0 {
 		return MeshPreviewRawResult{}, fmt.Errorf("mesh data is empty")
 	}
@@ -502,34 +514,49 @@ func ExtractMeshPreviewRawFromBytes(fileBytes []byte, maxTriangles int) (MeshPre
 		return MeshPreviewRawResult{}, closeErr
 	}
 
-	return ExtractMeshPreviewRawFromFile(tempFilePath, maxTriangles)
+	return extractMeshPreviewRawFromFile(tempFilePath, maxTriangles, unlimited)
 }
 
 func ExtractMeshPreviewRawFromFile(filePath string, maxTriangles int) (MeshPreviewRawResult, error) {
+	return extractMeshPreviewRawFromFile(filePath, maxTriangles, false)
+}
+
+// ExtractMeshPreviewRawFromFileFull mirrors ExtractMeshPreviewRawFromBytesFull
+// for callers that already have the mesh on disk.
+func ExtractMeshPreviewRawFromFileFull(filePath string) (MeshPreviewRawResult, error) {
+	return extractMeshPreviewRawFromFile(filePath, 0, true)
+}
+
+func extractMeshPreviewRawFromFile(filePath string, maxTriangles int, unlimited bool) (MeshPreviewRawResult, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return MeshPreviewRawResult{}, fmt.Errorf("mesh file path is empty")
 	}
-	if maxTriangles <= 0 {
+	if !unlimited && maxTriangles <= 0 {
 		maxTriangles = 20000
+	}
+
+	extraArgs := []string{"mesh-preview", filePath}
+	if !unlimited {
+		extraArgs = append(extraArgs, strconv.Itoa(maxTriangles))
 	}
 
 	commandName := ""
 	commandArgs := []string{}
 	if bundledBinaryPath, bundledErr := prepareBundledBinary(); bundledErr == nil {
 		commandName = bundledBinaryPath
-		commandArgs = []string{"mesh-preview", filePath, strconv.Itoa(maxTriangles)}
+		commandArgs = extraArgs
 	} else if !errors.Is(bundledErr, errBundledBinaryUnavailable) {
 		return MeshPreviewRawResult{}, bundledErr
 	} else if binaryPath, found := findBinaryPath(); found {
 		commandName = binaryPath
-		commandArgs = []string{"mesh-preview", filePath, strconv.Itoa(maxTriangles)}
+		commandArgs = extraArgs
 	} else {
 		toolDirectoryPath, cargoManifestPath, found := findCargoManifestPath()
 		if !found {
 			return MeshPreviewRawResult{}, fmt.Errorf("Rusty Asset Tool unavailable: bundled binary not found")
 		}
 		commandName = "cargo"
-		commandArgs = []string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--", "mesh-preview", filePath, strconv.Itoa(maxTriangles)}
+		commandArgs = append([]string{"run", "--release", "--quiet", "--manifest-path", cargoManifestPath, "--"}, extraArgs...)
 		debug.Logf("Using cargo run for Rusty Asset Tool mesh preview extraction from %s", toolDirectoryPath)
 	}
 

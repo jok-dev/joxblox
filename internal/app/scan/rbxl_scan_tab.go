@@ -58,7 +58,7 @@ func newRBXLScanTab(
 			SelectSource:                     pickRBXLBaselineSource,
 			SelectSecondarySource:            pickRBXLTargetSource,
 			ExtractHits:                      scanRBXLFileDiffForAssetIDs,
-			PathFilteredExtractHits:          scanRBXLFileForAssetIDsFiltered,
+			PathFilteredExtractHits:          scanRBXLFileDiffForAssetIDsFiltered,
 			BuildWarning:                     buildRBXLScanDiffWarning,
 		},
 	})
@@ -254,6 +254,71 @@ func scanRBXLFileDiffForAssetIDs(sourcePath string, limit int, stopChannel <-cha
 
 	debug.Logf("RBXL file diff completed with %d new unique asset IDs", len(results))
 	return results, nil
+}
+
+func scanRBXLFileDiffForAssetIDsFiltered(sourcePath string, pathPrefixes []string, limit int, stopChannel <-chan struct{}) ([]loader.ScanHit, error) {
+	sourceParts := strings.SplitN(sourcePath, "\n", 2)
+	if len(sourceParts) != 2 {
+		return nil, fmt.Errorf("invalid file diff source format")
+	}
+	baselineFilePath := strings.TrimSpace(sourceParts[0])
+	targetFilePath := strings.TrimSpace(sourceParts[1])
+	if baselineFilePath == "" || targetFilePath == "" {
+		return nil, fmt.Errorf("both baseline and target files are required")
+	}
+	if _, readErr := os.Stat(baselineFilePath); readErr != nil {
+		return nil, readErr
+	}
+	if _, readErr := os.Stat(targetFilePath); readErr != nil {
+		return nil, readErr
+	}
+	debug.Logf("RBXL filtered file diff started: baseline=%s target=%s (prefixes=%v, limit=%d)", baselineFilePath, targetFilePath, pathPrefixes, limit)
+
+	baselineRefs, baselineErr := extractor.ExtractFilteredRefs(baselineFilePath, pathPrefixes, stopChannel)
+	if errors.Is(baselineErr, extractor.ErrCancelled) {
+		baselineErr = loader.ErrScanStopped
+	}
+	if errors.Is(baselineErr, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
+	}
+	if baselineErr != nil {
+		return nil, baselineErr
+	}
+	baselineReferenceKeys := map[string]bool{}
+	for _, reference := range baselineRefs {
+		if reference.ID <= 0 {
+			continue
+		}
+		baselineReferenceKeys[extractor.AssetReferenceKey(reference.ID, reference.RawContent)] = true
+	}
+
+	targetRefs, targetErr := extractor.ExtractFilteredRefs(targetFilePath, pathPrefixes, stopChannel)
+	if errors.Is(targetErr, extractor.ErrCancelled) {
+		targetErr = loader.ErrScanStopped
+	}
+	if errors.Is(targetErr, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
+	}
+	if targetErr != nil {
+		return nil, targetErr
+	}
+	sceneSurfaceAreasByPath, surfaceErr := loadRBXLSceneSurfaceAreas(targetFilePath, pathPrefixes, stopChannel)
+	if errors.Is(surfaceErr, loader.ErrScanStopped) {
+		return nil, loader.ErrScanStopped
+	}
+	filteredReferences := make([]extractor.Result, 0, len(targetRefs))
+	for _, reference := range targetRefs {
+		if reference.ID <= 0 {
+			continue
+		}
+		if baselineReferenceKeys[extractor.AssetReferenceKey(reference.ID, reference.RawContent)] {
+			continue
+		}
+		filteredReferences = append(filteredReferences, reference)
+	}
+	hits := buildScanHitsFromRustReferences(filteredReferences, targetFilePath, sceneSurfaceAreasByPath, limit)
+	debug.Logf("RBXL filtered file diff completed with %d new unique asset IDs", len(hits))
+	return hits, nil
 }
 
 func buildRBXLScanWarning(sourcePath string, pathPrefixes []string, stopChannel <-chan struct{}) (ui.MaterialVariantWarningData, error) {

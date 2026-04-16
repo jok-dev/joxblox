@@ -69,6 +69,7 @@ type ScanResult struct {
 	TotalBytesSize       int
 	MeshNumFaces         uint32
 	MeshNumVerts         uint32
+	MeshVersion          string
 	Resource             *fyne.StaticResource
 	DownloadBytes        []byte
 	DownloadFileName     string
@@ -119,4 +120,21 @@ type AssetViewData struct {
 	DownloadBytes         []byte
 	DownloadFileName      string
 	DownloadIsOriginal    bool
+
+	// Populated by PopulateAssetViewDisplayFields. Empty string hides the row.
+	DimensionsLabel     string
+	DimensionsDisplay   string
+	SelfSizeDisplay     string
+	TotalSizeDisplay    string
+	FormatDisplay       string
+	ContentTypeDisplay  string
+	AssetTypeDisplay    string
+	UseCountDisplay     string
+	ReferencedCount     int
+	ReferencedDisplay   string
+	InGameSizeDisplay   string
+	FailureReasonText   string
+	FileDisplay         string
+	FileSHA256Display   string
+	SourceDisplay       string
 }

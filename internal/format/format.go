@@ -4,9 +4,11 @@ import (
 	"cmp"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 const Megabyte = 1024 * 1024
+const Gigabyte = 1024 * Megabyte
 
 func Clamp[T cmp.Ordered](value, minimum, maximum T) T {
 	return max(minimum, min(value, maximum))
@@ -14,6 +16,11 @@ func Clamp[T cmp.Ordered](value, minimum, maximum T) T {
 
 func FormatSizeAuto(bytesSize int) string {
 	return FormatSizeAuto64(int64(bytesSize))
+}
+
+// FormatDimensions renders a width × height pair as "WxH".
+func FormatDimensions(width, height int) string {
+	return fmt.Sprintf("%dx%d", width, height)
 }
 
 func FormatSizeAuto64(bytesSize int64) string {
@@ -70,6 +77,45 @@ func AbsInt64(value int64) int64 {
 		return -value
 	}
 	return value
+}
+
+// ParseSizeBytes parses a human size string ("1mb", "500 KB", "2.5gb", "1024")
+// into bytes. Units are case-insensitive; missing unit = raw bytes. Returns
+// false if the input is not parseable.
+func ParseSizeBytes(raw string) (int64, bool) {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return 0, false
+	}
+	multiplier := int64(1)
+	unitSuffixes := []struct {
+		suffix string
+		factor int64
+	}{
+		{"gb", Gigabyte},
+		{"g", Gigabyte},
+		{"mb", Megabyte},
+		{"m", Megabyte},
+		{"kb", 1024},
+		{"k", 1024},
+		{"b", 1},
+	}
+	numericPart := trimmed
+	for _, entry := range unitSuffixes {
+		if strings.HasSuffix(trimmed, entry.suffix) {
+			numericPart = strings.TrimSpace(strings.TrimSuffix(trimmed, entry.suffix))
+			multiplier = entry.factor
+			break
+		}
+	}
+	if numericPart == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(numericPart, 64)
+	if err != nil {
+		return 0, false
+	}
+	return int64(value * float64(multiplier)), true
 }
 
 func FormatSignedIntCommas(value int64) string {

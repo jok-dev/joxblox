@@ -14,6 +14,7 @@ import (
 	"joxblox/internal/app/ui/menu"
 	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/app/ui/tabs/imageuploader"
+	"joxblox/internal/app/ui/tabs/lodviewer"
 	"joxblox/internal/app/ui/tabs/optimizeassets"
 	"joxblox/internal/app/ui/tabs/reportgeneration"
 	"joxblox/internal/app/ui/tabs/singleasset"
@@ -101,9 +102,10 @@ func Run() {
 	rbxlHeatmapContent, loadHeatmapRBXLFile := heatmaptab.NewRBXLHeatmapTab(window)
 	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, rbxlHeatmapContent)
 	modelHeatmapTab := container.NewTabItem(tabTitleModelHeatmap, heatmaptab.NewModelHeatmapTab(window))
+	lodViewerTab := container.NewTabItem(tabTitleLodViewer, lodviewer.NewLodViewerTab(window))
 	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, optimizeassets.NewOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, imageuploader.NewImageUploaderTab(window))
-	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, optimizeTab, imageUploaderTab)
+	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, lodViewerTab, optimizeTab, imageUploaderTab)
 	tabs.Select(reportGenerationTab)
 	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64) {
 		tabs.Select(scanTab)
