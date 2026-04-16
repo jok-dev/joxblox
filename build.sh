@@ -4,9 +4,26 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:-all}"
 
+embed_windows_resources() {
+  if [ "$(go env GOOS)" != "windows" ]; then
+    return
+  fi
+  if ! command -v go-winres &>/dev/null; then
+    echo "Installing go-winres..."
+    go install github.com/tc-hib/go-winres@latest
+  fi
+  echo "Embedding Windows icon and manifest..."
+  (cd "$ROOT_DIR/cmd/joxblox" && go-winres make --in winres/winres.json)
+}
+
 build_go() {
   echo "Building Go app..."
-  (cd "$ROOT_DIR" && go build ./cmd/joxblox)
+  embed_windows_resources
+  LDFLAGS=""
+  if [ "$(go env GOOS)" = "windows" ]; then
+    LDFLAGS="-H windowsgui"
+  fi
+  (cd "$ROOT_DIR" && go build -ldflags "${LDFLAGS}" ./cmd/joxblox)
 }
 
 build_rust() {

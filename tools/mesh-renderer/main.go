@@ -54,6 +54,7 @@ type loadedMeshModel struct {
 	baseColor   [3]float32
 	bounds      rl.BoundingBox
 	creaseEdges []uint16 // flat list of vertex index pairs (a0, b0, a1, b1, ...)
+	sceneMode   bool     // when true, baseColor is used as the render tint instead of vertex colors
 }
 
 const mainVertSrc = `
@@ -216,7 +217,7 @@ func handleLoad(parts []string, reader io.Reader, hasColors bool) {
 		respond(fmt.Sprintf("ERR read binary: %s", err.Error()))
 		return
 	}
-	model, createErr := createModelFromRawData(positions, indices32, colors)
+	model, createErr := createModelFromRawData(positions, indices32, colors, false)
 	if createErr != nil {
 		respond(fmt.Sprintf("ERR %s", createErr.Error()))
 		return
@@ -270,7 +271,7 @@ func handleLoadScene(parts []string, reader *bufio.Reader) {
 			respond(fmt.Sprintf("ERR read batch binary: %s", payloadErr.Error()))
 			return
 		}
-		model, createErr := createModelFromRawData(positions, indices32, colors)
+		model, createErr := createModelFromRawData(positions, indices32, colors, true)
 		if createErr != nil {
 			unloadMeshModels(nextScene)
 			respond(fmt.Sprintf("ERR %s", createErr.Error()))
@@ -366,7 +367,7 @@ func readMeshPayload(reader io.Reader, vertexCount int, indexCount int, hasColor
 	return positions, indices32, colors, nil
 }
 
-func createModelFromRawData(positions []float32, indices32 []uint32, colors []uint8) (loadedMeshModel, error) {
+func createModelFromRawData(positions []float32, indices32 []uint32, colors []uint8, sceneMode bool) (loadedMeshModel, error) {
 	vertexCount := len(positions) / 3
 	if vertexCount <= 0 || len(indices32) < 3 {
 		return loadedMeshModel{}, fmt.Errorf("mesh payload is empty")
@@ -392,14 +393,23 @@ func createModelFromRawData(positions []float32, indices32 []uint32, colors []ui
 		positions:   storedPositions,
 		normals:     normals,
 		indices:     indices16,
-		colors:      append([]uint8(nil), colors...),
 		bounds:      computeBoundingBox(positions),
 		creaseEdges: computeCreaseEdges(storedPositions, indices16),
+		sceneMode:   sceneMode,
 		baseColor: [3]float32{
 			float32(colors[0]) / 255.0,
 			float32(colors[1]) / 255.0,
 			float32(colors[2]) / 255.0,
 		},
+	}
+	if sceneMode {
+		gpuColors := make([]uint8, len(colors))
+		for i := range gpuColors {
+			gpuColors[i] = 255
+		}
+		modelData.colors = gpuColors
+	} else {
+		modelData.colors = append([]uint8(nil), colors...)
 	}
 	mesh := rl.Mesh{
 		VertexCount:   int32(vertexCount),
@@ -559,16 +569,25 @@ func handleRender(parts []string) {
 	rl.BeginTextureMode(renderTarget)
 	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
 	rl.BeginMode3D(camera)
-	rl.DisableDepthTest()
+	transparent := opacity < 0.999
+	if transparent {
+		rl.DisableDepthTest()
+	}
 	opacityTint := rl.NewColor(255, 255, 255, uint8(clampFloat64(opacity, 0.1, 1.0)*255.0))
 	for _, batchIndex := range drawOrder {
 		meshModel := loadedScene[batchIndex]
-		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, opacityTint)
+		tint := opacityTint
+		if meshModel.sceneMode {
+			tint = modelTint(meshModel.baseColor, opacity)
+		}
+		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, tint)
 		if batchIndex == selectedBatch {
 			drawSelectedMeshHighlight(meshModel, bgR, bgG, bgB)
 		}
 	}
-	rl.EnableDepthTest()
+	if transparent {
+		rl.EnableDepthTest()
+	}
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
@@ -648,7 +667,11 @@ func handleRenderOrtho(parts []string) {
 	rl.BeginMode3D(camera)
 	whiteTint := rl.NewColor(255, 255, 255, 255)
 	for _, meshModel := range loadedScene {
-		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, whiteTint)
+		tint := whiteTint
+		if meshModel.sceneMode {
+			tint = modelTint(meshModel.baseColor, 1.0)
+		}
+		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, tint)
 	}
 	rl.EndMode3D()
 	rl.EndTextureMode()

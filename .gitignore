@@ -16,6 +16,7 @@ __pycache__/
 # Go build artifacts
 *.exe
 *.test
+*.syso
 /joxblox-mesh-renderer
 
 # Local generated scratch files

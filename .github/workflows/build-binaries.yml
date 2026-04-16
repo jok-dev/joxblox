@@ -52,6 +52,15 @@ jobs:
             libasound2-dev \
             libgtk-3-dev
 
+      - name: Embed Windows icon and manifest
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install github.com/tc-hib/go-winres@latest
+          cd cmd/joxblox
+          go-winres make --in winres/winres.json
+
       - name: Build release binary
         id: build
         shell: bash
@@ -77,7 +86,12 @@ jobs:
           cp CHANGELOG.md "${RELEASE_ASSETS_DIR}/CHANGELOG.md"
           cp LICENSE.md "${RELEASE_ASSETS_DIR}/LICENSE.md"
 
-          go build -v -tags release -trimpath -ldflags "-X joxblox/internal/app.appVersion=${VERSION_NAME}" -o "${OUTPUT_PATH}" ./cmd/joxblox
+          LDFLAGS="-X joxblox/internal/app.appVersion=${VERSION_NAME}"
+          if [ "${GOOS}" = "windows" ]; then
+            LDFLAGS="${LDFLAGS} -H windowsgui"
+          fi
+
+          go build -v -tags release -trimpath -ldflags "${LDFLAGS}" -o "${OUTPUT_PATH}" ./cmd/joxblox
           echo "output_path=${OUTPUT_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Upload release artifact
