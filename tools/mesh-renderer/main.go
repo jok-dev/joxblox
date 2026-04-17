@@ -522,7 +522,7 @@ func handleRender(parts []string) {
 		return
 	}
 	if len(parts) < 12 {
-		respond("ERR RENDER requires width height cam_x cam_y cam_z selected_batch yaw pitch zoom opacity bg_hex")
+		respond("ERR RENDER requires width height cam_x cam_y cam_z selected_batch yaw pitch zoom opacity bg_hex [wireframe]")
 		return
 	}
 
@@ -537,6 +537,11 @@ func handleRender(parts []string) {
 	zoom, _ := strconv.ParseFloat(parts[9], 64)
 	opacity, _ := strconv.ParseFloat(parts[10], 64)
 	bgHex := parts[11]
+	wireframe := false
+	if len(parts) >= 13 {
+		wireframeFlag, _ := strconv.Atoi(parts[12])
+		wireframe = wireframeFlag != 0
+	}
 
 	if width < 1 || width > 4096 {
 		width = 440
@@ -580,7 +585,11 @@ func handleRender(parts []string) {
 		if meshModel.sceneMode {
 			tint = modelTint(meshModel.baseColor, opacity)
 		}
-		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, tint)
+		if wireframe {
+			rl.DrawModelWires(meshModel.model, rl.Vector3{}, 1.0, tint)
+		} else {
+			rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, tint)
+		}
 		if batchIndex == selectedBatch {
 			drawSelectedMeshHighlight(meshModel, bgR, bgG, bgB)
 		}

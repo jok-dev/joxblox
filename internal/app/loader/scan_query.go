@@ -102,6 +102,12 @@ func buildScanQueryFieldAliases() map[string]*scanQueryFieldSpec {
 	tex := sizeField("tex", func(r ScanResult) float64 { return float64(r.TextureBytes) })
 	meshbytes := sizeField("meshbytes", func(r ScanResult) float64 { return float64(r.MeshBytes) })
 	tris := numericField("tris", func(r ScanResult) float64 { return float64(r.MeshNumFaces) })
+	totaltris := numericField("totaltris", func(r ScanResult) float64 {
+		if r.UseCount <= 0 {
+			return 0
+		}
+		return float64(r.MeshNumFaces) * float64(r.UseCount)
+	})
 	verts := numericField("verts", func(r ScanResult) float64 { return float64(r.MeshNumVerts) })
 	pixels := numericField("pixels", func(r ScanResult) float64 { return float64(r.PixelCount) })
 	width := numericField("w", func(r ScanResult) float64 { return float64(r.Width) })
@@ -134,6 +140,7 @@ func buildScanQueryFieldAliases() map[string]*scanQueryFieldSpec {
 		"tex":       tex, "texbytes": tex, "texturebytes": tex,
 		"meshbytes": meshbytes,
 		"tris":      tris, "triangles": tris, "meshfaces": tris, "faces": tris,
+		"totaltris": totaltris, "totaltriangles": totaltris, "totalfaces": totaltris,
 		"verts":  verts, "vertices": verts,
 		"pixels": pixels, "pixelcount": pixels,
 		"w": width, "width": width,

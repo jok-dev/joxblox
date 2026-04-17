@@ -94,6 +94,16 @@ func CompareScanResults(leftResult ScanResult, rightResult ScanResult, sortField
 		return CompareInt(leftResult.MeshBytes, rightResult.MeshBytes)
 	case "Mesh Triangles":
 		return CompareUint32(leftResult.MeshNumFaces, rightResult.MeshNumFaces)
+	case "Total Triangles":
+		leftTotal := int64(0)
+		if leftResult.UseCount > 0 {
+			leftTotal = int64(leftResult.MeshNumFaces) * int64(leftResult.UseCount)
+		}
+		rightTotal := int64(0)
+		if rightResult.UseCount > 0 {
+			rightTotal = int64(rightResult.MeshNumFaces) * int64(rightResult.UseCount)
+		}
+		return CompareInt64(leftTotal, rightTotal)
 	case "Instance Type":
 		return strings.Compare(leftResult.InstanceType, rightResult.InstanceType)
 	case "Property":

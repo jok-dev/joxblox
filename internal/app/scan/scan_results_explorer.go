@@ -88,6 +88,7 @@ type ScanResultsExplorer struct {
 	statsDuplicateSizeLabel          *widget.Label
 	statsSizeLabel                   *widget.Label
 	statsTrianglesLabel              *widget.Label
+	statsTotalTrianglesLabel         *widget.Label
 	searchEntry                      *widget.Entry
 	compiledSearchQuery              loader.ScanQuery
 	versionIndex                     []string
@@ -138,6 +139,7 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 	explorer.statsDuplicateSizeLabel = widget.NewLabel("Duplicate Size: 0 B")
 	explorer.statsSizeLabel = widget.NewLabel("Shown Size: 0 B")
 	explorer.statsTrianglesLabel = widget.NewLabel("Shown Triangles: 0")
+	explorer.statsTotalTrianglesLabel = widget.NewLabel("Shown Total Triangles: 0")
 	explorer.showOnlyDuplicatesCheck = widget.NewCheck("Show only duplicates", func(checked bool) {
 		explorer.showOnlyDuplicates = checked
 		explorer.applySortAndFilters()
@@ -372,6 +374,8 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 		explorer.statsSizeLabel,
 		widget.NewSeparator(),
 		explorer.statsTrianglesLabel,
+		widget.NewSeparator(),
+		explorer.statsTotalTrianglesLabel,
 	)
 	controlItems := []fyne.CanvasObject{}
 	if options.HeaderContent != nil {
@@ -569,7 +573,7 @@ func (explorer *ScanResultsExplorer) defaultSortField() string {
 
 func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
 	if explorer.variant == ScanResultsExplorerVariantHeatmap {
-		headers := []string{"Asset ID", "Type", "Total Byte Size", "Texture Bytes", "Texture Pixels", "B/stud²", "Mesh Bytes", "Mesh Triangles", "Property", "Instance Path", "World Position"}
+		headers := []string{"Asset ID", "Type", "Total Byte Size", "Texture Bytes", "Texture Pixels", "B/stud²", "Mesh Bytes", "Mesh Triangles", "Total Triangles", "Property", "Instance Path", "World Position"}
 		for _, row := range explorer.allResults {
 			if strings.TrimSpace(row.Side) != "" {
 				return append([]string{"Side"}, headers...)
@@ -578,9 +582,9 @@ func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
 		return headers
 	}
 	if explorer.similarityActive {
-		return []string{"Similarity", "Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Asset SHA256"}
+		return []string{"Similarity", "Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
 	}
-	return []string{"Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Asset SHA256"}
+	return []string{"Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
 }
 
 func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
@@ -595,21 +599,23 @@ func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
 			"B/stud²":         120,
 			"Mesh Bytes":      110,
 			"Mesh Triangles":  110,
+			"Total Triangles": 120,
 			"Property":        120,
 			"Instance Path":   520,
 			"World Position":  220,
 		}
 	}
 	return map[string]float32{
-		"Similarity":   110,
-		"Asset ID":     140,
-		"Use Count":    100,
-		"Type":         190,
-		"Self Size":    90,
-		"B/stud²":      120,
-		"Dimensions":   120,
-		"Triangles":    100,
-		"Asset SHA256": 500,
+		"Similarity":      110,
+		"Asset ID":        140,
+		"Use Count":       100,
+		"Type":            190,
+		"Self Size":       90,
+		"B/stud²":         120,
+		"Dimensions":      120,
+		"Triangles":       100,
+		"Total Triangles": 120,
+		"Asset SHA256":    500,
 	}
 }
 
@@ -760,6 +766,7 @@ func (explorer *ScanResultsExplorer) updateStatsLabels() {
 	failedRowsCount := 0
 	shownBytesTotal := 0
 	shownTrianglesTotal := uint64(0)
+	shownTotalTrianglesTotal := uint64(0)
 	for _, row := range explorer.displayResults {
 		if row.State == loader.FailedScanRowState {
 			failedRowsCount++
@@ -773,6 +780,9 @@ func (explorer *ScanResultsExplorer) updateStatsLabels() {
 		}
 		if row.MeshNumFaces > 0 {
 			shownTrianglesTotal += uint64(row.MeshNumFaces)
+			if row.UseCount > 0 {
+				shownTotalTrianglesTotal += uint64(row.MeshNumFaces) * uint64(row.UseCount)
+			}
 		}
 	}
 	explorer.statsRowsLabel.SetText(fmt.Sprintf("Rows: %d", totalRowsCount))
@@ -782,6 +792,7 @@ func (explorer *ScanResultsExplorer) updateStatsLabels() {
 	explorer.statsDuplicateSizeLabel.SetText(fmt.Sprintf("Duplicate Size: %s", format.FormatSizeAuto(explorer.duplicateBytesTotal)))
 	explorer.statsSizeLabel.SetText(fmt.Sprintf("Shown Size: %s", format.FormatSizeAuto(shownBytesTotal)))
 	explorer.statsTrianglesLabel.SetText(fmt.Sprintf("Shown Triangles: %d", shownTrianglesTotal))
+	explorer.statsTotalTrianglesLabel.SetText(fmt.Sprintf("Shown Total Triangles: %d", shownTotalTrianglesTotal))
 }
 
 func (explorer *ScanResultsExplorer) updateFilterOptions(hashCounts map[string]int) {
@@ -989,6 +1000,11 @@ func (explorer *ScanResultsExplorer) columnValue(row loader.ScanResult, columnNa
 	case "Mesh Triangles", "Triangles":
 		if row.MeshNumFaces > 0 {
 			return format.FormatIntCommas(int64(row.MeshNumFaces))
+		}
+		return "-"
+	case "Total Triangles":
+		if row.MeshNumFaces > 0 && row.UseCount > 0 {
+			return format.FormatIntCommas(int64(row.MeshNumFaces) * int64(row.UseCount))
 		}
 		return "-"
 	case "Dimensions":

@@ -100,6 +100,7 @@ type MeshPreviewWidget struct {
 	pitch          float64
 	zoom           float64
 	rightMouseDown bool
+	wireframe      bool
 	pickToken      atomic.Uint64
 	renderToken    atomic.Uint64
 	process        *meshRendererProcess
@@ -350,6 +351,14 @@ func (viewer *MeshPreviewWidget) SetZoom(nextZoom float64) {
 		return
 	}
 	viewer.zoom = format.Clamp(nextZoom, 0.35, 5.0)
+	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) SetWireframe(enabled bool) {
+	if viewer == nil || viewer.wireframe == enabled {
+		return
+	}
+	viewer.wireframe = enabled
 	viewer.render()
 }
 
@@ -687,12 +696,13 @@ func (viewer *MeshPreviewWidget) render() {
 	yawSnapshot := viewer.yaw
 	pitchSnapshot := viewer.pitch
 	opacitySnapshot := viewer.opacity
+	wireframeSnapshot := viewer.wireframe
 	bg := color.NRGBAModel.Convert(viewer.background.FillColor).(color.NRGBA)
 	bgHex := fmt.Sprintf("%02x%02x%02x", bg.R, bg.G, bg.B)
 	renderID := viewer.renderToken.Add(1)
 
 	go func() {
-		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex)
+		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex, wireframeSnapshot)
 		if renderErr != nil {
 			debug.Logf("mesh renderer subprocess render failed: %s", renderErr.Error())
 			return
@@ -985,14 +995,18 @@ func (p *meshRendererProcess) recolorScene(batchColors []color.NRGBA) error {
 	return nil
 }
 
-func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string) (image.Image, error) {
+func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string, wireframe bool) (image.Image, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.alive {
 		return nil, fmt.Errorf("process not alive")
 	}
 
-	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex)
+	wireframeFlag := 0
+	if wireframe {
+		wireframeFlag = 1
+	}
+	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s %d\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex, wireframeFlag)
 	if _, err := io.WriteString(p.stdin, cmd); err != nil {
 		p.alive = false
 		return nil, fmt.Errorf("write render: %w", err)
