@@ -60,7 +60,7 @@ jobs:
           VERSION_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          ./build.sh release
+          bash ./build.sh release
           OUTPUT_PATH="$(cat dist/.last-release-path)"
           echo "output_path=${OUTPUT_PATH}" >> "$GITHUB_OUTPUT"
 
