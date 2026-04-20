@@ -61,17 +61,17 @@ build_release() {
 
   embed_windows_resources
 
-  local safe_version ldflags output_path
+  local safe_version ldflags output_rel
   safe_version="${VERSION_NAME//\//-}"
-  output_path="$dist_dir/joxblox-${safe_version}-${goos}-${goarch}${goexe}"
+  output_rel="dist/joxblox-${safe_version}-${goos}-${goarch}${goexe}"
   ldflags="-X joxblox/internal/app.appVersion=${VERSION_NAME}"
   if [ "$goos" = "windows" ]; then
     ldflags="${ldflags} -H windowsgui"
   fi
 
-  echo "Building release binary -> ${output_path}"
-  (cd "$ROOT_DIR" && go build -v -tags release -trimpath -ldflags "${ldflags}" -o "${output_path}" ./cmd/joxblox)
-  printf '%s\n' "${output_path}" > "$dist_dir/.last-release-path"
+  echo "Building release binary -> ${output_rel}"
+  (cd "$ROOT_DIR" && go build -v -tags release -trimpath -ldflags "${ldflags}" -o "${output_rel}" ./cmd/joxblox)
+  printf '%s\n' "${output_rel}" > "$dist_dir/.last-release-path"
 }
 
 case "$TARGET" in
