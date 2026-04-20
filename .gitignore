@@ -15,6 +15,7 @@ __pycache__/
 
 # Go build artifacts
 *.exe
+*.exe~
 *.test
 *.syso
 /joxblox-mesh-renderer
