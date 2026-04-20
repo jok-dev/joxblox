@@ -27,6 +27,7 @@ import (
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
+	"joxblox/internal/procutil"
 )
 
 const MaxMeshPreviewTriangles = 20000
@@ -804,6 +805,7 @@ func startMeshRendererProcess() (*meshRendererProcess, error) {
 	}
 
 	cmd := exec.Command(commandName, commandArgs...)
+	procutil.HideWindow(cmd)
 	stderrFile, stderrErr := os.OpenFile(filepath.Join(os.TempDir(), "joxblox-mesh-renderer-stderr.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if stderrErr == nil {
 		cmd.Stderr = stderrFile

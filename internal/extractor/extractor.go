@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"joxblox/internal/debug"
+	"joxblox/internal/procutil"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/mesh"
 )
@@ -82,6 +83,7 @@ func ExtractAssetIDsWithCounts(filePath string, assetTypeID int, limit int, stop
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -169,6 +171,7 @@ func ExtractFilteredRefs(filePath string, pathPrefixes []string, stopChannel <-c
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -229,6 +232,7 @@ func ExtractPositionedRefs(filePath string, pathPrefixes []string, stopChannel <
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -282,6 +286,7 @@ func ExtractMissingMaterialVariants(filePath string, pathPrefixes []string, stop
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -339,6 +344,7 @@ func ExtractMapRenderParts(filePath string, pathPrefixes []string, stopChannel <
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -455,6 +461,7 @@ func ExtractMeshStatsFromFile(filePath string) (mesh.HeaderInfo, error) {
 	}
 
 	command := exec.Command(commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -561,6 +568,7 @@ func extractMeshPreviewRawFromFile(filePath string, maxTriangles int, unlimited 
 	}
 
 	command := exec.Command(commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer
@@ -642,6 +650,7 @@ func ReplaceAssetIDs(inputPath string, outputPath string, replacements map[int64
 	}
 
 	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
 	command.Env = appendCargoEnv(os.Environ())
 	var stdoutBuffer bytes.Buffer
 	var stderrBuffer bytes.Buffer

@@ -34,3 +34,11 @@ internal/app/release-assets/
 latest.log
 
 .tmp
+
+# Private test fixtures - NEVER commit these.
+# They live at ../joxblox-private-tests/ (out of tree); this is defense-in-depth
+# in case someone copies them into the repo by accident.
+joxblox-private-tests/
+*.rbxl
+*.rbxm
+*.obj
