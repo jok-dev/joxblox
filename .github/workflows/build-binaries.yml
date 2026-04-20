@@ -52,46 +52,16 @@ jobs:
             libasound2-dev \
             libgtk-3-dev
 
-      - name: Embed Windows icon and manifest
-        if: matrix.goos == 'windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          go install github.com/tc-hib/go-winres@latest
-          cd cmd/joxblox
-          go-winres make --in winres/winres.json
-
       - name: Build release binary
         id: build
         shell: bash
         env:
           GOOS: ${{ matrix.goos }}
-          APP_NAME: joxblox
-          EXTRACTOR_NAME: joxblox-rusty-asset-tool
           VERSION_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-
-          GOARCH="$(go env GOARCH)"
-          SAFE_VERSION_NAME="${VERSION_NAME//\//-}"
-          EXTRACTOR_BINARY_NAME="${EXTRACTOR_NAME}${{ matrix.ext }}"
-          OUTPUT_NAME="${APP_NAME}-${SAFE_VERSION_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
-          OUTPUT_PATH="dist/${OUTPUT_NAME}"
-          RELEASE_ASSETS_DIR="internal/app/release-assets"
-
-          mkdir -p dist "${RELEASE_ASSETS_DIR}"
-
-          cargo build --release --manifest-path tools/rbxl-id-extractor/Cargo.toml
-          cp "tools/rbxl-id-extractor/target/release/${EXTRACTOR_BINARY_NAME}" "${RELEASE_ASSETS_DIR}/rbxl-id-extractor.bin"
-          cp CHANGELOG.md "${RELEASE_ASSETS_DIR}/CHANGELOG.md"
-          cp LICENSE.md "${RELEASE_ASSETS_DIR}/LICENSE.md"
-
-          LDFLAGS="-X joxblox/internal/app.appVersion=${VERSION_NAME}"
-          if [ "${GOOS}" = "windows" ]; then
-            LDFLAGS="${LDFLAGS} -H windowsgui"
-          fi
-
-          go build -v -tags release -trimpath -ldflags "${LDFLAGS}" -o "${OUTPUT_PATH}" ./cmd/joxblox
+          ./build.sh release
+          OUTPUT_PATH="$(cat dist/.last-release-path)"
           echo "output_path=${OUTPUT_PATH}" >> "$GITHUB_OUTPUT"
 
       - name: Upload release artifact

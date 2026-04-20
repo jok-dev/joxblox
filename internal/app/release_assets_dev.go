@@ -6,6 +6,10 @@ func bundledRustyAssetToolBinary() []byte {
 	return nil
 }
 
+func bundledMeshRendererBinary() []byte {
+	return nil
+}
+
 func bundledChangelogMarkdown() string {
 	return ""
 }

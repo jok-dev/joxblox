@@ -56,6 +56,7 @@ var appIconSVG []byte
 func Run() {
 	debug.Logf = ui.LogDebugf
 	extractor.BinaryProvider = bundledRustyAssetToolBinary
+	ui.MeshRendererBinaryProvider = bundledMeshRendererBinary
 	mesh.CoreMeshFallback = extractor.ExtractMeshStatsFromBytes
 	loader.LoadCacheSettings = func() loader.CacheSettings {
 		settings := loadAssetDownloadCacheSettings()

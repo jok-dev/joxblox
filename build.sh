@@ -36,6 +36,44 @@ build_mesh_renderer() {
   (cd "$ROOT_DIR/tools/mesh-renderer" && go build -o "$ROOT_DIR/joxblox-mesh-renderer$(go env GOEXE)" .)
 }
 
+build_release() {
+  : "${VERSION_NAME:?VERSION_NAME must be set for release builds (e.g. VERSION_NAME=v1.2.3 ./build.sh release)}"
+
+  local goos goarch goexe
+  goos="$(go env GOOS)"
+  goarch="$(go env GOARCH)"
+  goexe="$(go env GOEXE)"
+
+  local release_assets_dir="$ROOT_DIR/internal/app/release-assets"
+  local dist_dir="$ROOT_DIR/dist"
+  mkdir -p "$release_assets_dir" "$dist_dir"
+
+  echo "Building Rust extractor..."
+  (cd "$ROOT_DIR/tools/rbxl-id-extractor" && cargo build --release)
+  cp "$ROOT_DIR/tools/rbxl-id-extractor/target/release/joxblox-rusty-asset-tool${goexe}" \
+    "$release_assets_dir/rbxl-id-extractor.bin"
+
+  echo "Building mesh renderer into release assets..."
+  (cd "$ROOT_DIR/tools/mesh-renderer" && go build -o "$release_assets_dir/joxblox-mesh-renderer.bin" .)
+
+  cp "$ROOT_DIR/CHANGELOG.md" "$release_assets_dir/CHANGELOG.md"
+  cp "$ROOT_DIR/LICENSE.md" "$release_assets_dir/LICENSE.md"
+
+  embed_windows_resources
+
+  local safe_version ldflags output_path
+  safe_version="${VERSION_NAME//\//-}"
+  output_path="$dist_dir/joxblox-${safe_version}-${goos}-${goarch}${goexe}"
+  ldflags="-X joxblox/internal/app.appVersion=${VERSION_NAME}"
+  if [ "$goos" = "windows" ]; then
+    ldflags="${ldflags} -H windowsgui"
+  fi
+
+  echo "Building release binary -> ${output_path}"
+  (cd "$ROOT_DIR" && go build -v -tags release -trimpath -ldflags "${ldflags}" -o "${output_path}" ./cmd/joxblox)
+  printf '%s\n' "${output_path}" > "$dist_dir/.last-release-path"
+}
+
 case "$TARGET" in
   go)
     build_go
@@ -47,13 +85,16 @@ case "$TARGET" in
   mesh-renderer)
     build_mesh_renderer
     ;;
+  release)
+    build_release
+    ;;
   all)
     build_go
     build_rust
     build_mesh_renderer
     ;;
   *)
-    echo "Usage: $0 [go|rust|mesh-renderer|all]"
+    echo "Usage: $0 [go|rust|mesh-renderer|release|all]"
     exit 1
     ;;
 esac

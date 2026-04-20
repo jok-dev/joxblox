@@ -1180,6 +1180,9 @@ func resolveMeshRendererCommand() (string, []string, bool) {
 	if binaryPath, found := findMeshRendererBinaryPath(); found {
 		return binaryPath, nil, true
 	}
+	if binaryPath, err := prepareBundledMeshRendererBinary(); err == nil && strings.TrimSpace(binaryPath) != "" {
+		return binaryPath, nil, true
+	}
 	if GetRepositoryRootPath != nil {
 		if repoRoot, err := GetRepositoryRootPath(); err == nil && strings.TrimSpace(repoRoot) != "" {
 			rendererSourcePath := filepath.Join(repoRoot, "tools", "mesh-renderer", "main.go")

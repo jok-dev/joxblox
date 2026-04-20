@@ -8,6 +8,9 @@ var (
 	//go:embed release-assets/rbxl-id-extractor.bin
 	bundledRustyAssetToolBinaryData []byte
 
+	//go:embed release-assets/joxblox-mesh-renderer.bin
+	bundledMeshRendererBinaryData []byte
+
 	//go:embed release-assets/CHANGELOG.md
 	bundledChangelogMarkdownData string
 
@@ -17,6 +20,10 @@ var (
 
 func bundledRustyAssetToolBinary() []byte {
 	return bundledRustyAssetToolBinaryData
+}
+
+func bundledMeshRendererBinary() []byte {
+	return bundledMeshRendererBinaryData
 }
 
 func bundledChangelogMarkdown() string {
