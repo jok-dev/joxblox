@@ -52,9 +52,26 @@ type renderdocTabState struct {
 
 var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM"}
 
-// NewRenderDocTab builds the RenderDoc tab. The window is used to parent
-// dialogs shown from background goroutines.
+// NewRenderDocTab builds the RenderDoc tab with two sub-tabs: Textures
+// (existing UI) and Meshes (new).
 func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
+	textures := newTexturesSubTab(window)
+	meshes := newMeshesSubTab(window)
+	return container.NewAppTabs(
+		container.NewTabItem("Textures", textures),
+		container.NewTabItem("Meshes", meshes),
+	)
+}
+
+// newMeshesSubTab is a placeholder for Task 6. It currently returns a
+// simple label so the sub-tab is visible but empty.
+func newMeshesSubTab(window fyne.Window) fyne.CanvasObject {
+	return widget.NewLabel("Load a RenderDoc capture to view meshes (coming in Task 6).")
+}
+
+// newTexturesSubTab builds the Textures sub-tab. The window is used to parent
+// dialogs shown from background goroutines.
+func newTexturesSubTab(window fyne.Window) fyne.CanvasObject {
 	state := &renderdocTabState{
 		sortColumn:     "VRAM",
 		sortDescending: true,
