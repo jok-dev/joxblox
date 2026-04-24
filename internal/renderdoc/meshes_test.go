@@ -79,3 +79,63 @@ func TestParseCreateInputLayoutChunk(t *testing.T) {
 		t.Errorf("first element slot/offset = (%d, %d), want (0, 0)", pos.InputSlot, pos.AlignedByteOffset)
 	}
 }
+
+const sampleDrawCallXML = `<root>
+<chunk name="ID3D11Device::CreateBuffer">
+  <struct><uint name="ByteWidth">1024</uint>
+  <enum name="BindFlags" string="D3D11_BIND_VERTEX_BUFFER">1</enum></struct>
+  <ResourceId name="pBuffer">100</ResourceId>
+  <buffer name="InitialData" byteLength="1024">1</buffer>
+</chunk>
+<chunk name="ID3D11Device::CreateBuffer">
+  <struct><uint name="ByteWidth">512</uint>
+  <enum name="BindFlags" string="D3D11_BIND_INDEX_BUFFER">2</enum></struct>
+  <ResourceId name="pBuffer">200</ResourceId>
+  <buffer name="InitialData" byteLength="512">2</buffer>
+</chunk>
+<chunk name="ID3D11DeviceContext::IASetVertexBuffers">
+  <uint name="StartSlot">0</uint>
+  <array name="ppVertexBuffers"><ResourceId>100</ResourceId></array>
+  <array name="pStrides"><uint>32</uint></array>
+  <array name="pOffsets"><uint>0</uint></array>
+</chunk>
+<chunk name="ID3D11DeviceContext::IASetIndexBuffer">
+  <ResourceId name="pIndexBuffer">200</ResourceId>
+  <enum name="Format" string="DXGI_FORMAT_R16_UINT">57</enum>
+  <uint name="Offset">0</uint>
+</chunk>
+<chunk name="ID3D11DeviceContext::IASetInputLayout">
+  <ResourceId name="pInputLayout">9999</ResourceId>
+</chunk>
+<chunk name="ID3D11DeviceContext::DrawIndexed">
+  <uint name="IndexCount">300</uint>
+  <uint name="StartIndexLocation">0</uint>
+  <int name="BaseVertexLocation">0</int>
+</chunk>
+</root>`
+
+func TestParseDrawCallPairing(t *testing.T) {
+	report, err := parseMeshXML(strings.NewReader(sampleDrawCallXML))
+	if err != nil {
+		t.Fatalf("parseMeshXML: %v", err)
+	}
+	if len(report.DrawCalls) != 1 {
+		t.Fatalf("DrawCalls len = %d, want 1", len(report.DrawCalls))
+	}
+	dc := report.DrawCalls[0]
+	if dc.IndexCount != 300 {
+		t.Errorf("IndexCount = %d, want 300", dc.IndexCount)
+	}
+	if dc.IndexBufferID != "200" || dc.IndexBufferFormat != "DXGI_FORMAT_R16_UINT" {
+		t.Errorf("index buffer = (%q, %q)", dc.IndexBufferID, dc.IndexBufferFormat)
+	}
+	if len(dc.VertexBuffers) != 1 || dc.VertexBuffers[0].BufferID != "100" {
+		t.Errorf("vertex buffers = %+v", dc.VertexBuffers)
+	}
+	if dc.VertexBuffers[0].Stride != 32 {
+		t.Errorf("vb stride = %d, want 32", dc.VertexBuffers[0].Stride)
+	}
+	if dc.InputLayoutID != "9999" {
+		t.Errorf("InputLayoutID = %q, want 9999", dc.InputLayoutID)
+	}
+}
