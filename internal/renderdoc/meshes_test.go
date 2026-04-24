@@ -194,11 +194,12 @@ func TestBuildMeshesDedupesByHash(t *testing.T) {
 		t.Errorf("IndexBufferBytes = %d, want %d", meshes[0].IndexBufferBytes, len(ibBytes))
 	}
 
-	// Verify hash shape: 16 hex chars, matches SHA-256 prefix of vb|ib.
+	// Full 64-char SHA-256 of vb|ib — the UI truncates for display, but
+	// internally we keep the full digest to avoid silent collisions.
 	hasher := sha256.New()
 	hasher.Write(vbBytes)
 	hasher.Write(ibBytes)
-	expectedHash := hex.EncodeToString(hasher.Sum(nil))[:16]
+	expectedHash := hex.EncodeToString(hasher.Sum(nil))
 	if meshes[0].Hash != expectedHash {
 		t.Errorf("Hash = %q, want %q", meshes[0].Hash, expectedHash)
 	}

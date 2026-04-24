@@ -133,6 +133,8 @@ func newMeshesSubTab(window fyne.Window) fyne.CanvasObject {
 			fyneDialog.ShowError(loadErr, window)
 			if newStore != nil {
 				_ = newStore.Close()
+			}
+			if xmlPath != "" {
 				renderdoc.RemoveConvertedOutput(xmlPath)
 			}
 			return
@@ -196,9 +198,16 @@ func meshColumnValue(mesh renderdoc.MeshInfo, column string) string {
 	case "Layout":
 		return mesh.InputLayoutID
 	case "Hash":
-		return mesh.Hash
+		return truncateHash(mesh.Hash)
 	}
 	return ""
+}
+
+func truncateHash(hash string) string {
+	if len(hash) > 16 {
+		return hash[:16]
+	}
+	return hash
 }
 
 func applyMeshColumnWidths(table *widget.Table) {
@@ -290,7 +299,7 @@ func loadMeshPreview(state *meshesTabState, mesh renderdoc.MeshInfo, viewer *ui.
 				vertexCountOf(mesh),
 				mesh.IndexCount/3,
 				format.FormatSizeAuto64(int64(mesh.VertexBufferBytes)),
-				mesh.Hash,
+				truncateHash(mesh.Hash),
 			))
 			viewer.SetData(data)
 		})

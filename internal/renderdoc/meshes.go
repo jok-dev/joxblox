@@ -484,20 +484,28 @@ func parseDrawIndexedChunk(decoder *xml.Decoder) (*DrawCall, error) {
 			switch typed.Name.Local {
 			case "uint", "int":
 				name := attr(typed, "name")
-				value, readErr := readIntElement(decoder)
-				if readErr != nil {
-					return nil, readErr
-				}
-				depth--
 				switch name {
-				case "IndexCount", "IndexCountPerInstance":
-					dc.IndexCount = value
-				case "StartIndexLocation":
-					dc.StartIndexLocation = value
-				case "BaseVertexLocation":
-					dc.BaseVertexLocation = value
-				case "InstanceCount":
-					dc.InstanceCount = value
+				case "IndexCount", "IndexCountPerInstance", "StartIndexLocation", "BaseVertexLocation", "InstanceCount":
+					value, readErr := readIntElement(decoder)
+					if readErr != nil {
+						return nil, readErr
+					}
+					depth--
+					switch name {
+					case "IndexCount", "IndexCountPerInstance":
+						dc.IndexCount = value
+					case "StartIndexLocation":
+						dc.StartIndexLocation = value
+					case "BaseVertexLocation":
+						dc.BaseVertexLocation = value
+					case "InstanceCount":
+						dc.InstanceCount = value
+					}
+				default:
+					if skipErr := skipElement(decoder); skipErr != nil {
+						return nil, skipErr
+					}
+					depth--
 				}
 			}
 		case xml.EndElement:
@@ -563,7 +571,9 @@ func BuildMeshes(report *MeshReport, reader BufferReader) ([]MeshInfo, error) {
 		}
 		hash, vbBytes, ibBytes, err := hashMeshBuffers(dc, report.Buffers, reader)
 		if err != nil {
-			return nil, err
+			// A single unreadable buffer shouldn't kill the whole list —
+			// skip this draw call, keep building the rest.
+			continue
 		}
 		if hash == "" {
 			continue
@@ -622,5 +632,8 @@ func hashMeshBuffers(dc DrawCall, buffers map[string]BufferInfo, reader BufferRe
 		return "", 0, 0, fmt.Errorf("read IB %s: %w", dc.IndexBufferID, err)
 	}
 	hasher.Write(ibData)
-	return hex.EncodeToString(hasher.Sum(nil))[:16], vbBytes, len(ibData), nil
+	// Full 64-hex-char SHA-256 stored; the UI truncates to 16 for display.
+	// Using the full digest avoids silent collision-merges between genuinely
+	// different meshes that happen to share their first 16 hex chars.
+	return hex.EncodeToString(hasher.Sum(nil)), vbBytes, len(ibData), nil
 }
