@@ -63,12 +63,6 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 	)
 }
 
-// newMeshesSubTab is a placeholder for Task 6. It currently returns a
-// simple label so the sub-tab is visible but empty.
-func newMeshesSubTab(window fyne.Window) fyne.CanvasObject {
-	return widget.NewLabel("Load a RenderDoc capture to view meshes (coming in Task 6).")
-}
-
 // newTexturesSubTab builds the Textures sub-tab. The window is used to parent
 // dialogs shown from background goroutines.
 func newTexturesSubTab(window fyne.Window) fyne.CanvasObject {
