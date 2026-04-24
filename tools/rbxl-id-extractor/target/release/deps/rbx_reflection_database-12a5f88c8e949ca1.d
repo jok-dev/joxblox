@@ -1,9 +1,0 @@
-/Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/deps/rbx_reflection_database-12a5f88c8e949ca1.d: /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/lib.rs /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/error.rs /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/../database.msgpack
-
-/Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/deps/librbx_reflection_database-12a5f88c8e949ca1.rlib: /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/lib.rs /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/error.rs /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/../database.msgpack
-
-/Users/jok/work/voldex/roblox-asset-explorer/tools/rbxl-id-extractor/target/release/deps/librbx_reflection_database-12a5f88c8e949ca1.rmeta: /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/lib.rs /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/error.rs /Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/../database.msgpack
-
-/Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/lib.rs:
-/Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/error.rs:
-/Users/jok/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rbx_reflection_database-2.0.2+roblox-700/src/../database.msgpack:

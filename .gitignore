@@ -43,3 +43,4 @@ joxblox-private-tests/
 *.rbxl
 *.rbxm
 *.obj
+.claude/settings.local.json
