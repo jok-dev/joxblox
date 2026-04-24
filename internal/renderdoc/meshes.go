@@ -1,6 +1,8 @@
 package renderdoc
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -524,4 +526,101 @@ func mergeVertexBufferBindings(current, incoming []DrawCallVertexBuffer) []DrawC
 		}
 	}
 	return result
+}
+
+// MeshInfo aggregates one deduplicated mesh (VB+IB pair) across all draw
+// calls that used it.
+type MeshInfo struct {
+	Hash              string
+	FirstResourceID   string // resource ID of the first VB slot for display
+	VertexBuffers     []DrawCallVertexBuffer
+	IndexBufferID     string
+	IndexBufferFormat string
+	VertexBufferBytes int
+	IndexBufferBytes  int
+	IndexCount        int // max IndexCount seen across draws — represents the full mesh
+	DrawCallCount     int
+	InputLayoutID     string // first non-empty layout id seen
+}
+
+// BufferReader is the minimal surface needed by BuildMeshes. Satisfied
+// by *BufferStore in production.
+type BufferReader interface {
+	ReadBuffer(id string) ([]byte, error)
+}
+
+// BuildMeshes walks report.DrawCalls, hashes each VB+IB byte set, and
+// returns one MeshInfo per unique hash. DrawCallCount counts duplicates.
+func BuildMeshes(report *MeshReport, reader BufferReader) ([]MeshInfo, error) {
+	if report == nil {
+		return nil, nil
+	}
+	byHash := map[string]*MeshInfo{}
+	var order []string
+	for _, dc := range report.DrawCalls {
+		if len(dc.VertexBuffers) == 0 || dc.IndexBufferID == "" {
+			continue
+		}
+		hash, vbBytes, ibBytes, err := hashMeshBuffers(dc, report.Buffers, reader)
+		if err != nil {
+			return nil, err
+		}
+		if hash == "" {
+			continue
+		}
+		mesh, exists := byHash[hash]
+		if !exists {
+			mesh = &MeshInfo{
+				Hash:              hash,
+				FirstResourceID:   dc.VertexBuffers[0].BufferID,
+				VertexBuffers:     append([]DrawCallVertexBuffer(nil), dc.VertexBuffers...),
+				IndexBufferID:     dc.IndexBufferID,
+				IndexBufferFormat: dc.IndexBufferFormat,
+				VertexBufferBytes: vbBytes,
+				IndexBufferBytes:  ibBytes,
+				InputLayoutID:     dc.InputLayoutID,
+			}
+			byHash[hash] = mesh
+			order = append(order, hash)
+		}
+		mesh.DrawCallCount++
+		if dc.IndexCount > mesh.IndexCount {
+			mesh.IndexCount = dc.IndexCount
+		}
+		if mesh.InputLayoutID == "" {
+			mesh.InputLayoutID = dc.InputLayoutID
+		}
+	}
+	out := make([]MeshInfo, 0, len(order))
+	for _, hash := range order {
+		out = append(out, *byHash[hash])
+	}
+	return out, nil
+}
+
+func hashMeshBuffers(dc DrawCall, buffers map[string]BufferInfo, reader BufferReader) (string, int, int, error) {
+	hasher := sha256.New()
+	vbBytes := 0
+	for _, vb := range dc.VertexBuffers {
+		buf, ok := buffers[vb.BufferID]
+		if !ok || buf.InitialDataBufferID == "" {
+			continue
+		}
+		data, err := reader.ReadBuffer(buf.InitialDataBufferID)
+		if err != nil {
+			return "", 0, 0, fmt.Errorf("read VB %s: %w", vb.BufferID, err)
+		}
+		hasher.Write(data)
+		vbBytes += len(data)
+	}
+	ibBuf, ok := buffers[dc.IndexBufferID]
+	if !ok || ibBuf.InitialDataBufferID == "" {
+		return "", 0, 0, nil
+	}
+	ibData, err := reader.ReadBuffer(ibBuf.InitialDataBufferID)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("read IB %s: %w", dc.IndexBufferID, err)
+	}
+	hasher.Write(ibData)
+	return hex.EncodeToString(hasher.Sum(nil))[:16], vbBytes, len(ibData), nil
 }

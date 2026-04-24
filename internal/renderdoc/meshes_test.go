@@ -1,6 +1,8 @@
 package renderdoc
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -137,5 +139,67 @@ func TestParseDrawCallPairing(t *testing.T) {
 	}
 	if dc.InputLayoutID != "9999" {
 		t.Errorf("InputLayoutID = %q, want 9999", dc.InputLayoutID)
+	}
+}
+
+// fakeBufferReader implements the minimal surface needed by BuildMeshes:
+// ReadBuffer(id) returning bytes for a buffer ID.
+type fakeBufferReader struct{ bytesByID map[string][]byte }
+
+func (f *fakeBufferReader) ReadBuffer(id string) ([]byte, error) {
+	return f.bytesByID[id], nil
+}
+
+func TestBuildMeshesDedupesByHash(t *testing.T) {
+	vbBytes := []byte("vertex-data-aaaa")
+	ibBytes := []byte("index-data-bbbb")
+	report := &MeshReport{
+		Buffers: map[string]BufferInfo{
+			"100": {ResourceID: "100", ByteWidth: len(vbBytes), BindFlags: "D3D11_BIND_VERTEX_BUFFER", InitialDataBufferID: "vb-blob"},
+			"200": {ResourceID: "200", ByteWidth: len(ibBytes), BindFlags: "D3D11_BIND_INDEX_BUFFER", InitialDataBufferID: "ib-blob"},
+		},
+		DrawCalls: []DrawCall{
+			{
+				IndexCount: 300, IndexBufferID: "200", IndexBufferFormat: "DXGI_FORMAT_R16_UINT",
+				VertexBuffers: []DrawCallVertexBuffer{{Slot: 0, BufferID: "100", Stride: 32}},
+			},
+			// second draw reusing the same mesh → should dedupe
+			{
+				IndexCount: 300, IndexBufferID: "200", IndexBufferFormat: "DXGI_FORMAT_R16_UINT",
+				VertexBuffers: []DrawCallVertexBuffer{{Slot: 0, BufferID: "100", Stride: 32}},
+			},
+		},
+	}
+	reader := &fakeBufferReader{bytesByID: map[string][]byte{
+		"vb-blob": vbBytes,
+		"ib-blob": ibBytes,
+	}}
+	meshes, err := BuildMeshes(report, reader)
+	if err != nil {
+		t.Fatalf("BuildMeshes: %v", err)
+	}
+	if len(meshes) != 1 {
+		t.Fatalf("meshes len = %d, want 1 (dedup)", len(meshes))
+	}
+	if meshes[0].DrawCallCount != 2 {
+		t.Errorf("DrawCallCount = %d, want 2", meshes[0].DrawCallCount)
+	}
+	if meshes[0].IndexCount != 300 {
+		t.Errorf("IndexCount = %d, want 300", meshes[0].IndexCount)
+	}
+	if meshes[0].VertexBufferBytes != len(vbBytes) {
+		t.Errorf("VertexBufferBytes = %d, want %d", meshes[0].VertexBufferBytes, len(vbBytes))
+	}
+	if meshes[0].IndexBufferBytes != len(ibBytes) {
+		t.Errorf("IndexBufferBytes = %d, want %d", meshes[0].IndexBufferBytes, len(ibBytes))
+	}
+
+	// Verify hash shape: 16 hex chars, matches SHA-256 prefix of vb|ib.
+	hasher := sha256.New()
+	hasher.Write(vbBytes)
+	hasher.Write(ibBytes)
+	expectedHash := hex.EncodeToString(hasher.Sum(nil))[:16]
+	if meshes[0].Hash != expectedHash {
+		t.Errorf("Hash = %q, want %q", meshes[0].Hash, expectedHash)
 	}
 }
