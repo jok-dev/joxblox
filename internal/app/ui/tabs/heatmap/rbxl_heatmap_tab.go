@@ -836,13 +836,18 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		}
 	}
 
-	return container.NewBorder(
+	// Wrap the whole tab in a VScroll so the tall controls stack
+	// (~400px) doesn't pin the main window's minimum height. When the
+	// window is tall the scroll is invisible; when it's short the
+	// vertical scrollbar appears and lets the user reach controls that
+	// overflow.
+	return container.NewVScroll(container.NewBorder(
 		controls,
 		statusLabel,
 		nil,
 		nil,
 		viewerStack,
-	), loadRBXLFile
+	)), loadRBXLFile
 }
 
 func buildRBXLHeatmapScene(
@@ -1299,6 +1304,16 @@ func BuildHeatmapCells(scene *RBXLHeatmapScene, gridDivisions int) ([]heatmap.Ce
 		totals.MeshBytes += int64(point.Stats.MeshBytes) * delta
 		totals.TotalBytes += int64(point.Stats.TotalBytes) * delta
 		totals.PixelCount += point.Stats.PixelCount * delta
+		if point.Stats.PixelCount > 0 {
+			if loader.ClassifyAsBC3(point.Stats.HasAlphaChannel, point.Stats.NonOpaqueAlphaPixels, point.PropertyName) {
+				totals.BC3PixelCount += point.Stats.PixelCount * delta
+				if loader.IsWastefulBC3(point.Stats.HasAlphaChannel, point.Stats.NonOpaqueAlphaPixels, point.Stats.PixelCount, point.PropertyName) {
+					totals.WastefulBC3PixelCount += point.Stats.PixelCount * delta
+				}
+			} else {
+				totals.BC1PixelCount += point.Stats.PixelCount * delta
+			}
+		}
 	}
 	accumulatePoints(scene.Points, func(accumulator *heatmapCellAccumulator, point RBXLHeatmapPoint) {
 		_, seenAssetInBase := accumulator.baseSeenAssets[point.AssetID]

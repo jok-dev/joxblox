@@ -443,9 +443,13 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		container.NewCenter(placeholderLabel),
 		container.NewPadded(viewer),
 	)
+	// The control strip sums to ~1000px of fixed-width grids, which would
+	// otherwise force the whole window to stay that wide (AppTabs inherits
+	// the max MinSize across tabs). Wrap in HScroll so the window can shrink
+	// freely — a horizontal scrollbar appears only when the row overflows.
 	previewCard := container.NewBorder(
 		container.NewVBox(
-			container.NewHBox(
+			container.NewHScroll(container.NewHBox(
 				widget.NewLabel("Background:"),
 				container.NewGridWrap(fyne.NewSize(120, 36), backgroundSelect),
 				widget.NewLabel("Heat Mode:"),
@@ -457,7 +461,7 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 				container.NewGridWrap(fyne.NewSize(220, 36), spreadSlider),
 				spreadValueLabel,
 				layout.NewSpacer(),
-			),
+			)),
 			widget.NewLabel(ui.MeshPreviewControlsText()),
 		),
 		nil,
@@ -473,7 +477,10 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		filePathLabel,
 	)
 
-	return container.NewBorder(
+	// Wrap the whole tab in a VScroll so the controls + mesh preview stack
+	// (which sums to ~500-600px MinSize via MeshPreviewWidget's 440x300)
+	// doesn't pin the main window's minimum height.
+	return container.NewVScroll(container.NewBorder(
 		controls,
 		statusLabel,
 		nil,
@@ -488,7 +495,7 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 			nil,
 			previewCard,
 		),
-	)
+	))
 }
 
 func buildModelHeatmapInstances(mapParts []extractor.MapRenderPartResult, refs []extractor.PositionedResult) []modelHeatmapMeshInstance {

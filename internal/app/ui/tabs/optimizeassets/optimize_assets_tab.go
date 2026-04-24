@@ -769,7 +769,11 @@ func NewOptimizeAssetsTab(window fyne.Window) fyne.CanvasObject {
 		widget.NewLabel("Results:"),
 	)
 
-	return container.NewBorder(topSection, nil, nil, nil, resultsEntry)
+	// Wrap in VScroll so the tab's ~500px form-controls stack doesn't pin
+	// the main window's minimum height (AppTabs inherits the max MinSize
+	// across tabs). When the window is tall the scroll is invisible; when
+	// it's short, a vertical scrollbar appears.
+	return container.NewVScroll(container.NewBorder(topSection, nil, nil, nil, resultsEntry))
 }
 
 func runOptimization(

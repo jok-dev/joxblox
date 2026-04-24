@@ -16,6 +16,7 @@ import (
 	"joxblox/internal/app/ui/tabs/imageuploader"
 	"joxblox/internal/app/ui/tabs/lodviewer"
 	"joxblox/internal/app/ui/tabs/optimizeassets"
+	renderdoctab "joxblox/internal/app/ui/tabs/renderdoc"
 	"joxblox/internal/app/ui/tabs/reportgeneration"
 	"joxblox/internal/app/ui/tabs/singleasset"
 	"joxblox/internal/debug"
@@ -106,7 +107,8 @@ func Run() {
 	lodViewerTab := container.NewTabItem(tabTitleLodViewer, lodviewer.NewLodViewerTab(window))
 	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, optimizeassets.NewOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, imageuploader.NewImageUploaderTab(window))
-	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, lodViewerTab, optimizeTab, imageUploaderTab)
+	renderdocTab := container.NewTabItem(tabTitleRenderDoc, renderdoctab.NewRenderDocTab(window))
+	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, lodViewerTab, optimizeTab, imageUploaderTab, renderdocTab)
 	tabs.Select(reportGenerationTab)
 	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64) {
 		tabs.Select(scanTab)

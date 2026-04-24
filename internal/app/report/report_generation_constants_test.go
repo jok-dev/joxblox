@@ -16,6 +16,8 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 			DuplicationWastePct: [6]float64{100, 200, 300, 400, 500, 600},
 			TotalSizeMB:         [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
 			TextureSizeMB:       [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
+			GPUTextureMemoryMB:  [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
+			WastefulBC3Count:    [6]float64{100, 200, 300, 400, 500, 600},
 			MeshSizeMB:          [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
 			OversizedTextures:   [6]float64{100, 200, 300, 400, 500, 600},
 			DuplicateCount:      [6]float64{100, 200, 300, 400, 500, 600},
@@ -39,8 +41,8 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 	}
 
 	grades := ComputePerformanceProfileForAssetType(customAssetType, CellPercentiles{}, summary)
-	if len(grades) != 11 {
-		t.Fatalf("expected 11 grades, got %d", len(grades))
+	if len(grades) != 13 {
+		t.Fatalf("expected 13 grades, got %d", len(grades))
 	}
 	for _, grade := range grades {
 		if grade.Grade != gradeAPlus {

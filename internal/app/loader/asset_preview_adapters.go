@@ -105,10 +105,14 @@ func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResu
 	if statsInfo.Width > 0 && statsInfo.Height > 0 {
 		result.PixelCount = int64(statsInfo.Width * statsInfo.Height)
 		result.TextureBytes = statsInfo.BytesSize
+		result.HasAlphaChannel = statsInfo.HasAlphaChannel
+		result.NonOpaqueAlphaPixels = statsInfo.NonOpaqueAlphaPixels
 	}
 	if previewResult.Image != nil && previewResult.Image.Width > 0 && previewResult.Image.Height > 0 {
 		result.PixelCount = int64(previewResult.Image.Width * previewResult.Image.Height)
 		result.TextureBytes = previewResult.Image.BytesSize
+		result.HasAlphaChannel = previewResult.Image.HasAlphaChannel
+		result.NonOpaqueAlphaPixels = previewResult.Image.NonOpaqueAlphaPixels
 	}
 	result.Resource = resource
 	result.DownloadBytes = append([]byte(nil), previewResult.DownloadBytes...)

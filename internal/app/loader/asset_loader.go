@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -87,6 +88,17 @@ type ImageInfo struct {
 	Format                   string
 	ContentType              string
 	SHA256                   string
+	// HasAlphaChannel is true when the decoded image exposes an alpha channel,
+	// regardless of per-pixel content. Roblox's upload pipeline appears to
+	// inspect actual alpha values (see NonOpaqueAlphaPixels) — a PNG with an
+	// all-255 alpha channel is still stored as BC1, not BC3.
+	HasAlphaChannel bool
+	// NonOpaqueAlphaPixels counts how many pixels have an alpha byte < 255.
+	// Meaningful only when HasAlphaChannel is true. Zero means the alpha
+	// channel is entirely opaque and Roblox will still pick BC1. A small
+	// non-zero fraction (< 5% of total pixels) marks a "wasteful" BC3 — the
+	// artist could likely drop the alpha channel and save 2x the GPU memory.
+	NonOpaqueAlphaPixels int64
 }
 
 type ChildAssetInfo struct {
@@ -1057,21 +1069,22 @@ func fetchImageInfoWithCacheKeyAndTrace(imageURL string, cacheKey string, assetI
 	if includeHash {
 		sha256Value = ComputeSHA256Hex(imageBytes)
 	}
-	recompressedPNGByteSize, recompressedJPEGByteSize, recompressErr := computeBestCompressedImageSizes(imageBytes)
-	if recompressErr != nil {
-		recompressedPNGByteSize = 0
-		recompressedJPEGByteSize = 0
+	analysis, analysisErr := analyzeImage(imageBytes)
+	if analysisErr != nil {
+		analysis = imageAnalysis{}
 	}
 	return &ImageInfo{
 		Resource:                 fyne.NewStaticResource(resourceName, imageBytes),
 		Width:                    imageConfig.Width,
 		Height:                   imageConfig.Height,
 		BytesSize:                len(imageBytes),
-		RecompressedPNGByteSize:  recompressedPNGByteSize,
-		RecompressedJPEGByteSize: recompressedJPEGByteSize,
+		RecompressedPNGByteSize:  analysis.RecompressedPNGBytes,
+		RecompressedJPEGByteSize: analysis.RecompressedJPEGBytes,
 		Format:                   strings.ToUpper(imageFormat),
 		ContentType:              contentType,
 		SHA256:                   sha256Value,
+		HasAlphaChannel:          analysis.HasAlphaChannel,
+		NonOpaqueAlphaPixels:     analysis.NonOpaqueAlphaPixels,
 	}, nil
 }
 
@@ -1145,10 +1158,12 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 	info.Width = imageConfig.Width
 	info.Height = imageConfig.Height
 	info.Format = strings.ToUpper(imageFormat)
-	recompressedPNGByteSize, recompressedJPEGByteSize, recompressErr := computeBestCompressedImageSizes(fileBytes)
-	if recompressErr == nil {
-		info.RecompressedPNGByteSize = recompressedPNGByteSize
-		info.RecompressedJPEGByteSize = recompressedJPEGByteSize
+	analysis, analysisErr := analyzeImage(fileBytes)
+	if analysisErr == nil {
+		info.RecompressedPNGByteSize = analysis.RecompressedPNGBytes
+		info.RecompressedJPEGByteSize = analysis.RecompressedJPEGBytes
+		info.HasAlphaChannel = analysis.HasAlphaChannel
+		info.NonOpaqueAlphaPixels = analysis.NonOpaqueAlphaPixels
 	}
 	referencedAssetIDs := []int64{}
 	rustyAssetToolReferences := []extractor.Result{}
@@ -1252,21 +1267,81 @@ func ComputeSHA256Hex(payload []byte) string {
 	return hex.EncodeToString(hashBytes[:])
 }
 
-func computeBestCompressedImageSizes(imageBytes []byte) (int, int, error) {
+type imageAnalysis struct {
+	RecompressedPNGBytes  int
+	RecompressedJPEGBytes int
+	HasAlphaChannel       bool
+	NonOpaqueAlphaPixels  int64
+}
+
+func analyzeImage(imageBytes []byte) (imageAnalysis, error) {
 	decodedImage, _, decodeErr := image.Decode(bytes.NewReader(imageBytes))
 	if decodeErr != nil {
-		return 0, 0, decodeErr
+		return imageAnalysis{}, decodeErr
 	}
 	var recompressedBuffer bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestCompression}
 	if encodeErr := encoder.Encode(&recompressedBuffer, decodedImage); encodeErr != nil {
-		return 0, 0, encodeErr
+		return imageAnalysis{}, encodeErr
 	}
 	var recompressedJPEGBuffer bytes.Buffer
 	if encodeErr := jpeg.Encode(&recompressedJPEGBuffer, decodedImage, &jpeg.Options{Quality: 1}); encodeErr != nil {
-		return 0, 0, encodeErr
+		return imageAnalysis{}, encodeErr
 	}
-	return recompressedBuffer.Len(), recompressedJPEGBuffer.Len(), nil
+	hasAlpha, nonOpaque := classifyImageAlpha(decodedImage)
+	return imageAnalysis{
+		RecompressedPNGBytes:  recompressedBuffer.Len(),
+		RecompressedJPEGBytes: recompressedJPEGBuffer.Len(),
+		HasAlphaChannel:       hasAlpha,
+		NonOpaqueAlphaPixels:  nonOpaque,
+	}, nil
+}
+
+// classifyImageAlpha reports whether the source image exposes an alpha
+// channel and, if so, counts how many pixels have a < 255 alpha byte. The
+// count is what drives BC1/BC3 classification and the "wasteful BC3"
+// threshold downstream — zero means Roblox will still pick BC1, and tiny
+// non-zero fractions mark textures whose alpha could probably be dropped.
+func classifyImageAlpha(img image.Image) (hasAlpha bool, nonOpaque int64) {
+	switch img.ColorModel() {
+	case color.RGBAModel, color.NRGBAModel, color.RGBA64Model, color.NRGBA64Model, color.AlphaModel, color.Alpha16Model:
+		hasAlpha = true
+	default:
+		return false, 0
+	}
+
+	if rgba, ok := img.(*image.RGBA); ok {
+		return true, countNonOpaqueAlpha(rgba.Pix, rgba.Stride, rgba.Rect)
+	}
+	if nrgba, ok := img.(*image.NRGBA); ok {
+		return true, countNonOpaqueAlpha(nrgba.Pix, nrgba.Stride, nrgba.Rect)
+	}
+
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			_, _, _, a := img.At(x, y).RGBA()
+			if a < 0xFFFF {
+				nonOpaque++
+			}
+		}
+	}
+	return true, nonOpaque
+}
+
+func countNonOpaqueAlpha(pix []byte, stride int, rect image.Rectangle) int64 {
+	width := rect.Dx()
+	height := rect.Dy()
+	var count int64
+	for row := 0; row < height; row++ {
+		base := row * stride
+		for col := 0; col < width; col++ {
+			if pix[base+col*4+3] != 0xFF {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func computeChildAssetsAndTotal(selfBytesSize int, referencedAssetIDs []int64, rustyAssetToolReferences []extractor.Result) (int, []ChildAssetInfo) {

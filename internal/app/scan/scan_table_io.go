@@ -80,6 +80,8 @@ type scanTableExportRow struct {
 	SceneSurfaceArea     float64                 `json:"sceneSurfaceArea,omitempty"`
 	LargestSurfacePath   string                  `json:"largestSurfacePath,omitempty"`
 	LargeTextureScore    float64                 `json:"largeTextureScore,omitempty"`
+	HasAlphaChannel      bool                    `json:"hasAlphaChannel,omitempty"`
+	NonOpaqueAlphaPixels int64                   `json:"nonOpaqueAlphaPixels,omitempty"`
 	ImageResourceName    string                  `json:"imageResourceName,omitempty"`
 	ImageBytesBase64     string                  `json:"imageBytesBase64,omitempty"`
 }
@@ -371,6 +373,8 @@ func mapScanResultToExportRow(row loader.ScanResult) scanTableExportRow {
 		SceneSurfaceArea:     row.SceneSurfaceArea,
 		LargestSurfacePath:   row.LargestSurfacePath,
 		LargeTextureScore:    row.LargeTextureScore,
+		HasAlphaChannel:      row.HasAlphaChannel,
+		NonOpaqueAlphaPixels: row.NonOpaqueAlphaPixels,
 		ImageResourceName:    imageResourceName,
 		ImageBytesBase64:     imageBytesBase64,
 	}
@@ -425,6 +429,8 @@ func mapExportRowToScanResult(row scanTableExportRow) (loader.ScanResult, error)
 		SceneSurfaceArea:     row.SceneSurfaceArea,
 		LargestSurfacePath:   strings.TrimSpace(row.LargestSurfacePath),
 		LargeTextureScore:    row.LargeTextureScore,
+		HasAlphaChannel:      row.HasAlphaChannel,
+		NonOpaqueAlphaPixels: row.NonOpaqueAlphaPixels,
 		Resource:             importedResource,
 	}, nil
 }

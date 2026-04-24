@@ -88,6 +88,8 @@ func CompareScanResults(leftResult ScanResult, rightResult ScanResult, sortField
 		return CompareInt(leftResult.TextureBytes, rightResult.TextureBytes)
 	case "Texture Pixels":
 		return CompareInt64(leftResult.PixelCount, rightResult.PixelCount)
+	case "GPU Memory":
+		return CompareInt64(ScanResultGPUMemoryBytes(leftResult), ScanResultGPUMemoryBytes(rightResult))
 	case "B/stud²":
 		return CompareFloat64(leftResult.LargeTextureScore, rightResult.LargeTextureScore)
 	case "Mesh Bytes":

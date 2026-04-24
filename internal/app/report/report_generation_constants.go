@@ -9,6 +9,8 @@ type GradeThresholds struct {
 	DuplicationWastePct [6]float64
 	TotalSizeMB         [6]float64
 	TextureSizeMB       [6]float64
+	GPUTextureMemoryMB  [6]float64
+	WastefulBC3Count    [6]float64
 	MeshSizeMB          [6]float64
 	OversizedTextures   [6]float64
 	DuplicateCount      [6]float64
@@ -31,6 +33,8 @@ var VehicleThresholds = GradeThresholds{
 	DuplicationWastePct: [6]float64{2, 5, 15, 25, 40, 60},
 	TotalSizeMB:         [6]float64{10, 12, 15, 18, 22, 28},
 	TextureSizeMB:       [6]float64{5, 8, 10, 12, 15, 20},
+	GPUTextureMemoryMB:  [6]float64{10, 16, 20, 24, 30, 40},
+	WastefulBC3Count:    [6]float64{1, 3, 6, 10, 15, 25},
 	MeshSizeMB:          [6]float64{5, 8, 10, 12, 15, 18},
 	OversizedTextures:   [6]float64{1, 3, 6, 10, 15, 25},
 	DuplicateCount:      [6]float64{1, 5, 15, 40, 80, 150},
@@ -49,6 +53,8 @@ var AssetTypeConfigs = []AssetTypeConfig{
 			DuplicationWastePct: [6]float64{2, 5, 15, 25, 40, 60},
 			TotalSizeMB:         [6]float64{2, 5, 8, 12, 20, 30},
 			TextureSizeMB:       [6]float64{2, 4, 6, 8, 12, 20},
+			GPUTextureMemoryMB:  [6]float64{4, 8, 12, 16, 24, 40},
+			WastefulBC3Count:    [6]float64{1, 3, 6, 10, 15, 25},
 			MeshSizeMB:          [6]float64{1, 2, 3, 5, 10, 15},
 			OversizedTextures:   [6]float64{1, 3, 6, 10, 15, 25},
 			DuplicateCount:      [6]float64{1, 5, 15, 40, 80, 150},
@@ -73,6 +79,8 @@ var AssetTypeConfigs = []AssetTypeConfig{
 			DuplicationWastePct: VehicleThresholds.DuplicationWastePct,
 			TotalSizeMB: VehicleThresholds.TotalSizeMB,
 			TextureSizeMB: VehicleThresholds.TextureSizeMB,
+			GPUTextureMemoryMB: VehicleThresholds.GPUTextureMemoryMB,
+			WastefulBC3Count: VehicleThresholds.WastefulBC3Count,
 			MeshSizeMB: VehicleThresholds.MeshSizeMB,
 			OversizedTextures: VehicleThresholds.OversizedTextures,
 			DuplicateCount: VehicleThresholds.DuplicateCount,

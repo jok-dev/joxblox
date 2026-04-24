@@ -231,13 +231,15 @@ func NewLodViewerTab(window fyne.Window) fyne.CanvasObject {
 		container.NewMax(previewWidget),
 	)
 
-	return container.NewBorder(
+	// VScroll so the mesh preview's 440x300 MinSize + footer controls don't
+	// pin the main window's minimum height.
+	return container.NewVScroll(container.NewBorder(
 		header,
 		footer,
 		nil,
 		nil,
 		previewRow,
-	)
+	))
 }
 
 // buildLodOptionLabels produces one radio option per LOD entry. Each label

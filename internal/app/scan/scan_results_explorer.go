@@ -352,6 +352,12 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 		widget.NewLabel("Property Name:"),
 		container.NewGridWrap(fyne.NewSize(280, 36), explorer.propertyNameFilterSelect),
 	)
+	// The filter row sums to ~1020px minimum across its fixed-width grids; a
+	// bare HBox would force the whole window to stay that wide because AppTabs
+	// inherits the largest MinSize across its children. Wrap it in an HScroll
+	// so the window can shrink below that threshold (the row then scrolls
+	// horizontally instead of pinning the window).
+	filterRowScroll := container.NewHScroll(filterRow)
 	if options.ShowDuplicateUI {
 		filterRow.Add(explorer.showOnlyDuplicatesCheck)
 	}
@@ -384,12 +390,15 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 	explorer.searchSuggestionsBox = container.NewHBox()
 	explorer.searchSuggestionsRow = container.NewHScroll(explorer.searchSuggestionsBox)
 	explorer.searchSuggestionsRow.Hide()
+	// statsRow also strings many labels together horizontally; wrap for the
+	// same reason.
+	statsRowScroll := container.NewHScroll(statsRow)
 	controlItems = append(controlItems,
 		widget.NewLabel("Filters"),
 		container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, explorer.searchEntry),
 		explorer.searchSuggestionsRow,
-		filterRow,
-		statsRow,
+		filterRowScroll,
+		statsRowScroll,
 	)
 	controls := container.NewVBox(controlItems...)
 	previewContent := container.NewVBox(
@@ -573,7 +582,7 @@ func (explorer *ScanResultsExplorer) defaultSortField() string {
 
 func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
 	if explorer.variant == ScanResultsExplorerVariantHeatmap {
-		headers := []string{"Asset ID", "Type", "Total Byte Size", "Texture Bytes", "Texture Pixels", "B/stud²", "Mesh Bytes", "Mesh Triangles", "Total Triangles", "Property", "Instance Path", "World Position"}
+		headers := []string{"Asset ID", "Type", "Total Byte Size", "Texture Bytes", "Texture Pixels", "GPU Memory", "B/stud²", "Mesh Bytes", "Mesh Triangles", "Total Triangles", "Property", "Instance Path", "World Position"}
 		for _, row := range explorer.allResults {
 			if strings.TrimSpace(row.Side) != "" {
 				return append([]string{"Side"}, headers...)
@@ -582,9 +591,9 @@ func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
 		return headers
 	}
 	if explorer.similarityActive {
-		return []string{"Similarity", "Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
+		return []string{"Similarity", "Asset ID", "Use Count", "Type", "Self Size", "GPU Memory", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
 	}
-	return []string{"Asset ID", "Use Count", "Type", "Self Size", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
+	return []string{"Asset ID", "Use Count", "Type", "Self Size", "GPU Memory", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
 }
 
 func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
@@ -596,6 +605,7 @@ func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
 			"Total Byte Size": 110,
 			"Texture Bytes":   110,
 			"Texture Pixels":  110,
+			"GPU Memory":      140,
 			"B/stud²":         120,
 			"Mesh Bytes":      110,
 			"Mesh Triangles":  110,
@@ -611,6 +621,7 @@ func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
 		"Use Count":       100,
 		"Type":            190,
 		"Self Size":       90,
+		"GPU Memory":      140,
 		"B/stud²":         120,
 		"Dimensions":      120,
 		"Triangles":       100,
@@ -993,6 +1004,8 @@ func (explorer *ScanResultsExplorer) columnValue(row loader.ScanResult, columnNa
 			return format.FormatIntCommas(row.PixelCount)
 		}
 		return "-"
+	case "GPU Memory":
+		return loader.FormatScanResultGPUMemory(row)
 	case "B/stud²":
 		return loader.FormatLargeTextureScore(row.LargeTextureScore)
 	case "Mesh Bytes":

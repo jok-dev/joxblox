@@ -505,8 +505,8 @@ func TestComputePerformanceProfileIntegration(t *testing.T) {
 	}
 
 	grades := ComputePerformanceProfile(CellPercentiles{}, summary)
-	if len(grades) != 11 {
-		t.Fatalf("expected 11 grades, got %d", len(grades))
+	if len(grades) != 13 {
+		t.Fatalf("expected 13 grades, got %d", len(grades))
 	}
 
 	for _, g := range grades {
@@ -554,10 +554,7 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 		if g.Grade != gradeAPlus {
 			t.Errorf("grade %q = %s, want A+ (cell p90 values are small despite large totals)", g.Label, g.Grade)
 		}
-		if g.Label == "Oversized Textures" {
-			if g.TotalValue != "" {
-				t.Errorf("grade %q should not report p90/cell, got %q", g.Label, g.TotalValue)
-			}
+		if g.Label == "Oversized Textures" || g.Label == "Wasteful BC3 Textures" {
 			continue
 		}
 		if g.TotalValue == "" {

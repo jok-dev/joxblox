@@ -31,17 +31,18 @@ const (
 )
 
 type CellPercentiles struct {
-	P90TotalBytes    float64
-	P90TextureBytes  float64
-	P90MeshBytes     float64
-	P90TriangleCount float64
-	P90UniqueAssets  float64
-	P90MeshParts     float64
-	P90Parts         float64
-	P90DrawCalls     float64
-	CellCount        int
-	CellSizeStuds    float64
-	WholeFileMode    bool
+	P90TotalBytes      float64
+	P90TextureBytes    float64
+	P90GPUTextureBytes float64
+	P90MeshBytes       float64
+	P90TriangleCount   float64
+	P90UniqueAssets    float64
+	P90MeshParts       float64
+	P90Parts           float64
+	P90DrawCalls       float64
+	CellCount          int
+	CellSizeStuds      float64
+	WholeFileMode      bool
 }
 
 func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
@@ -52,6 +53,7 @@ func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
 	occupied := 0
 	totalBytesValues := make([]float64, 0, len(cells))
 	textureBytesValues := make([]float64, 0, len(cells))
+	gpuTextureBytesValues := make([]float64, 0, len(cells))
 	meshBytesValues := make([]float64, 0, len(cells))
 	triangleCountValues := make([]float64, 0, len(cells))
 	uniqueAssetValues := make([]float64, 0, len(cells))
@@ -79,6 +81,7 @@ func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
 		occupied++
 		totalBytesValues = append(totalBytesValues, float64(cell.Stats.TotalBytes))
 		textureBytesValues = append(textureBytesValues, float64(cell.Stats.TextureBytes))
+		gpuTextureBytesValues = append(gpuTextureBytesValues, float64(EstimateGPUTextureBytes(cell.Stats.BC1PixelCount, cell.Stats.BC3PixelCount)))
 		meshBytesValues = append(meshBytesValues, float64(cell.Stats.MeshBytes))
 		triangleCountValues = append(triangleCountValues, float64(cell.Stats.TriangleCount))
 		uniqueAssetValues = append(uniqueAssetValues, float64(cell.Stats.UniqueAssetCount))
@@ -92,32 +95,34 @@ func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
 	}
 
 	return CellPercentiles{
-		P90TotalBytes:    PercentileFloat64(totalBytesValues, reportGenerationPercentile),
-		P90TextureBytes:  PercentileFloat64(textureBytesValues, reportGenerationPercentile),
-		P90MeshBytes:     PercentileFloat64(meshBytesValues, reportGenerationPercentile),
-		P90TriangleCount: PercentileFloat64(triangleCountValues, reportGenerationPercentile),
-		P90UniqueAssets:  PercentileFloat64(uniqueAssetValues, reportGenerationPercentile),
-		P90MeshParts:     PercentileFloat64(meshPartValues, reportGenerationPercentile),
-		P90Parts:         PercentileFloat64(partValues, reportGenerationPercentile),
-		P90DrawCalls:     PercentileFloat64(drawCallValues, reportGenerationPercentile),
-		CellCount:        occupied,
-		CellSizeStuds:    cellSize,
+		P90TotalBytes:      PercentileFloat64(totalBytesValues, reportGenerationPercentile),
+		P90TextureBytes:    PercentileFloat64(textureBytesValues, reportGenerationPercentile),
+		P90GPUTextureBytes: PercentileFloat64(gpuTextureBytesValues, reportGenerationPercentile),
+		P90MeshBytes:       PercentileFloat64(meshBytesValues, reportGenerationPercentile),
+		P90TriangleCount:   PercentileFloat64(triangleCountValues, reportGenerationPercentile),
+		P90UniqueAssets:    PercentileFloat64(uniqueAssetValues, reportGenerationPercentile),
+		P90MeshParts:       PercentileFloat64(meshPartValues, reportGenerationPercentile),
+		P90Parts:           PercentileFloat64(partValues, reportGenerationPercentile),
+		P90DrawCalls:       PercentileFloat64(drawCallValues, reportGenerationPercentile),
+		CellCount:          occupied,
+		CellSizeStuds:      cellSize,
 	}
 }
 
 func ComputeReportCellPercentiles(assetType AssetTypeConfig, cells []heatmap.Cell, summary Summary) CellPercentiles {
 	if assetType.DisableSpatialMode {
 		return CellPercentiles{
-			P90TotalBytes:    float64(summary.TotalBytes),
-			P90TextureBytes:  float64(summary.TextureBytes),
-			P90MeshBytes:     float64(summary.MeshBytes),
-			P90TriangleCount: float64(summary.TriangleCount),
-			P90UniqueAssets:  float64(summary.UniqueAssetCount),
-			P90MeshParts:     float64(summary.MeshPartCount),
-			P90Parts:         float64(summary.PartCount),
-			P90DrawCalls:     float64(summary.DrawCallCount),
-			CellCount:        1,
-			WholeFileMode:    true,
+			P90TotalBytes:      float64(summary.TotalBytes),
+			P90TextureBytes:    float64(summary.TextureBytes),
+			P90GPUTextureBytes: float64(EstimateGPUTextureBytes(summary.BC1PixelCount, summary.BC3PixelCount)),
+			P90MeshBytes:       float64(summary.MeshBytes),
+			P90TriangleCount:   float64(summary.TriangleCount),
+			P90UniqueAssets:    float64(summary.UniqueAssetCount),
+			P90MeshParts:       float64(summary.MeshPartCount),
+			P90Parts:           float64(summary.PartCount),
+			P90DrawCalls:       float64(summary.DrawCallCount),
+			CellCount:          1,
+			WholeFileMode:      true,
 		}
 	}
 	return ComputeCellPercentiles(cells)
@@ -160,6 +165,8 @@ func ComputePerformanceProfileForAssetType(assetType AssetTypeConfig, percentile
 	grades := []PerformanceGrade{
 		ComputeDownloadSizeGradeWithThresholds(summary.TotalBytes, percentiles.P90TotalBytes, useCellPercentiles, thresholds.TotalSizeMB),
 		ComputeTextureSizeGradeWithThresholds(summary.TextureBytes, percentiles.P90TextureBytes, useCellPercentiles, thresholds.TextureSizeMB),
+		ComputeGPUTextureMemoryGradeWithThresholds(summary.BC1PixelCount, summary.BC3PixelCount, summary.BC1BytesExact, summary.BC3BytesExact, percentiles.P90GPUTextureBytes, useCellPercentiles, thresholds.GPUTextureMemoryMB),
+		ComputeWastefulBC3GradeWithThresholds(summary.WastefulBC3Count, summary.WastefulBC3PixelCount, thresholds.WastefulBC3Count),
 		ComputeMeshSizeGradeWithThresholds(summary.MeshBytes, percentiles.P90MeshBytes, useCellPercentiles, thresholds.MeshSizeMB),
 		ComputeOversizedTextureCountGradeWithThresholds(summary.OversizedTextureCount, thresholds.OversizedTextures),
 		ComputeMeshComplexityGradeWithThresholds(summary.TriangleCount, percentiles.P90TriangleCount, useCellPercentiles, thresholds.MeshComplexity),
@@ -309,6 +316,184 @@ func ComputeTextureSizeGradeWithThresholds(textureBytes int64, percentilePerCell
 		TotalValue:        totalLabel,
 		Description:       TextureSizeGradeDescription(grade),
 		MetricDescription: "Total size of all image/texture assets in the scene",
+	}
+}
+
+// GPU-format byte rates (bytes per source pixel) for the formats Roblox picks
+// at upload time: BC1 for alpha-less sources, BC3 for sources that carry any
+// alpha channel. The mip-chain multiplier (~1.33x) covers the full pyramid.
+const (
+	BC1BytesPerPixel = 0.5
+	BC3BytesPerPixel = 1.0
+	MipChainFactor   = 4.0 / 3.0
+)
+
+// EstimateGPUTextureBytes sums the BC1 and BC3 GPU footprints (with mipmaps)
+// for the given pixel-count buckets. bc1Pixels are pixels from textures Roblox
+// would store as BC1; bc3Pixels are pixels from textures stored as BC3.
+//
+// Uses the 4/3 geometric mip-sum approximation; accurate to within ~0.01%
+// for typical asset resolutions but undercounts by ~10-30 B per texture
+// because BC formats require a full 4x4 block per mip regardless of how
+// small the mip is. For byte-for-byte RDC parity use
+// EstimateGPUTextureBytesExact instead.
+func EstimateGPUTextureBytes(bc1Pixels, bc3Pixels int64) int64 {
+	if bc1Pixels < 0 {
+		bc1Pixels = 0
+	}
+	if bc3Pixels < 0 {
+		bc3Pixels = 0
+	}
+	total := float64(bc1Pixels)*BC1BytesPerPixel*MipChainFactor +
+		float64(bc3Pixels)*BC3BytesPerPixel*MipChainFactor
+	return int64(math.Round(total))
+}
+
+// EstimateGPUTextureBytesExact returns the byte-accurate on-GPU footprint
+// of a single texture, summing each mip explicitly and rounding each mip's
+// block count up to the BC 4x4-block minimum. Matches what RDC reports.
+// Bytes-per-block: 8 for BC1, 16 for BC3. Full mip chain down to 1x1.
+// Returns 0 for non-positive dimensions.
+func EstimateGPUTextureBytesExact(width, height int, isBC3 bool) int64 {
+	if width <= 0 || height <= 0 {
+		return 0
+	}
+	bytesPerBlock := int64(8)
+	if isBC3 {
+		bytesPerBlock = 16
+	}
+	var total int64
+	w, h := width, height
+	for {
+		// BC formats store 4x4 blocks; any mip smaller than 4x4 still
+		// allocates one block per dimension-axis (minimum 1 block).
+		blocksX := (w + 3) / 4
+		if blocksX < 1 {
+			blocksX = 1
+		}
+		blocksY := (h + 3) / 4
+		if blocksY < 1 {
+			blocksY = 1
+		}
+		total += int64(blocksX) * int64(blocksY) * bytesPerBlock
+		if w == 1 && h == 1 {
+			break
+		}
+		if w > 1 {
+			w /= 2
+		}
+		if h > 1 {
+			h /= 2
+		}
+	}
+	return total
+}
+
+// EstimateBC3SavingsBytes returns how much VRAM would be reclaimed if every
+// wasteful-BC3 texture (alpha present but every pixel fully opaque) were
+// re-uploaded without an alpha channel and therefore encoded as BC1.
+func EstimateBC3SavingsBytes(wastefulBC3Pixels int64) int64 {
+	if wastefulBC3Pixels <= 0 {
+		return 0
+	}
+	saved := float64(wastefulBC3Pixels) * (BC3BytesPerPixel - BC1BytesPerPixel) * MipChainFactor
+	return int64(math.Round(saved))
+}
+
+func ComputeGPUTextureMemoryGrade(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
+	return ComputeGPUTextureMemoryGradeWithThresholds(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.GPUTextureMemoryMB)
+}
+
+// ComputeGPUTextureMemoryGradeWithThresholds grades combined BC1+BC3 GPU texture
+// memory. Prefers bc1BytesExact+bc3BytesExact (byte-for-byte match with
+// RenderDoc) and falls back to the pixel approximation when exact bytes
+// are not populated (older call sites or tests). percentilePerCell is the
+// p90 of per-cell GPU bytes when in spatial mode.
+func ComputeGPUTextureMemoryGradeWithThresholds(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+	totalBytes := bc1BytesExact + bc3BytesExact
+	if totalBytes <= 0 {
+		totalBytes = EstimateGPUTextureBytes(bc1Pixels, bc3Pixels)
+	}
+	gradeValue := float64(totalBytes) / float64(format.Megabyte)
+	totalLabel := ""
+	if useCellPercentile {
+		gradeValue = percentilePerCell / float64(format.Megabyte)
+		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
+	}
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	return PerformanceGrade{
+		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
+		Label:             "GPU Texture Memory",
+		Value:             format.FormatSizeAuto64(totalBytes),
+		TotalValue:        totalLabel,
+		Description:       GPUTextureMemoryGradeDescription(grade),
+		MetricDescription: "Estimated GPU VRAM: BC1 (0.5 B/px) for no-alpha sources + BC3 (1.0 B/px) for alpha sources, both with mipmaps",
+	}
+}
+
+func ComputeWastefulBC3Grade(wastefulCount int, wastefulPixels int64) PerformanceGrade {
+	return ComputeWastefulBC3GradeWithThresholds(wastefulCount, wastefulPixels, DefaultAssetType().Thresholds.WastefulBC3Count)
+}
+
+// ComputeWastefulBC3GradeWithThresholds grades how many textures were uploaded
+// with a fully-opaque alpha channel — Roblox encodes them as BC3 and so they
+// occupy 2x the VRAM they'd need as BC1.
+func ComputeWastefulBC3GradeWithThresholds(wastefulCount int, wastefulPixels int64, thresholds [6]float64) PerformanceGrade {
+	gradeValue := float64(wastefulCount)
+	grade := GradeFromThresholds(gradeValue, thresholds)
+	savings := EstimateBC3SavingsBytes(wastefulPixels)
+	valueLabel := fmt.Sprintf("%d textures", wastefulCount)
+	totalLabel := ""
+	if savings > 0 {
+		totalLabel = format.FormatSizeAuto64(savings) + " recoverable"
+	}
+	return PerformanceGrade{
+		Grade:             grade,
+		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
+		Label:             "Wasteful BC3 Textures",
+		Value:             valueLabel,
+		TotalValue:        totalLabel,
+		Description:       WastefulBC3GradeDescription(grade),
+		MetricDescription: "BC3 textures using <5% non-opaque alpha — the alpha channel is barely used, re-exporting without it would fall back to BC1 (0.5 B/px) and halve the GPU cost",
+	}
+}
+
+func WastefulBC3GradeDescription(grade string) string {
+	switch grade {
+	case gradeAPlus:
+		return "No BC3 textures with <5% alpha usage detected"
+	case gradeA:
+		return "A handful of BC3 textures barely use their alpha channel"
+	case gradeB:
+		return "Some BC3 textures use <5% of their alpha channel — dropping alpha would halve GPU cost"
+	case gradeC:
+		return "Notable number of barely-alpha BC3 textures — re-export without alpha for BC1"
+	case gradeD:
+		return "Many BC3 textures have minimal alpha usage; significant VRAM is recoverable"
+	case gradeE:
+		return "Heavy BC3 waste; most alpha channels cover <5% of pixels"
+	default:
+		return "Most alpha-bearing textures use alpha on <5% of pixels; large GPU savings available"
+	}
+}
+
+func GPUTextureMemoryGradeDescription(grade string) string {
+	switch grade {
+	case gradeAPlus:
+		return "Minimal GPU texture memory, negligible VRAM impact"
+	case gradeA:
+		return "Low GPU texture memory, plenty of headroom on all platforms"
+	case gradeB:
+		return "Moderate GPU texture memory, acceptable for most devices"
+	case gradeC:
+		return "Heavy GPU texture memory, may strain low-end devices"
+	case gradeD:
+		return "Very heavy GPU texture memory, risk of texture streaming hitches"
+	case gradeE:
+		return "Extreme GPU texture memory, likely to cause VRAM pressure"
+	default:
+		return "Massive GPU texture memory, will exceed VRAM budget on most devices"
 	}
 }
 

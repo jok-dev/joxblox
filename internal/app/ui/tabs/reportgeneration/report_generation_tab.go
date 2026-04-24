@@ -263,7 +263,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 			}
 
 			summary, points := buildReportSummaryAndPoints(positionedRefs, resolved, mapParts, assetType.OversizedTextureThreshold)
-			cells := buildReportGenerationCells(points, mapParts, positionedRefs)
+			cells := buildReportGenerationCells(points, mapParts, positionedRefs, resolved)
 			debug.Logf(
 				"Report generation summary for %s (%s): meshparts=%d parts=%d points=%d cells=%d resolved=%d unique-assets=%d",
 				sourcePath,
@@ -453,7 +453,7 @@ func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgre
 	return resolvedByReferenceKey
 }
 
-func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult) []heatmap.Cell {
+func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset) []heatmap.Cell {
 	if len(points) == 0 && len(mapParts) == 0 {
 		return nil
 	}
@@ -553,6 +553,9 @@ func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts [
 		cells[index].Stats.PartCount = counts.PartCount
 		cells[index].Stats.DrawCallCount = counts.DrawCallCount
 	}
+
+	applyPerCellSurfaceAppearanceCorrection(cells, cellIndexByKey, refs, resolved, renderInfos, scene, cellSizeWorld, columnCount, rowCount)
+
 	sort.Slice(cells, func(left int, right int) bool {
 		if cells[left].Row == cells[right].Row {
 			return cells[left].Column < cells[right].Column
@@ -560,6 +563,58 @@ func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts [
 		return cells[left].Row < cells[right].Row
 	})
 	return cells
+}
+
+// applyPerCellSurfaceAppearanceCorrection adjusts each cell's
+// BC1PixelCount so per-cell GPU-memory grading sees engine-allocated
+// MR-pack VRAM (one BC1 per unique normal map in the cell) instead of
+// the raw per-asset tally produced by BuildHeatmapCells.
+func applyPerCellSurfaceAppearanceCorrection(
+	cells []heatmap.Cell,
+	cellIndexByKey map[string]int,
+	refs []extractor.PositionedResult,
+	resolved map[string]reportGenerationResolvedAsset,
+	renderInfos map[string]reportGenerationInstanceRenderInfo,
+	scene *heatmaptab.RBXLHeatmapScene,
+	cellSizeWorld float64,
+	columnCount, rowCount int,
+) {
+	if len(cells) == 0 || len(refs) == 0 || cellSizeWorld <= 0 {
+		return
+	}
+	cellKeyForRef := func(ref extractor.PositionedResult) (string, bool) {
+		x, z, ok := refWorldXZ(ref, renderInfos)
+		if !ok {
+			return "", false
+		}
+		column := format.Clamp(int(math.Floor((x-scene.MinimumX)/cellSizeWorld)), 0, columnCount-1)
+		row := format.Clamp(int(math.Floor((z-scene.MinimumZ)/cellSizeWorld)), 0, rowCount-1)
+		return heatmaptab.HeatmapCellKey(row, column), true
+	}
+	materialsByCell := buildSurfaceAppearanceMaterialsByOwner(refs, resolved, cellKeyForRef)
+	for cellKey, materials := range materialsByCell {
+		index, ok := cellIndexByKey[cellKey]
+		if !ok {
+			continue
+		}
+		delta := report.ComputeSurfaceAppearanceMemoryCorrection(materials)
+		report.ApplyDeltaClamped(&cells[index].Stats.BC1PixelCount, delta.NetBC1Pixels())
+		report.ApplyDeltaClamped(&cells[index].Stats.BC3PixelCount, delta.NetBC3Pixels())
+	}
+}
+
+// refWorldXZ returns the (x, z) world position to attribute a ref to. If
+// the ref carries world coords directly it uses those; otherwise it
+// looks up the owning part via renderInfos.
+func refWorldXZ(ref extractor.PositionedResult, renderInfos map[string]reportGenerationInstanceRenderInfo) (float64, float64, bool) {
+	if ref.WorldX != nil && ref.WorldZ != nil {
+		return *ref.WorldX, *ref.WorldZ, true
+	}
+	ownerPath, _ := report.PositionedRefTarget(ref)
+	if info, ok := renderInfos[ownerPath]; ok && info.HasPosition {
+		return info.X, info.Z, true
+	}
+	return 0, 0, false
 }
 
 func buildReportGenerationStatsFromPreview(assetID int64, previewResult *loader.AssetPreviewResult) heatmap.AssetStats {
@@ -606,6 +661,22 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 		}
 		summary.TotalBytes += int64(stats.TotalBytes)
 		summary.TextureBytes += int64(stats.TextureBytes)
+		summary.TexturePixelCount += stats.PixelCount
+		if stats.PixelCount > 0 {
+			isBC3 := loader.ClassifyAsBC3(stats.HasAlphaChannel, stats.NonOpaqueAlphaPixels, ref.PropertyName)
+			exactBytes := report.EstimateGPUTextureBytesExact(stats.Width, stats.Height, isBC3)
+			if isBC3 {
+				summary.BC3PixelCount += stats.PixelCount
+				summary.BC3BytesExact += exactBytes
+				if loader.IsWastefulBC3(stats.HasAlphaChannel, stats.NonOpaqueAlphaPixels, stats.PixelCount, ref.PropertyName) {
+					summary.WastefulBC3PixelCount += stats.PixelCount
+					summary.WastefulBC3Count++
+				}
+			} else {
+				summary.BC1PixelCount += stats.PixelCount
+				summary.BC1BytesExact += exactBytes
+			}
+		}
 		summary.MeshBytes += int64(stats.MeshBytes)
 		summary.ResolvedCount++
 	}
@@ -627,6 +698,8 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 	}
 	summary.UniqueAssetCount = len(uniqueAssetIDs)
 	summary.OversizedTextureCount = countReportGenerationOversizedTextures(refs, resolved, mapParts, oversizedTextureThreshold)
+	correction := report.ApplySurfaceAppearanceMemoryCorrections(&summary, collectSurfaceAppearanceMaterialSlots(refs, resolved))
+	logGPUTextureMemoryBreakdown(summary, correction)
 
 	points := make([]heatmaptab.RBXLHeatmapPoint, 0, len(refs))
 	for _, ref := range refs {
@@ -754,6 +827,123 @@ func countEstimatedDrawCalls(mapParts []heatmaptab.RBXLHeatmapMapPart, refs []ex
 		}
 	}
 	return drawCalls + len(meshDrawKeys)
+}
+
+func logGPUTextureMemoryBreakdown(summary report.Summary, correction report.SurfaceAppearanceMemoryCorrectionSummary) {
+	totalBytes := summary.BC1BytesExact + summary.BC3BytesExact
+	debug.Logf(
+		"GPU texture memory breakdown (exact per-mip, matches RenderDoc):\n"+
+			"  raw per-asset BC1: %s (%d pixels)\n"+
+			"  + MR packs (1 BC1 per unique normal map): %d blank + %d custom = +%s (%d pixels)\n"+
+			"  - standalone M/R BC1s baked into MR packs: -%s (%d pixels)\n"+
+			"  corrected BC1: %s (%d pixels)\n"+
+			"  raw per-asset BC3: %s (%d pixels)\n"+
+			"  + normal upscale to paired color (across %d normals): +%s (%d pixels)\n"+
+			"  corrected BC3: %s (%d pixels)\n"+
+			"  total GPU texture memory: %s",
+		format.FormatSizeAuto64(correction.PreCorrectionBC1Bytes),
+		correction.PreCorrectionBC1Pixels,
+		correction.BlankMRGroupCount,
+		correction.CustomMRGroupCount,
+		format.FormatSizeAuto64(correction.AddedMRPackBytes),
+		correction.AddedMRPackPixels,
+		format.FormatSizeAuto64(correction.SubtractedStandaloneBytes),
+		correction.SubtractedStandalonePixels,
+		format.FormatSizeAuto64(summary.BC1BytesExact),
+		summary.BC1PixelCount,
+		format.FormatSizeAuto64(correction.PreCorrectionBC3Bytes),
+		correction.PreCorrectionBC3Pixels,
+		correction.UpscaledNormalCount,
+		format.FormatSizeAuto64(correction.AddedNormalUpscaleBytes),
+		correction.AddedNormalUpscalePixels,
+		format.FormatSizeAuto64(summary.BC3BytesExact),
+		summary.BC3PixelCount,
+		format.FormatSizeAuto64(totalBytes),
+	)
+}
+
+func collectSurfaceAppearanceMaterialSlots(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset) map[string]report.SurfaceAppearanceMaterialSlots {
+	allInOneOwner := func(extractor.PositionedResult) (string, bool) { return "", true }
+	return buildSurfaceAppearanceMaterialsByOwner(refs, resolved, allInOneOwner)[""]
+}
+
+// buildSurfaceAppearanceMaterialsByOwner walks SA-related refs once and
+// groups them into per-owner material maps. ownerKeyFn returns the
+// owner identifier for a ref (a constant for all-in-one-bucket, or a
+// per-cell key for spatial bucketing) — return false to skip the ref.
+//
+// Two MeshParts named identically (e.g. both "MeshPart") produce the
+// same instancePath for their child SurfaceAppearance, so the path
+// alone can't be a material key. The rusty extractor emits each
+// material's refs as a contiguous block (TexturePack, Normal, Color,
+// then the next material's TexturePack, Normal, Color, …); when a slot
+// we already filled is about to be overwritten, that's the boundary
+// into a new SA on the same path — we suffix the material key with
+// #1, #2, … to keep them distinct.
+func buildSurfaceAppearanceMaterialsByOwner(
+	refs []extractor.PositionedResult,
+	resolved map[string]reportGenerationResolvedAsset,
+	ownerKeyFn func(ref extractor.PositionedResult) (string, bool),
+) map[string]map[string]report.SurfaceAppearanceMaterialSlots {
+	materialsByOwner := map[string]map[string]report.SurfaceAppearanceMaterialSlots{}
+	type pathState struct {
+		currentKey string
+		counter    int
+	}
+	stateByOwnerPath := map[string]map[string]*pathState{}
+	for _, ref := range refs {
+		if ref.ID <= 0 {
+			continue
+		}
+		normalizedProperty := strings.ToLower(strings.TrimSpace(ref.PropertyName))
+		if !report.IsSurfaceAppearanceProperty(normalizedProperty, ref.InstanceType) {
+			continue
+		}
+		instancePath := strings.TrimSpace(ref.InstancePath)
+		if instancePath == "" {
+			continue
+		}
+		ownerKey, ok := ownerKeyFn(ref)
+		if !ok {
+			continue
+		}
+		refKey := extractor.AssetReferenceKey(ref.ID, ref.RawContent)
+		asset, found := resolved[refKey]
+		if !found || asset.Stats.PixelCount <= 0 {
+			continue
+		}
+		slot := report.SurfaceAppearanceMaterialSlot{
+			AssetKey:   refKey,
+			Width:      asset.Stats.Width,
+			Height:     asset.Stats.Height,
+			PixelCount: asset.Stats.PixelCount,
+		}
+
+		materials := materialsByOwner[ownerKey]
+		if materials == nil {
+			materials = map[string]report.SurfaceAppearanceMaterialSlots{}
+			materialsByOwner[ownerKey] = materials
+		}
+		pathStates := stateByOwnerPath[ownerKey]
+		if pathStates == nil {
+			pathStates = map[string]*pathState{}
+			stateByOwnerPath[ownerKey] = pathStates
+		}
+		state, hasState := pathStates[instancePath]
+		if !hasState {
+			state = &pathState{currentKey: instancePath}
+			pathStates[instancePath] = state
+		}
+		slots := materials[state.currentKey]
+		if !slots.TryAssignByProperty(normalizedProperty, slot) {
+			state.counter++
+			state.currentKey = fmt.Sprintf("%s#%d", instancePath, state.counter)
+			slots = materials[state.currentKey]
+			slots.TryAssignByProperty(normalizedProperty, slot)
+		}
+		materials[state.currentKey] = slots
+	}
+	return materialsByOwner
 }
 
 func buildReportGenerationRenderInfos(mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult) map[string]reportGenerationInstanceRenderInfo {

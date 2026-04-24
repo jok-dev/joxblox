@@ -53,8 +53,11 @@ type loadedMeshModel struct {
 	colors      []uint8
 	baseColor   [3]float32
 	bounds      rl.BoundingBox
-	creaseEdges []uint16 // flat list of vertex index pairs (a0, b0, a1, b1, ...)
-	sceneMode   bool     // when true, baseColor is used as the render tint instead of vertex colors
+	// outlineSegments holds the crease-edge endpoints expanded into world-space
+	// Vector3 pairs (start0, end0, start1, end1, ...). Precomputed once so the
+	// selection highlight doesn't re-resolve indices per frame.
+	outlineSegments []rl.Vector3
+	sceneMode       bool // when true, baseColor is used as the render tint instead of vertex colors
 }
 
 const mainVertSrc = `
@@ -389,13 +392,14 @@ func createModelFromRawData(positions []float32, indices32 []uint32, colors []ui
 	}
 
 	storedPositions := append([]float32(nil), positions...)
+	creaseEdges := computeCreaseEdges(storedPositions, indices16)
 	modelData := loadedMeshModel{
-		positions:   storedPositions,
-		normals:     normals,
-		indices:     indices16,
-		bounds:      computeBoundingBox(positions),
-		creaseEdges: computeCreaseEdges(storedPositions, indices16),
-		sceneMode:   sceneMode,
+		positions:       storedPositions,
+		normals:         normals,
+		indices:         indices16,
+		bounds:          computeBoundingBox(positions),
+		outlineSegments: resolveOutlineSegments(storedPositions, creaseEdges),
+		sceneMode:       sceneMode,
 		baseColor: [3]float32{
 			float32(colors[0]) / 255.0,
 			float32(colors[1]) / 255.0,
@@ -852,35 +856,33 @@ func computeBoundingBox(positions []float32) rl.BoundingBox {
 const creaseAngleDotThreshold = 0.9063
 
 func drawSelectedMeshHighlight(meshModel loadedMeshModel, bgR uint8, bgG uint8, bgB uint8) {
-	if len(meshModel.creaseEdges) < 2 {
+	segments := meshModel.outlineSegments
+	if len(segments) < 2 {
 		return
 	}
 	outlineColor := selectedMeshOutlineColor(bgR, bgG, bgB)
-	positions := meshModel.positions
-
-	// rl.SetLineWidth is a no-op on modern GL core profile, so draw each crease
-	// edge as a thin cylinder. Radius scales with the mesh bounding-box diagonal
-	// so small props and large structures both get a visible but proportional
-	// outline.
-	dx := meshModel.bounds.Max.X - meshModel.bounds.Min.X
-	dy := meshModel.bounds.Max.Y - meshModel.bounds.Min.Y
-	dz := meshModel.bounds.Max.Z - meshModel.bounds.Min.Z
-	diagonal := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
-	radius := diagonal * 0.0006
-	if radius < 0.0015 {
-		radius = 0.0015
+	for i := 0; i+1 < len(segments); i += 2 {
+		rl.DrawLine3D(segments[i], segments[i+1], outlineColor)
 	}
+}
 
-	for i := 0; i+1 < len(meshModel.creaseEdges); i += 2 {
-		aIdx := int(meshModel.creaseEdges[i]) * 3
-		bIdx := int(meshModel.creaseEdges[i+1]) * 3
+func resolveOutlineSegments(positions []float32, creaseEdges []uint16) []rl.Vector3 {
+	if len(creaseEdges) < 2 {
+		return nil
+	}
+	segments := make([]rl.Vector3, 0, len(creaseEdges))
+	for i := 0; i+1 < len(creaseEdges); i += 2 {
+		aIdx := int(creaseEdges[i]) * 3
+		bIdx := int(creaseEdges[i+1]) * 3
 		if aIdx+2 >= len(positions) || bIdx+2 >= len(positions) {
 			continue
 		}
-		start := rl.Vector3{X: positions[aIdx], Y: positions[aIdx+1], Z: positions[aIdx+2]}
-		end := rl.Vector3{X: positions[bIdx], Y: positions[bIdx+1], Z: positions[bIdx+2]}
-		rl.DrawCylinderEx(start, end, radius, radius, 4, outlineColor)
+		segments = append(segments,
+			rl.Vector3{X: positions[aIdx], Y: positions[aIdx+1], Z: positions[aIdx+2]},
+			rl.Vector3{X: positions[bIdx], Y: positions[bIdx+1], Z: positions[bIdx+2]},
+		)
 	}
+	return segments
 }
 
 // computeCreaseEdges returns the edges of a mesh whose two adjacent triangles

@@ -57,6 +57,12 @@ type ScanResult struct {
 	TextureBytes         int
 	MeshBytes            int
 	PixelCount           int64
+	// HasAlphaChannel is true when the decoded image carries an alpha channel.
+	HasAlphaChannel bool
+	// NonOpaqueAlphaPixels counts how many pixels have alpha < 255. Combined
+	// with PixelCount, this drives BC1 vs BC3 classification (0 non-opaque →
+	// BC1 on Roblox) and the "wasteful BC3" threshold (< 5% non-opaque).
+	NonOpaqueAlphaPixels int64
 	SceneSurfaceArea     float64
 	LargestSurfacePath   string
 	LargeTextureScore    float64

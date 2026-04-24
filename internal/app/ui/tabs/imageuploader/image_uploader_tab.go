@@ -540,7 +540,10 @@ func NewImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		}(countValue, outputFolderPath, selectedPatternMode, imgWidth, imgHeight, samples, interpolator, uploadEnabled, uploadCreator, apiKey, assetNameBase, description)
 	}
 
-	controls := container.NewHBox(
+	// These two control rows sum to ~900–1000px of fixed-width grids; wrap
+	// in HScroll so the window can shrink below that width with the control
+	// row scrolling horizontally instead of pinning the whole window.
+	controls := container.NewHScroll(container.NewHBox(
 		widget.NewLabel("Count:"),
 		container.NewGridWrap(fyne.NewSize(80, 36), countEntry),
 		widget.NewLabel("Pattern:"),
@@ -552,13 +555,13 @@ func NewImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		selectFolderButton,
 		generateButton,
 		stopButton,
-	)
-	sampleSizesRow := container.NewHBox(
+	))
+	sampleSizesRow := container.NewHScroll(container.NewHBox(
 		widget.NewLabel("Samples:"),
 		sampleListContainer,
 		container.NewGridWrap(fyne.NewSize(100, 36), addSampleSelect),
 		addSampleButton,
-	)
+	))
 	infoText := widget.NewLabel(
 		"Generates PNG files at the selected size. Optionally uploads each image to Roblox as a decal and lists the returned asset IDs. " +
 			"When multiple sample sizes are selected, each image is generated once then downsampled to each size, and results are grouped by sample size. " +
@@ -587,7 +590,10 @@ func NewImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 	uploadWarning.TextSize = 12
 	uploadWarning.TextStyle = fyne.TextStyle{Bold: true}
 
-	return container.NewVBox(
+	// Wrap the whole tab in a VScroll so its ~600px stack of form controls
+	// doesn't force a floor on the main window height. AppTabs inherits the
+	// max MinSize across children, so any one tall tab pins every tab.
+	return container.NewVScroll(container.NewVBox(
 		infoText,
 		container.NewBorder(nil, nil, widget.NewLabel("Output Folder:"), nil, outputFolderEntry),
 		uploadSettingsCard,
@@ -597,7 +603,7 @@ func NewImageUploaderTab(window fyne.Window) fyne.CanvasObject {
 		statusLabel,
 		widget.NewLabel("Generated File Paths / Uploaded Asset IDs:"),
 		generatedPathsEntry,
-	)
+	))
 }
 
 func generatedAssetDisplayName(baseName string, index int) string {

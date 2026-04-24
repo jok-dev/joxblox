@@ -9,4 +9,5 @@ const (
 	tabTitleLodViewer        = "LOD Viewer"
 	tabTitleOptimizeAssets   = "Optimize Assets"
 	tabTitleImageGenerator   = "Image Generator"
+	tabTitleRenderDoc        = "RenderDoc"
 )

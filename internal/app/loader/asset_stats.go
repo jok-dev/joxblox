@@ -24,6 +24,10 @@ func BuildAssetStatsFromPreview(assetID int64, previewResult *AssetPreviewResult
 	if previewResult.Image != nil && previewResult.Image.Width > 0 && previewResult.Image.Height > 0 {
 		stats.TextureBytes = previewResult.Image.BytesSize
 		stats.PixelCount = int64(previewResult.Image.Width * previewResult.Image.Height)
+		stats.Width = previewResult.Image.Width
+		stats.Height = previewResult.Image.Height
+		stats.HasAlphaChannel = previewResult.Image.HasAlphaChannel
+		stats.NonOpaqueAlphaPixels = previewResult.Image.NonOpaqueAlphaPixels
 	}
 	if mesh.IsMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
 		stats.MeshBytes = stats.TotalBytes

@@ -366,7 +366,7 @@ func TestBuildReportGenerationCellsUsesFixedCellSize(t *testing.T) {
 		},
 	}
 
-	cells := buildReportGenerationCells(points, mapParts, nil)
+	cells := buildReportGenerationCells(points, mapParts, nil, nil)
 	if len(cells) != 2 {
 		t.Fatalf("expected 2 occupied cells, got %d", len(cells))
 	}
@@ -405,7 +405,7 @@ func TestBuildReportGenerationCellsUsesMapPartsForPartCounts(t *testing.T) {
 		},
 	}
 
-	cells := buildReportGenerationCells(points, mapParts, nil)
+	cells := buildReportGenerationCells(points, mapParts, nil, nil)
 	if len(cells) != 2 {
 		t.Fatalf("expected 2 cells after adding map-part-only cell, got %d", len(cells))
 	}
@@ -453,7 +453,7 @@ func TestBuildReportGenerationCellsDeduplicatesAssetSizeWithinCell(t *testing.T)
 		},
 	}
 
-	cells := buildReportGenerationCells(points, nil, nil)
+	cells := buildReportGenerationCells(points, nil, nil, nil)
 	if len(cells) != 1 {
 		t.Fatalf("expected 1 cell, got %d", len(cells))
 	}
@@ -522,7 +522,7 @@ func TestBuildReportGenerationCellsEstimatesDrawCallsFromRefs(t *testing.T) {
 		{ID: 200, RawContent: "rbxassetid://200", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2", PropertyName: "TextureContent", WorldX: &x2, WorldY: &y2, WorldZ: &z2},
 	}
 
-	cells := buildReportGenerationCells(points, nil, refs)
+	cells := buildReportGenerationCells(points, nil, refs, nil)
 	if len(cells) != 1 {
 		t.Fatalf("expected 1 cell, got %d", len(cells))
 	}
