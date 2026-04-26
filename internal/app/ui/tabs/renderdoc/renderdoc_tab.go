@@ -54,29 +54,51 @@ var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category"
 
 // NewRenderDocTab builds the RenderDoc tab. A launcher row sits above two
 // sub-tabs: Textures (existing UI) and Meshes (new). The launcher's capture
-// list dispatches loads to whichever sub-tab is currently selected.
+// list dispatches loads to whichever sub-tab is currently selected and shows
+// an indicator next to the capture currently loaded in that sub-tab.
 func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
-	texturesView, loadTexturesFromPath := newTexturesSubTab(window)
-	meshesView, loadMeshesFromPath := newMeshesSubTab(window)
+	const (
+		texturesIndex = 0
+		meshesIndex   = 1
+	)
+
+	var lc *launcher
+	texturesView, loadTexturesFromPath := newTexturesSubTab(window, func(path string) {
+		if lc != nil {
+			lc.setLoaded(texturesIndex, path)
+		}
+	})
+	meshesView, loadMeshesFromPath := newMeshesSubTab(window, func(path string) {
+		if lc != nil {
+			lc.setLoaded(meshesIndex, path)
+		}
+	})
+
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Textures", texturesView),
 		container.NewTabItem("Meshes", meshesView),
 	)
+
 	loadIntoActiveSubTab := func(path string) {
 		switch tabs.SelectedIndex() {
-		case 0:
+		case texturesIndex:
 			loadTexturesFromPath(path)
-		case 1:
+		case meshesIndex:
 			loadMeshesFromPath(path)
 		}
 	}
-	launcher := newLauncherRow(window, loadIntoActiveSubTab)
-	return container.NewBorder(launcher, nil, nil, nil, tabs)
+
+	lc = newLauncher(window, loadIntoActiveSubTab)
+	tabs.OnSelected = func(*container.TabItem) {
+		lc.setActiveSubTab(tabs.SelectedIndex())
+	}
+
+	return container.NewBorder(lc.canvas, nil, nil, nil, tabs)
 }
 
 // newTexturesSubTab builds the Textures sub-tab. The window is used to parent
 // dialogs shown from background goroutines.
-func newTexturesSubTab(window fyne.Window) (fyne.CanvasObject, func(path string)) {
+func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
 	state := &renderdocTabState{
 		sortColumn:     "VRAM",
 		sortDescending: true,
@@ -313,6 +335,9 @@ func newTexturesSubTab(window fyne.Window) (fyne.CanvasObject, func(path string)
 		previewCanvas.Image = nil
 		previewCanvas.Refresh()
 		table.Refresh()
+		if onLoaded != nil {
+			onLoaded(loadedPath)
+		}
 	}
 
 	statusFn := func(message string) {

@@ -32,7 +32,7 @@ type meshesTabState struct {
 
 var meshColumnHeaders = []string{"ID", "Verts", "Tris", "VB bytes", "IB bytes", "Draws", "Layout", "Hash"}
 
-func newMeshesSubTab(window fyne.Window) (fyne.CanvasObject, func(path string)) {
+func newMeshesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
 	state := &meshesTabState{
 		sortColumn:     "VB bytes",
 		sortDescending: true,
@@ -157,6 +157,9 @@ func newMeshesSubTab(window fyne.Window) (fyne.CanvasObject, func(path string)) 
 		previewWidget.Clear()
 		previewInfoLabel.SetText("Select a mesh to preview.")
 		table.Refresh()
+		if onLoaded != nil {
+			onLoaded(loadedPath)
+		}
 	}
 
 	loadFromPath := func(path string) {
