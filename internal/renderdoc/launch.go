@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 )
 
@@ -80,6 +81,28 @@ func LaunchStudioWithRenderDoc(studioPath, captureFileTemplate string) (*exec.Cm
 		return nil, fmt.Errorf("start renderdoccmd: %w", startErr)
 	}
 	return cmd, nil
+}
+
+// LocateQRenderDoc finds qrenderdoc.exe (the full RenderDoc UI) so callers
+// can open captures in it for deeper inspection. Searches next to
+// renderdoccmd first, then PATH, then the default Windows install path.
+func LocateQRenderDoc() (string, error) {
+	if cmdPath, err := locateRenderdoccmd(); err == nil {
+		candidate := filepath.Join(filepath.Dir(cmdPath), "qrenderdoc.exe")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		}
+	}
+	if onPath, err := exec.LookPath("qrenderdoc"); err == nil {
+		return onPath, nil
+	}
+	if runtime.GOOS == "windows" {
+		candidate := `C:\Program Files\RenderDoc\qrenderdoc.exe`
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("qrenderdoc not found — install RenderDoc (https://renderdoc.org)")
 }
 
 func buildLaunchCommand(renderdoccmdPath, studioPath, captureFileTemplate string) *exec.Cmd {

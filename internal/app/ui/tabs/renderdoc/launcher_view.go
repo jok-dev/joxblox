@@ -22,10 +22,15 @@ import (
 
 const (
 	preferenceKeyRenderDocStudioPath = "renderdoc.studio_path"
+	preferenceKeyRenderDocAutoLoad   = "renderdoc.auto_load_latest"
 	captureFileStem                  = "capture"
 	captureListMinHeight             = 80
 	loadedIndicator                  = "● "
 	notLoadedIndicator               = "   "
+	// autoLoadFreshnessWindow filters out renames/copies of older captures
+	// from triggering an auto-load — only files whose mtime is within this
+	// window when the watcher sees them are treated as fresh new captures.
+	autoLoadFreshnessWindow = 10 * time.Second
 )
 
 // captureEntry is one row in the captures list.
@@ -56,10 +61,13 @@ type launcher struct {
 	captures        []captureEntry
 	loadedBySubTab  map[int]string
 	activeSubTabIdx int
+	autoLoadLatest  bool
+	firstScanDone   bool
 
 	header        *widget.Label
 	list          *widget.List
 	refreshLister func()
+	loadCapture   func(string)
 }
 
 // setLoaded records that the given sub-tab successfully loaded the given
@@ -101,6 +109,8 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	l := &launcher{
 		sessionDir:     sessionDir,
 		loadedBySubTab: make(map[int]string),
+		loadCapture:    loadCapture,
+		autoLoadLatest: loadAutoLoadPreference(),
 	}
 
 	studioLabel := widget.NewLabel(formatStudioVersionLabel(LoadStudioPath()))
@@ -119,9 +129,11 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 		func() fyne.CanvasObject {
 			name := widget.NewLabel("")
 			loadBtn := widget.NewButton("Load", nil)
+			rdBtn := widget.NewButton("RenderDoc", nil)
 			renameBtn := widget.NewButton("Rename", nil)
+			deleteBtn := widget.NewButton("Delete", nil)
 			return container.NewBorder(nil, nil, nil,
-				container.NewHBox(loadBtn, renameBtn),
+				container.NewHBox(loadBtn, rdBtn, renameBtn, deleteBtn),
 				name,
 			)
 		},
@@ -135,11 +147,13 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 				return
 			}
 			rightBox, ok := row.Objects[1].(*fyne.Container)
-			if !ok || len(rightBox.Objects) < 2 {
+			if !ok || len(rightBox.Objects) < 4 {
 				return
 			}
 			loadBtn := rightBox.Objects[0].(*widget.Button)
-			renameBtn := rightBox.Objects[1].(*widget.Button)
+			rdBtn := rightBox.Objects[1].(*widget.Button)
+			renameBtn := rightBox.Objects[2].(*widget.Button)
+			deleteBtn := rightBox.Objects[3].(*widget.Button)
 
 			l.mu.Lock()
 			if id < 0 || id >= len(l.captures) {
@@ -161,8 +175,14 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 					loadCapture(entry.Path)
 				}
 			}
+			rdBtn.OnTapped = func() {
+				openInRenderDoc(window, entry.Path)
+			}
 			renameBtn.OnTapped = func() {
 				promptRename(window, entry, l.refreshLister)
+			}
+			deleteBtn.OnTapped = func() {
+				promptDelete(window, entry, l.refreshLister)
 			}
 		},
 	)
@@ -188,6 +208,14 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 			fyneDialog.ShowError(fmt.Errorf("open captures folder: %w", err), window)
 		}
 	})
+
+	autoLoadCheck := widget.NewCheck("Auto-load new", func(checked bool) {
+		l.mu.Lock()
+		l.autoLoadLatest = checked
+		l.mu.Unlock()
+		saveAutoLoadPreference(checked)
+	})
+	autoLoadCheck.SetChecked(l.autoLoadLatest)
 
 	var launchButton *widget.Button
 	launchButton = widget.NewButton("Launch with RenderDoc", func() {
@@ -243,7 +271,10 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	startCaptureFolderWatcher(l.sessionDir, l.refreshLister)
 
 	topRow := container.NewBorder(nil, nil, studioLabel, launchButton, statusLabel)
-	capturesHeaderRow := container.NewBorder(nil, nil, nil, openFolderButton, l.header)
+	capturesHeaderRow := container.NewBorder(nil, nil, nil,
+		container.NewHBox(autoLoadCheck, openFolderButton),
+		l.header,
+	)
 	l.canvas = container.NewVBox(topRow, capturesHeaderRow, captureListScroll)
 	return l
 }
@@ -292,14 +323,53 @@ func (l *launcher) refreshCaptures() {
 	})
 
 	l.mu.Lock()
+	previousPaths := make(map[string]struct{}, len(l.captures))
+	for _, prev := range l.captures {
+		previousPaths[prev.Path] = struct{}{}
+	}
 	l.captures = items
 	count := len(l.captures)
+	autoLoad := l.autoLoadLatest
+	firstScan := !l.firstScanDone
+	l.firstScanDone = true
+	loadCapture := l.loadCapture
 	l.mu.Unlock()
 
 	fyne.Do(func() {
 		l.header.SetText(fmt.Sprintf("Captures: %d", count))
 		l.list.Refresh()
 	})
+
+	if autoLoad && !firstScan && loadCapture != nil {
+		if newest, ok := newestFreshAddition(items, previousPaths); ok {
+			pathToLoad := newest.Path
+			fyne.Do(func() {
+				loadCapture(pathToLoad)
+			})
+		}
+	}
+}
+
+// newestFreshAddition picks the newest entry whose path wasn't in the previous
+// scan AND whose mtime is recent enough to count as a freshly written capture
+// (filtering out renames and copies of older files).
+func newestFreshAddition(items []captureEntry, previousPaths map[string]struct{}) (captureEntry, bool) {
+	var newest captureEntry
+	var found bool
+	now := time.Now()
+	for _, item := range items {
+		if _, existed := previousPaths[item.Path]; existed {
+			continue
+		}
+		if now.Sub(item.ModTime) > autoLoadFreshnessWindow {
+			continue
+		}
+		if !found || item.ModTime.After(newest.ModTime) {
+			newest = item
+			found = true
+		}
+	}
+	return newest, found
 }
 
 // startCaptureFolderWatcher launches an fsnotify watcher on the given dir
@@ -338,6 +408,54 @@ func startCaptureFolderWatcher(dir string, onChange func()) {
 			}
 		}
 	}()
+}
+
+// openInRenderDoc launches qrenderdoc.exe pointed at the given .rdc so the
+// user can drop into the full RenderDoc UI for deeper inspection.
+func openInRenderDoc(window fyne.Window, capturePath string) {
+	qrPath, err := renderdoc.LocateQRenderDoc()
+	if err != nil {
+		fyneDialog.ShowError(err, window)
+		return
+	}
+	if startErr := exec.Command(qrPath, capturePath).Start(); startErr != nil {
+		fyneDialog.ShowError(fmt.Errorf("open in RenderDoc: %w", startErr), window)
+	}
+}
+
+// promptDelete asks the user to confirm and removes the capture file. The
+// fsnotify watcher catches the removal and refreshes the list; we still call
+// onDone explicitly so the user sees the row disappear without waiting.
+func promptDelete(window fyne.Window, entry captureEntry, onDone func()) {
+	fyneDialog.ShowConfirm("Delete capture",
+		fmt.Sprintf("Delete %s? This cannot be undone.", entry.Name),
+		func(confirmed bool) {
+			if !confirmed {
+				return
+			}
+			if err := os.Remove(entry.Path); err != nil {
+				fyneDialog.ShowError(fmt.Errorf("delete: %w", err), window)
+				return
+			}
+			if onDone != nil {
+				onDone()
+			}
+		}, window)
+}
+
+// loadAutoLoadPreference reads the persisted auto-load checkbox state.
+func loadAutoLoadPreference() bool {
+	if currentApp := fyne.CurrentApp(); currentApp != nil {
+		return currentApp.Preferences().Bool(preferenceKeyRenderDocAutoLoad)
+	}
+	return false
+}
+
+// saveAutoLoadPreference persists the auto-load checkbox state.
+func saveAutoLoadPreference(value bool) {
+	if currentApp := fyne.CurrentApp(); currentApp != nil {
+		currentApp.Preferences().SetBool(preferenceKeyRenderDocAutoLoad, value)
+	}
 }
 
 // promptRename opens a dialog for renaming a capture. On confirm, the .rdc
