@@ -36,6 +36,50 @@ type materialsTabState struct {
 
 var materialColumnHeaders = []string{"Color", "Normal", "MR", "Color Hash", "Draws", "Meshes", "VRAM"}
 
+type materialPreview struct {
+	colorImg, normalImg, mrImg       *canvas.Image
+	colorLabel, normalLabel, mrLabel *widget.Label
+	infoEntry                        *widget.Entry
+	container                        *fyne.Container
+}
+
+func newMaterialPreview() *materialPreview {
+	mk := func(title string) (*canvas.Image, *widget.Label, *fyne.Container) {
+		img := canvas.NewImageFromImage(nil)
+		img.FillMode = canvas.ImageFillContain
+		img.SetMinSize(fyne.NewSize(256, 256))
+		lbl := widget.NewLabel(title)
+		return img, lbl, container.NewBorder(lbl, nil, nil, nil, img)
+	}
+	colorImg, colorLabel, colorBox := mk("Color: —")
+	normalImg, normalLabel, normalBox := mk("Normal: —")
+	mrImg, mrLabel, mrBox := mk("MR: —")
+	row := container.NewGridWithColumns(3, colorBox, normalBox, mrBox)
+	infoEntry := widget.NewMultiLineEntry()
+	infoEntry.Wrapping = fyne.TextWrapWord
+	infoEntry.Disable()
+	infoEntry.SetText("Select a material to preview.")
+	return &materialPreview{
+		colorImg: colorImg, normalImg: normalImg, mrImg: mrImg,
+		colorLabel: colorLabel, normalLabel: normalLabel, mrLabel: mrLabel,
+		infoEntry:  infoEntry,
+		container:  container.NewBorder(row, nil, nil, nil, infoEntry),
+	}
+}
+
+func (p *materialPreview) reset() {
+	p.colorImg.Image = nil
+	p.normalImg.Image = nil
+	p.mrImg.Image = nil
+	p.colorImg.Refresh()
+	p.normalImg.Refresh()
+	p.mrImg.Refresh()
+	p.colorLabel.SetText("Color: —")
+	p.normalLabel.SetText("Normal: —")
+	p.mrLabel.SetText("MR: —")
+	p.infoEntry.SetText("Select a material to preview.")
+}
+
 func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
 	state := &materialsTabState{
 		sortColumn:     "VRAM",
@@ -57,11 +101,8 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 	filterEntry := widget.NewEntry()
 	filterEntry.SetPlaceHolder("Filter by texture ID or hash")
 
-	previewInfoLabel := widget.NewMultiLineEntry()
-	previewInfoLabel.Wrapping = fyne.TextWrapWord
-	previewInfoLabel.SetText("Select a material to preview.")
-	previewInfoLabel.Disable()
-	previewPane := container.NewMax(previewInfoLabel)
+	preview := newMaterialPreview()
+	previewPane := preview.container
 
 	var table *widget.Table
 	table = widget.NewTableWithHeaders(
@@ -122,7 +163,7 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 			return
 		}
 		state.selectedRow = id.Row
-		updateMaterialPreviewPlaceholder(state, state.displayMaterials[id.Row], previewInfoLabel)
+		updateMaterialPreview(state, state.displayMaterials[id.Row], preview)
 	}
 
 	filterEntry.OnChanged = func(text string) {
@@ -169,7 +210,7 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 		pathLabel.SetText(fmt.Sprintf("Loaded: %s", loadedPath))
 		summaryLabel.SetText(fmt.Sprintf("%d materials across %d draw calls", len(materials), countTotalDraws(materials)))
 		countLabel.SetText(fmt.Sprintf("Showing %d of %d materials", len(state.displayMaterials), len(state.materials)))
-		previewInfoLabel.SetText("Select a material to preview.")
+		preview.reset()
 		table.Refresh()
 		if onLoaded != nil {
 			onLoaded(loadedPath)
@@ -301,19 +342,19 @@ func materialColorHash(state *materialsTabState, mat renderdoc.Material) string 
 	return "—"
 }
 
-func updateMaterialPreviewPlaceholder(state *materialsTabState, mat renderdoc.Material, label *widget.Entry) {
+func updateMaterialPreview(state *materialsTabState, mat renderdoc.Material, preview *materialPreview) {
+	setPreviewMap(state, mat.ColorTextureID, preview.colorImg, preview.colorLabel, "Color")
+	setPreviewMap(state, mat.NormalTextureID, preview.normalImg, preview.normalLabel, "Normal")
+	setPreviewMap(state, mat.MRTextureID, preview.mrImg, preview.mrLabel, "MR")
+
 	var b strings.Builder
-	fmt.Fprintf(&b, "Color: %s\nNormal: %s\nMR: %s\n",
-		nonEmptyOrDash(mat.ColorTextureID),
-		nonEmptyOrDash(mat.NormalTextureID),
-		nonEmptyOrDash(mat.MRTextureID))
-	if len(mat.OtherTextureIDs) > 0 {
-		fmt.Fprintf(&b, "Other: %s\n", strings.Join(mat.OtherTextureIDs, ", "))
-	}
-	fmt.Fprintf(&b, "\nDraws: %d  Meshes: %d  VRAM: %s\n",
+	fmt.Fprintf(&b, "Draws: %d   Meshes: %d   VRAM: %s\n",
 		mat.DrawCallCount, len(mat.MeshHashes), format.FormatSizeAuto64(mat.TotalBytes))
+	if len(mat.OtherTextureIDs) > 0 {
+		fmt.Fprintf(&b, "Other PS textures: %s\n", strings.Join(mat.OtherTextureIDs, ", "))
+	}
 	if len(mat.MeshHashes) > 0 {
-		b.WriteString("\nMesh hashes:\n")
+		b.WriteString("\nMesh hashes (first 16 chars):\n")
 		for _, h := range mat.MeshHashes {
 			if len(h) > 16 {
 				h = h[:16]
@@ -321,14 +362,37 @@ func updateMaterialPreviewPlaceholder(state *materialsTabState, mat renderdoc.Ma
 			b.WriteString(h + "\n")
 		}
 	}
-	label.SetText(b.String())
+	preview.infoEntry.SetText(b.String())
 }
 
-func nonEmptyOrDash(s string) string {
-	if s == "" {
-		return "—"
+func setPreviewMap(state *materialsTabState, texID string, img *canvas.Image, label *widget.Label, kind string) {
+	if texID == "" {
+		img.Image = nil
+		img.Refresh()
+		label.SetText(kind + ": —")
+		return
 	}
-	return s
+	label.SetText(kind + ": " + texID)
+	if cached, ok := state.thumbnailCache[texID]; ok && cached != nil {
+		img.Image = cached
+		img.Refresh()
+		return
+	}
+	tex, ok := state.textureByID[texID]
+	if !ok || state.bufferStore == nil {
+		img.Image = nil
+		img.Refresh()
+		return
+	}
+	decoded, err := renderdoc.DecodeTexturePreview(tex, state.bufferStore)
+	if err != nil || decoded == nil {
+		img.Image = nil
+		img.Refresh()
+		return
+	}
+	state.thumbnailCache[texID] = decoded
+	img.Image = decoded
+	img.Refresh()
 }
 
 func countTotalDraws(materials []renderdoc.Material) int {
