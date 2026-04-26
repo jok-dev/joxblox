@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"joxblox/internal/renderdoc"
@@ -15,34 +17,122 @@ import (
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/fsnotify/fsnotify"
 )
 
 const (
 	preferenceKeyRenderDocStudioPath = "renderdoc.studio_path"
 	captureFileStem                  = "capture"
+	captureListMinHeight             = 140
 )
 
+// captureEntry is one row in the captures list.
+type captureEntry struct {
+	Name    string
+	Path    string
+	ModTime time.Time
+}
+
 // capturesDirectory returns the per-app directory we tell renderdoccmd to
-// write captures into via `-c`. Stable across launches so the user can find
-// older captures without hunting around.
+// write captures into via `-c`. Stable across launches so older captures
+// remain reachable from the list and the "Open folder" button.
 func capturesDirectory() string {
 	return filepath.Join(os.TempDir(), "joxblox-renderdoc-captures")
 }
 
-// newLauncherRow builds the "Launch Studio with RenderDoc" row that mounts
-// above the RenderDoc sub-tabs. The Studio path is configured via the app
-// settings dialog; this row only displays the version, triggers a launch,
-// and shows captures observed during the running Studio session.
-func newLauncherRow(window fyne.Window) fyne.CanvasObject {
+// newLauncherRow builds the launcher row above the RenderDoc sub-tabs.
+// loadCapture is invoked when the user clicks an entry in the captures list;
+// it should load the given path into whichever sub-tab is active.
+func newLauncherRow(window fyne.Window, loadCapture func(path string)) fyne.CanvasObject {
 	studioLabel := widget.NewLabel(formatStudioVersionLabel(LoadStudioPath()))
 
 	statusLabel := widget.NewLabel("Ready")
 	statusLabel.Wrapping = fyne.TextWrapWord
 
-	capturesLabel := widget.NewLabel(formatCapturesLabel(0, ""))
-	capturesLabel.Wrapping = fyne.TextWrapWord
+	capturesHeader := widget.NewLabel("Captures: 0")
 
-	openFolderButton := widget.NewButton("Open captures folder", func() {
+	var capturesMutex sync.Mutex
+	var captures []captureEntry
+
+	captureList := widget.NewList(
+		func() int {
+			capturesMutex.Lock()
+			defer capturesMutex.Unlock()
+			return len(captures)
+		},
+		func() fyne.CanvasObject {
+			return widget.NewLabel("")
+		},
+		func(id widget.ListItemID, obj fyne.CanvasObject) {
+			capturesMutex.Lock()
+			defer capturesMutex.Unlock()
+			if id < 0 || id >= len(captures) {
+				return
+			}
+			label, ok := obj.(*widget.Label)
+			if !ok {
+				return
+			}
+			entry := captures[id]
+			label.SetText(fmt.Sprintf("%s  ·  %s", entry.Name, entry.ModTime.Format("15:04:05")))
+		},
+	)
+	captureList.OnSelected = func(id widget.ListItemID) {
+		capturesMutex.Lock()
+		var path string
+		if id >= 0 && id < len(captures) {
+			path = captures[id].Path
+		}
+		capturesMutex.Unlock()
+		captureList.Unselect(id)
+		if path != "" && loadCapture != nil {
+			loadCapture(path)
+		}
+	}
+
+	captureListScroll := container.NewVScroll(captureList)
+	captureListScroll.SetMinSize(fyne.NewSize(0, captureListMinHeight))
+
+	refreshList := func() {
+		dir := capturesDirectory()
+		entries, readErr := os.ReadDir(dir)
+		var items []captureEntry
+		if readErr == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				if !strings.HasSuffix(strings.ToLower(name), ".rdc") {
+					continue
+				}
+				info, statErr := entry.Info()
+				if statErr != nil {
+					continue
+				}
+				items = append(items, captureEntry{
+					Name:    name,
+					Path:    filepath.Join(dir, name),
+					ModTime: info.ModTime(),
+				})
+			}
+		}
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].ModTime.After(items[j].ModTime)
+		})
+
+		capturesMutex.Lock()
+		captures = items
+		count := len(captures)
+		capturesMutex.Unlock()
+
+		fyne.Do(func() {
+			capturesHeader.SetText(fmt.Sprintf("Captures: %d", count))
+			captureList.Refresh()
+		})
+	}
+
+	openFolderButton := widget.NewButton("Open folder", func() {
 		dir := capturesDirectory()
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fyneDialog.ShowError(err, window)
@@ -76,9 +166,6 @@ func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 
 		launchButton.Disable()
 		statusLabel.SetText("Launching…")
-		capturesLabel.SetText(formatCapturesLabel(0, ""))
-
-		launchTime := time.Now()
 
 		go func() {
 			cmd, err := renderdoc.LaunchStudioWithRenderDoc(studioPath, captureTemplate)
@@ -92,14 +179,9 @@ func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 			})
 
 			if cmd != nil {
-				done := make(chan struct{})
-				go runCaptureWatcher(dir, launchTime, done, capturesLabel)
 				go func() {
 					_ = cmd.Wait()
-					close(done)
-					fyne.Do(func() {
-						statusLabel.SetText("Ready")
-					})
+					fyne.Do(func() { statusLabel.SetText("Ready") })
 				}()
 			}
 
@@ -113,76 +195,57 @@ func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 		}()
 	})
 
+	// Start the fsnotify watcher and run the initial scan once. The watcher
+	// goroutine lives for the app's lifetime; the directory persists across
+	// launches so older captures remain visible.
+	startCaptureFolderWatcher(refreshList)
+
 	topRow := container.NewBorder(nil, nil, studioLabel, launchButton, statusLabel)
-	bottomRow := container.NewBorder(nil, nil, nil, openFolderButton, capturesLabel)
-	return container.NewVBox(topRow, bottomRow)
+	capturesHeaderRow := container.NewBorder(nil, nil, nil, openFolderButton, capturesHeader)
+	return container.NewVBox(topRow, capturesHeaderRow, captureListScroll)
 }
 
-// runCaptureWatcher polls the captures directory every second while Studio is
-// running. New `.rdc` files (mtime >= launchTime) update the captures label.
-// Stops when the done channel is closed.
-func runCaptureWatcher(dir string, since time.Time, done <-chan struct{}, label *widget.Label) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+// startCaptureFolderWatcher launches an fsnotify watcher on the captures dir
+// in a background goroutine. Each .rdc-relevant filesystem event triggers
+// onChange. Runs an initial onChange call before entering the event loop so
+// the list reflects existing files on first build.
+func startCaptureFolderWatcher(onChange func()) {
+	dir := capturesDirectory()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		// Without the directory we can't watch — leave the list empty and
+		// rely on the user clicking Launch (which creates it) to re-init.
+		return
+	}
 
-	seen := make(map[string]struct{})
-	count := 0
-	last := ""
-	// Round down by 1s to absorb filesystem mtime granularity differences.
-	threshold := since.Add(-1 * time.Second)
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	if addErr := watcher.Add(dir); addErr != nil {
+		_ = watcher.Close()
+		return
+	}
 
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				continue
-			}
-			changed := false
-			for _, entry := range entries {
-				if entry.IsDir() {
+	go func() {
+		defer watcher.Close()
+		onChange()
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				if !strings.HasSuffix(strings.ToLower(event.Name), ".rdc") {
 					continue
 				}
-				name := entry.Name()
-				if !strings.HasSuffix(strings.ToLower(name), ".rdc") {
-					continue
+				onChange()
+			case _, ok := <-watcher.Errors:
+				if !ok {
+					return
 				}
-				if _, ok := seen[name]; ok {
-					continue
-				}
-				info, infoErr := entry.Info()
-				if infoErr != nil {
-					continue
-				}
-				if info.ModTime().Before(threshold) {
-					continue
-				}
-				seen[name] = struct{}{}
-				count++
-				last = name
-				changed = true
-			}
-			if changed {
-				snapshotCount := count
-				snapshotLast := last
-				fyne.Do(func() {
-					label.SetText(formatCapturesLabel(snapshotCount, snapshotLast))
-				})
 			}
 		}
-	}
-}
-
-func formatCapturesLabel(count int, last string) string {
-	if count == 0 {
-		return "Captures: 0"
-	}
-	if last == "" {
-		return fmt.Sprintf("Captures: %d", count)
-	}
-	return fmt.Sprintf("Captures: %d — last: %s", count, last)
+	}()
 }
 
 // formatStudioVersionLabel renders the Studio path as a short, user-facing

@@ -32,7 +32,7 @@ type meshesTabState struct {
 
 var meshColumnHeaders = []string{"ID", "Verts", "Tris", "VB bytes", "IB bytes", "Draws", "Layout", "Hash"}
 
-func newMeshesSubTab(window fyne.Window) fyne.CanvasObject {
+func newMeshesSubTab(window fyne.Window) (fyne.CanvasObject, func(path string)) {
 	state := &meshesTabState{
 		sortColumn:     "VB bytes",
 		sortDescending: true,
@@ -159,6 +159,10 @@ func newMeshesSubTab(window fyne.Window) fyne.CanvasObject {
 		table.Refresh()
 	}
 
+	loadFromPath := func(path string) {
+		go loadMeshCaptureFromPath(window, progressBar, loadButton, path, onLoadFinished)
+	}
+
 	loadButton = widget.NewButton("Load .rdc…", func() {
 		go pickAndLoadMeshCapture(window, progressBar, loadButton, onLoadFinished)
 	})
@@ -171,7 +175,7 @@ func newMeshesSubTab(window fyne.Window) fyne.CanvasObject {
 	)
 	split := container.NewHSplit(table, previewPane)
 	split.Offset = 0.55
-	return container.NewBorder(header, countLabel, nil, nil, split)
+	return container.NewBorder(header, countLabel, nil, nil, split), loadFromPath
 }
 
 func meshColumnValue(mesh renderdoc.MeshInfo, column string) string {
@@ -391,6 +395,12 @@ func pickAndLoadMeshCapture(window fyne.Window, progressBar *widget.ProgressBarI
 		fyne.Do(func() { fyneDialog.ShowError(err, window) })
 		return
 	}
+	loadMeshCaptureFromPath(window, progressBar, loadButton, capturePath, onFinished)
+}
+
+// loadMeshCaptureFromPath runs the convert -> parse -> build pipeline for the
+// Meshes view. Used by the file-picker flow and by the launcher's capture list.
+func loadMeshCaptureFromPath(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, capturePath string, onFinished func(*renderdoc.MeshReport, []renderdoc.MeshInfo, string, string, *renderdoc.BufferStore, error)) {
 	fyne.Do(func() {
 		progressBar.Show()
 		if loadButton != nil {
