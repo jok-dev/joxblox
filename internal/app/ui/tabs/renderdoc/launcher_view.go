@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,16 +17,41 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const preferenceKeyRenderDocStudioPath = "renderdoc.studio_path"
+const (
+	preferenceKeyRenderDocStudioPath = "renderdoc.studio_path"
+	captureFileStem                  = "capture"
+)
+
+// capturesDirectory returns the per-app directory we tell renderdoccmd to
+// write captures into via `-c`. Stable across launches so the user can find
+// older captures without hunting around.
+func capturesDirectory() string {
+	return filepath.Join(os.TempDir(), "joxblox-renderdoc-captures")
+}
 
 // newLauncherRow builds the "Launch Studio with RenderDoc" row that mounts
 // above the RenderDoc sub-tabs. The Studio path is configured via the app
-// settings dialog; this row only displays its version and triggers a launch.
+// settings dialog; this row only displays the version, triggers a launch,
+// and shows captures observed during the running Studio session.
 func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 	studioLabel := widget.NewLabel(formatStudioVersionLabel(LoadStudioPath()))
 
 	statusLabel := widget.NewLabel("Ready")
 	statusLabel.Wrapping = fyne.TextWrapWord
+
+	capturesLabel := widget.NewLabel(formatCapturesLabel(0, ""))
+	capturesLabel.Wrapping = fyne.TextWrapWord
+
+	openFolderButton := widget.NewButton("Open captures folder", func() {
+		dir := capturesDirectory()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fyneDialog.ShowError(err, window)
+			return
+		}
+		if err := exec.Command("explorer", dir).Start(); err != nil {
+			fyneDialog.ShowError(fmt.Errorf("open captures folder: %w", err), window)
+		}
+	})
 
 	var launchButton *widget.Button
 	launchButton = widget.NewButton("Launch with RenderDoc", func() {
@@ -41,11 +67,21 @@ func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 			return
 		}
 
+		dir := capturesDirectory()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fyneDialog.ShowError(fmt.Errorf("create captures dir: %w", err), window)
+			return
+		}
+		captureTemplate := filepath.Join(dir, captureFileStem)
+
 		launchButton.Disable()
 		statusLabel.SetText("Launching…")
+		capturesLabel.SetText(formatCapturesLabel(0, ""))
+
+		launchTime := time.Now()
 
 		go func() {
-			cmd, err := renderdoc.LaunchStudioWithRenderDoc(studioPath)
+			cmd, err := renderdoc.LaunchStudioWithRenderDoc(studioPath, captureTemplate)
 			fyne.Do(func() {
 				if err != nil {
 					statusLabel.SetText("Error")
@@ -54,21 +90,22 @@ func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 					statusLabel.SetText(fmt.Sprintf("Launched (PID %d)", cmd.Process.Pid))
 				}
 			})
-			// Reap the renderdoccmd process so we don't leave a zombie/handle slot,
-			// and reset the status label once Studio exits so a stale PID doesn't linger.
+
 			if cmd != nil {
+				done := make(chan struct{})
+				go runCaptureWatcher(dir, launchTime, done, capturesLabel)
 				go func() {
 					_ = cmd.Wait()
+					close(done)
 					fyne.Do(func() {
 						statusLabel.SetText("Ready")
 					})
 				}()
 			}
+
 			time.Sleep(1 * time.Second)
 			fyne.Do(func() {
 				launchButton.Enable()
-				// After an error the dialog is dismissed and the button is re-enabled;
-				// clear the "Error" status so the label tracks the button.
 				if err != nil {
 					statusLabel.SetText("Ready")
 				}
@@ -76,11 +113,76 @@ func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 		}()
 	})
 
-	return container.NewBorder(nil, nil,
-		studioLabel,
-		launchButton,
-		statusLabel,
-	)
+	topRow := container.NewBorder(nil, nil, studioLabel, launchButton, statusLabel)
+	bottomRow := container.NewBorder(nil, nil, nil, openFolderButton, capturesLabel)
+	return container.NewVBox(topRow, bottomRow)
+}
+
+// runCaptureWatcher polls the captures directory every second while Studio is
+// running. New `.rdc` files (mtime >= launchTime) update the captures label.
+// Stops when the done channel is closed.
+func runCaptureWatcher(dir string, since time.Time, done <-chan struct{}, label *widget.Label) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	seen := make(map[string]struct{})
+	count := 0
+	last := ""
+	// Round down by 1s to absorb filesystem mtime granularity differences.
+	threshold := since.Add(-1 * time.Second)
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				continue
+			}
+			changed := false
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				if !strings.HasSuffix(strings.ToLower(name), ".rdc") {
+					continue
+				}
+				if _, ok := seen[name]; ok {
+					continue
+				}
+				info, infoErr := entry.Info()
+				if infoErr != nil {
+					continue
+				}
+				if info.ModTime().Before(threshold) {
+					continue
+				}
+				seen[name] = struct{}{}
+				count++
+				last = name
+				changed = true
+			}
+			if changed {
+				snapshotCount := count
+				snapshotLast := last
+				fyne.Do(func() {
+					label.SetText(formatCapturesLabel(snapshotCount, snapshotLast))
+				})
+			}
+		}
+	}
+}
+
+func formatCapturesLabel(count int, last string) string {
+	if count == 0 {
+		return "Captures: 0"
+	}
+	if last == "" {
+		return fmt.Sprintf("Captures: %d", count)
+	}
+	return fmt.Sprintf("Captures: %d — last: %s", count, last)
 }
 
 // formatStudioVersionLabel renders the Studio path as a short, user-facing

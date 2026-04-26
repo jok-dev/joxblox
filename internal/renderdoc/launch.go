@@ -58,11 +58,11 @@ func locateRobloxStudioIn(envValue, versionsRoot string) (string, error) {
 }
 
 // LaunchStudioWithRenderDoc spawns `renderdoccmd capture <studioPath>` detached.
-// Returns the started *exec.Cmd (not waited on). The caller should not Wait()
-// on it — Studio runs independently. Note: the Studio path resolution order
-// (preference -> env -> scan) is the caller's responsibility; this function
-// just launches whatever path it's given.
-func LaunchStudioWithRenderDoc(studioPath string) (*exec.Cmd, error) {
+// If captureFileTemplate is non-empty, it is passed as `-c <template>` so
+// captures land at a predictable path stem (renderdoccmd appends its own
+// suffix and `.rdc`). Returns the started *exec.Cmd (not waited on). The
+// caller should not Wait() on it — Studio runs independently.
+func LaunchStudioWithRenderDoc(studioPath, captureFileTemplate string) (*exec.Cmd, error) {
 	if _, err := os.Stat(studioPath); err != nil {
 		return nil, fmt.Errorf("Studio executable not found at %q: %w", studioPath, err)
 	}
@@ -72,7 +72,7 @@ func LaunchStudioWithRenderDoc(studioPath string) (*exec.Cmd, error) {
 		return nil, err
 	}
 
-	cmd := buildLaunchCommand(cmdPath, studioPath)
+	cmd := buildLaunchCommand(cmdPath, studioPath, captureFileTemplate)
 	configureLaunchSysProcAttr(cmd)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
@@ -82,6 +82,11 @@ func LaunchStudioWithRenderDoc(studioPath string) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-func buildLaunchCommand(renderdoccmdPath, studioPath string) *exec.Cmd {
-	return exec.Command(renderdoccmdPath, "capture", studioPath)
+func buildLaunchCommand(renderdoccmdPath, studioPath, captureFileTemplate string) *exec.Cmd {
+	args := []string{"capture"}
+	if captureFileTemplate != "" {
+		args = append(args, "-c", captureFileTemplate)
+	}
+	args = append(args, studioPath)
+	return exec.Command(renderdoccmdPath, args...)
 }

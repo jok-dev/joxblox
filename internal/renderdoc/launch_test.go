@@ -80,7 +80,7 @@ func TestLocateRobloxStudio_NotFound(t *testing.T) {
 }
 
 func TestBuildLaunchCommand_UsesCaptureSubcommand(t *testing.T) {
-	cmd := buildLaunchCommand("/usr/bin/renderdoccmd", "/path/to/RobloxStudioBeta.exe")
+	cmd := buildLaunchCommand("/usr/bin/renderdoccmd", "/path/to/RobloxStudioBeta.exe", "")
 	if cmd.Path != "/usr/bin/renderdoccmd" {
 		t.Fatalf("Path = %q, want renderdoccmd", cmd.Path)
 	}
@@ -95,8 +95,21 @@ func TestBuildLaunchCommand_UsesCaptureSubcommand(t *testing.T) {
 	}
 }
 
+func TestBuildLaunchCommand_IncludesCaptureFileFlag(t *testing.T) {
+	cmd := buildLaunchCommand("/usr/bin/renderdoccmd", "/studio.exe", "/tmp/joxblox/cap")
+	wantArgs := []string{"/usr/bin/renderdoccmd", "capture", "-c", "/tmp/joxblox/cap", "/studio.exe"}
+	if len(cmd.Args) != len(wantArgs) {
+		t.Fatalf("Args = %v, want %v", cmd.Args, wantArgs)
+	}
+	for i, a := range wantArgs {
+		if cmd.Args[i] != a {
+			t.Fatalf("Args[%d] = %q, want %q", i, cmd.Args[i], a)
+		}
+	}
+}
+
 func TestLaunchStudioWithRenderDoc_RejectsMissingStudio(t *testing.T) {
-	_, err := LaunchStudioWithRenderDoc(filepath.Join(t.TempDir(), "no-such-studio.exe"))
+	_, err := LaunchStudioWithRenderDoc(filepath.Join(t.TempDir(), "no-such-studio.exe"), "")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
