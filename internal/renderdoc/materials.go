@@ -85,7 +85,12 @@ func BuildMaterials(textures *Report, meshes *MeshReport) []Material {
 				others = append(others, texID)
 			}
 		}
-		if color == "" && normal == "" && mr == "" && len(others) == 0 {
+		if color == "" && normal == "" && mr == "" {
+			// No PBR slots classified for this draw — typically a
+			// depth-only, shadow, or outline pass that doesn't sample any
+			// per-material textures. Whatever is in `others` here is
+			// stale globals our filters didn't catch; lumping them into a
+			// "material" produces a noisy catch-all row, so skip.
 			continue
 		}
 		key := matKey{color, normal, mr}

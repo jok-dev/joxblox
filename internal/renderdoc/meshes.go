@@ -174,6 +174,21 @@ func parseMeshXML(reader io.Reader) (*MeshReport, error) {
 				return nil, parseErr
 			}
 			currentPSSrvIDs = mergePSBindings(currentPSSrvIDs, startSlot, srvIDs)
+		case "ID3D11DeviceContext::PSSetShader":
+			// D3D11 leaves resource bindings live across shader changes,
+			// but treating that as "the next draw still uses the old PS
+			// textures" produces nonsense materials — e.g. a draw that
+			// only re-binds a color slot inherits the previous material's
+			// normal/MR slots and they get glued onto the wrong material.
+			// Clearing on every PS swap turns binding state into a
+			// conservative "what was set since this shader was last
+			// bound" — Roblox emits SetShader → SetResources → Draw per
+			// material, so the cleared state populates correctly before
+			// the next draw and we stop merging unrelated textures.
+			if skipErr := skipElement(decoder); skipErr != nil {
+				return nil, skipErr
+			}
+			currentPSSrvIDs = nil
 		case "ID3D11DeviceContext::DrawIndexed", "ID3D11DeviceContext::DrawIndexedInstanced":
 			dc, parseErr := parseDrawIndexedChunk(decoder)
 			if parseErr != nil {
