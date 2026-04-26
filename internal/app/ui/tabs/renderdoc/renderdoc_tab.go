@@ -57,9 +57,9 @@ var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category"
 // an indicator next to the capture currently loaded in that sub-tab.
 func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 	const (
-		texturesIndex  = 0
-		meshesIndex    = 1
-		materialsIndex = 2
+		materialsIndex = 0
+		texturesIndex  = 1
+		meshesIndex    = 2
 	)
 
 	var lc *launcher
@@ -80,11 +80,10 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 	})
 
 	tabs := container.NewAppTabs(
+		container.NewTabItem("Materials", materialsView),
 		container.NewTabItem("Textures", texturesView),
 		container.NewTabItem("Meshes", meshesView),
-		container.NewTabItem("Materials", materialsView),
 	)
-	tabs.SelectIndex(materialsIndex)
 
 	// Loading dispatches to all three sub-tabs at once so a single click
 	// populates Textures, Meshes, and Materials in parallel. Each sub-tab
