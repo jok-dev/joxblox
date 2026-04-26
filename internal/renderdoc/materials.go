@@ -176,3 +176,97 @@ func containsString(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// BuildMaterialsWithMeshHashes is BuildMaterials plus per-draw mesh hashing,
+// so each Material's MeshHashes lists the unique meshes it draws. Reuses the
+// same hash function as BuildMeshes for cross-tab consistency. Errors hashing
+// an individual draw are silently dropped (the material still appears, just
+// without that mesh hash) — same tolerance as BuildMeshes.
+func BuildMaterialsWithMeshHashes(textures *Report, meshes *MeshReport, reader BufferReader) []Material {
+	if textures == nil || meshes == nil || len(meshes.DrawCalls) == 0 {
+		return nil
+	}
+	drawHashes := make([]string, len(meshes.DrawCalls))
+	for i, dc := range meshes.DrawCalls {
+		if reader == nil || len(dc.VertexBuffers) == 0 || dc.IndexBufferID == "" {
+			continue
+		}
+		hash, _, _, err := hashMeshBuffers(dc, meshes.Buffers, reader)
+		if err == nil {
+			drawHashes[i] = hash
+		}
+	}
+	out := BuildMaterials(textures, meshes)
+	textureByID := map[string]TextureInfo{}
+	for _, t := range textures.Textures {
+		textureByID[t.ResourceID] = t
+	}
+	globals := computeSceneGlobalTextureIDs(textures, meshes, textureByID)
+	hashesByKey := map[[3]string]map[string]struct{}{}
+	for i, dc := range meshes.DrawCalls {
+		hash := drawHashes[i]
+		if hash == "" {
+			continue
+		}
+		k := classifyDrawForKey(dc, textureByID, globals)
+		if k == ([3]string{}) {
+			continue
+		}
+		if hashesByKey[k] == nil {
+			hashesByKey[k] = map[string]struct{}{}
+		}
+		hashesByKey[k][hash] = struct{}{}
+	}
+	for i := range out {
+		k := [3]string{out[i].ColorTextureID, out[i].NormalTextureID, out[i].MRTextureID}
+		set := hashesByKey[k]
+		if len(set) == 0 {
+			continue
+		}
+		hashes := make([]string, 0, len(set))
+		for h := range set {
+			hashes = append(hashes, h)
+		}
+		sort.Strings(hashes)
+		out[i].MeshHashes = hashes
+	}
+	return out
+}
+
+// classifyDrawForKey returns the (color, normal, mr) key a single draw call
+// produces — same logic as the inline classification in BuildMaterials but
+// extracted so we can reuse it when attaching mesh hashes. Caller passes
+// pre-built textureByID + globals so this stays O(slots) per call.
+func classifyDrawForKey(dc DrawCall, textureByID map[string]TextureInfo, globals map[string]struct{}) [3]string {
+	var color, normal, mr string
+	for _, texID := range dc.PSTextureIDs {
+		if texID == "" {
+			continue
+		}
+		if _, isGlobal := globals[texID]; isGlobal {
+			continue
+		}
+		tex, known := textureByID[texID]
+		if !known {
+			continue
+		}
+		switch tex.Category {
+		case CategoryNormalDXT5nm:
+			if normal == "" {
+				normal = texID
+			}
+		case CategoryBlankMR, CategoryCustomMR:
+			if mr == "" {
+				mr = texID
+			}
+		case CategoryAssetOpaque, CategoryAssetAlpha, CategoryAssetRaw:
+			if color == "" {
+				color = texID
+			}
+		}
+	}
+	if color == "" && normal == "" && mr == "" {
+		return [3]string{}
+	}
+	return [3]string{color, normal, mr}
+}

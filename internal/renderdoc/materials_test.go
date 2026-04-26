@@ -184,3 +184,50 @@ func TestBuildMaterialsSortsByTotalBytesDescending(t *testing.T) {
 		t.Errorf("sort order: got %v, want %v", sizes, want)
 	}
 }
+
+type stubReader map[string][]byte
+
+func (s stubReader) ReadBuffer(id string) ([]byte, error) {
+	return s[id], nil
+}
+
+func TestBuildMaterialsPopulatesMeshHashes(t *testing.T) {
+	textures := &Report{
+		Textures: []TextureInfo{
+			makeTexture("100", CategoryAssetOpaque, 1024),
+		},
+	}
+	meshes := &MeshReport{
+		Buffers: map[string]BufferInfo{
+			"vbA": {ResourceID: "vbA", InitialDataBufferID: "dataVbA"},
+			"ibA": {ResourceID: "ibA", InitialDataBufferID: "dataIbA"},
+			"vbB": {ResourceID: "vbB", InitialDataBufferID: "dataVbB"},
+			"ibB": {ResourceID: "ibB", InitialDataBufferID: "dataIbB"},
+		},
+		DrawCalls: []DrawCall{
+			{
+				PSTextureIDs:  []string{"100"},
+				VertexBuffers: []DrawCallVertexBuffer{{BufferID: "vbA"}},
+				IndexBufferID: "ibA",
+			},
+			{
+				PSTextureIDs:  []string{"100"},
+				VertexBuffers: []DrawCallVertexBuffer{{BufferID: "vbB"}},
+				IndexBufferID: "ibB",
+			},
+		},
+	}
+	reader := stubReader{
+		"dataVbA": []byte("vertexA"),
+		"dataIbA": []byte("indexA"),
+		"dataVbB": []byte("vertexB"),
+		"dataIbB": []byte("indexB"),
+	}
+	got := BuildMaterialsWithMeshHashes(textures, meshes, reader)
+	if len(got) != 1 {
+		t.Fatalf("materials: got %d, want 1", len(got))
+	}
+	if len(got[0].MeshHashes) != 2 {
+		t.Errorf("MeshHashes: got %d, want 2 (%v)", len(got[0].MeshHashes), got[0].MeshHashes)
+	}
+}
