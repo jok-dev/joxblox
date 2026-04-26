@@ -29,7 +29,13 @@ type materialsTabState struct {
 	filterText       string
 	selectedRow      int
 	thumbnailCache   map[string]image.Image // texID → decoded base mip
+	decodeInFlight   map[string]bool        // texID → background decode running
 	textureByID      map[string]renderdoc.TextureInfo
+	// previewGeneration increments on every row click. Background decodes
+	// capture the value at start and discard their result if a newer click
+	// has happened, so a slow Color decode for an old row can't overwrite
+	// a freshly-clicked row's preview pane.
+	previewGeneration int
 }
 
 var materialColumnHeaders = []string{"Color", "Normal", "MR", "Color Hash", "Draws", "Meshes", "VRAM"}
@@ -84,6 +90,7 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 		sortDescending: true,
 		selectedRow:    -1,
 		thumbnailCache: map[string]image.Image{},
+		decodeInFlight: map[string]bool{},
 		textureByID:    map[string]renderdoc.TextureInfo{},
 	}
 
@@ -119,7 +126,7 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 			cont := object.(*fyne.Container)
 			label := cont.Objects[0].(*widget.Label)
 			img := cont.Objects[1].(*canvas.Image)
-			renderMaterialCell(state, state.displayMaterials[id.Row], materialColumnHeaders[id.Col], label, img)
+			renderMaterialCell(state, state.displayMaterials[id.Row], materialColumnHeaders[id.Col], label, img, table)
 		},
 	)
 	table.CreateHeader = func() fyne.CanvasObject { return widget.NewButton("", nil) }
@@ -161,7 +168,8 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 			return
 		}
 		state.selectedRow = id.Row
-		updateMaterialPreview(state, state.displayMaterials[id.Row], preview)
+		state.previewGeneration++
+		updateMaterialPreview(state, state.displayMaterials[id.Row], preview, table)
 	}
 
 	filterEntry.OnChanged = func(text string) {
@@ -194,6 +202,8 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 		state.bufferStore = store
 		state.xmlPath = xmlPath
 		state.thumbnailCache = map[string]image.Image{}
+		state.decodeInFlight = map[string]bool{}
+		state.previewGeneration = 0
 		state.textureByID = map[string]renderdoc.TextureInfo{}
 		for _, t := range textureReport.Textures {
 			state.textureByID[t.ResourceID] = t
@@ -260,16 +270,16 @@ func loadMaterialsCaptureFromPath(window fyne.Window, progressBar *widget.Progre
 	fyne.Do(func() { onFinished(textureReport, meshReport, materials, capturePath, xmlPath, store, nil) })
 }
 
-func renderMaterialCell(state *materialsTabState, mat renderdoc.Material, column string, label *widget.Label, img *canvas.Image) {
+func renderMaterialCell(state *materialsTabState, mat renderdoc.Material, column string, label *widget.Label, img *canvas.Image, table *widget.Table) {
 	label.Hide()
 	img.Hide()
 	switch column {
 	case "Color":
-		setMaterialThumbnail(state, mat.ColorTextureID, label, img)
+		setMaterialThumbnail(state, mat.ColorTextureID, label, img, table)
 	case "Normal":
-		setMaterialThumbnail(state, mat.NormalTextureID, label, img)
+		setMaterialThumbnail(state, mat.NormalTextureID, label, img, table)
 	case "MR":
-		setMaterialThumbnail(state, mat.MRTextureID, label, img)
+		setMaterialThumbnail(state, mat.MRTextureID, label, img, table)
 	case "Color Hash":
 		label.SetText(materialColorHash(state, mat))
 		label.Show()
@@ -285,7 +295,7 @@ func renderMaterialCell(state *materialsTabState, mat renderdoc.Material, column
 	}
 }
 
-func setMaterialThumbnail(state *materialsTabState, texID string, label *widget.Label, img *canvas.Image) {
+func setMaterialThumbnail(state *materialsTabState, texID string, label *widget.Label, img *canvas.Image, table *widget.Table) {
 	if texID == "" {
 		label.SetText("—")
 		label.Show()
@@ -303,16 +313,39 @@ func setMaterialThumbnail(state *materialsTabState, texID string, label *widget.
 		label.Show()
 		return
 	}
-	decoded, err := renderdoc.DecodeTexturePreview(tex, state.bufferStore)
-	if err != nil || decoded == nil {
-		label.SetText("?")
-		label.Show()
+	label.SetText("…")
+	label.Show()
+	startTextureDecode(state, tex, func() {
+		if table != nil {
+			table.Refresh()
+		}
+	})
+}
+
+// startTextureDecode kicks off a background decode for the given texture and
+// caches the result. onCached runs on the UI thread once the decode completes
+// successfully. If a decode for this texID is already in flight, this is a
+// no-op — the existing decode's onCached will fire a table refresh that
+// re-renders any cells waiting on the cache.
+func startTextureDecode(state *materialsTabState, tex renderdoc.TextureInfo, onCached func()) {
+	if state.bufferStore == nil || state.decodeInFlight[tex.ResourceID] {
 		return
 	}
-	state.thumbnailCache[texID] = decoded
-	img.Image = decoded
-	img.Refresh()
-	img.Show()
+	state.decodeInFlight[tex.ResourceID] = true
+	store := state.bufferStore
+	go func() {
+		decoded, err := renderdoc.DecodeTexturePreview(tex, store)
+		fyne.Do(func() {
+			delete(state.decodeInFlight, tex.ResourceID)
+			if err != nil || decoded == nil {
+				return
+			}
+			state.thumbnailCache[tex.ResourceID] = decoded
+			if onCached != nil {
+				onCached()
+			}
+		})
+	}()
 }
 
 func materialColorHash(state *materialsTabState, mat renderdoc.Material) string {
@@ -325,10 +358,11 @@ func materialColorHash(state *materialsTabState, mat renderdoc.Material) string 
 	return "—"
 }
 
-func updateMaterialPreview(state *materialsTabState, mat renderdoc.Material, preview *materialPreview) {
-	setPreviewMap(state, mat.ColorTextureID, preview.colorImg, preview.colorLabel, "Color")
-	setPreviewMap(state, mat.NormalTextureID, preview.normalImg, preview.normalLabel, "Normal")
-	setPreviewMap(state, mat.MRTextureID, preview.mrImg, preview.mrLabel, "MR")
+func updateMaterialPreview(state *materialsTabState, mat renderdoc.Material, preview *materialPreview, table *widget.Table) {
+	gen := state.previewGeneration
+	setPreviewMap(state, mat.ColorTextureID, preview.colorImg, preview.colorLabel, "Color", gen, table)
+	setPreviewMap(state, mat.NormalTextureID, preview.normalImg, preview.normalLabel, "Normal", gen, table)
+	setPreviewMap(state, mat.MRTextureID, preview.mrImg, preview.mrLabel, "MR", gen, table)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Draws: %d   Meshes: %d   VRAM: %s\n",
@@ -348,7 +382,7 @@ func updateMaterialPreview(state *materialsTabState, mat renderdoc.Material, pre
 	preview.infoEntry.SetText(b.String())
 }
 
-func setPreviewMap(state *materialsTabState, texID string, img *canvas.Image, label *widget.Label, kind string) {
+func setPreviewMap(state *materialsTabState, texID string, img *canvas.Image, label *widget.Label, kind string, gen int, table *widget.Table) {
 	if texID == "" {
 		img.Image = nil
 		img.Refresh()
@@ -361,21 +395,31 @@ func setPreviewMap(state *materialsTabState, texID string, img *canvas.Image, la
 		img.Refresh()
 		return
 	}
-	tex, ok := state.textureByID[texID]
-	if !ok || state.bufferStore == nil {
-		img.Image = nil
-		img.Refresh()
-		return
-	}
-	decoded, err := renderdoc.DecodeTexturePreview(tex, state.bufferStore)
-	if err != nil || decoded == nil {
-		img.Image = nil
-		img.Refresh()
-		return
-	}
-	state.thumbnailCache[texID] = decoded
-	img.Image = decoded
+	img.Image = nil
 	img.Refresh()
+	tex, ok := state.textureByID[texID]
+	if !ok {
+		return
+	}
+	startTextureDecode(state, tex, func() {
+		// If a newer click happened, this preview slot belongs to a
+		// different material now. Refresh the table (so its thumbnail
+		// cell can pick up the cached image), but don't overwrite the
+		// preview canvas with our stale result.
+		if state.previewGeneration != gen {
+			if table != nil {
+				table.Refresh()
+			}
+			return
+		}
+		if decoded, ok := state.thumbnailCache[texID]; ok {
+			img.Image = decoded
+			img.Refresh()
+		}
+		if table != nil {
+			table.Refresh()
+		}
+	})
 }
 
 func countTotalDraws(materials []renderdoc.Material) int {
