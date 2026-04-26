@@ -267,6 +267,7 @@ func (explorer *ScanResultsExplorer) SetResults(rows []loader.ScanResult) {
 	explorer.clearPreview()
 	explorer.ClearSimilarity()
 	explorer.applySortAndFilters()
+	loader.PublishScanCompleted(explorer.allResults)
 }
 
 func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, refreshResults bool, refreshFilters bool) {
@@ -278,6 +279,7 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
 		explorer.refreshSearchSuggestions()
 		explorer.applySortAndFilters()
+		loader.PublishScanCompleted(explorer.allResults)
 		return
 	}
 	if refreshFilters {
@@ -289,6 +291,7 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
 		explorer.refreshSearchSuggestions()
 	}
+	loader.PublishScanCompleted(explorer.allResults)
 }
 
 func (explorer *ScanResultsExplorer) ClearSimilarity() {
