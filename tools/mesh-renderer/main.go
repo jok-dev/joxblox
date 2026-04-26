@@ -135,7 +135,11 @@ void main() {
     float rim = 1.0 - max(dot(norm, viewDir), 0.0);
     rim = pow(rim, 3.0) * 0.15;
     float shadow = calcShadow(fragPosLightSpace);
-    vec3 lit = ambientCol + key * (1.0 - shadow * 0.65) + fill + rim;
+    // Soft shadow contribution: even fully shadowed surfaces still get
+    // most of the key light, since we're previewing geometry not
+    // rendering a final scene. Heavy shadowing read as "broken lighting"
+    // rather than depth cue in early testing.
+    vec3 lit = ambientCol + key * (1.0 - shadow * 0.35) + fill + rim;
     // Lit Clay forces vertex color to white so the gray baseCol reads
     // as a uniform clay surface; Vertex Color uses the per-vertex tint.
     vec3 vertCol = (viewmode == 1) ? vec3(1.0) : fragColor.rgb;
@@ -722,7 +726,7 @@ func handleRender(parts []string) {
 		(camera.Target.Y-camera.Position.Y)+0.4,
 		camera.Target.Z-camera.Position.Z,
 	))
-	ambient := []float32{0.18, 0.19, 0.22}
+	ambient := []float32{0.32, 0.33, 0.36}
 	lightCol := []float32{1.0, 0.97, 0.92}
 	viewPos := []float32{float32(cameraX), float32(cameraY), float32(cameraZ)}
 	rl.SetShaderValue(mainShader, lightDirLoc, []float32{keyLightDir.X, keyLightDir.Y, keyLightDir.Z}, rl.ShaderUniformVec3)
@@ -731,7 +735,11 @@ func handleRender(parts []string) {
 	rl.SetShaderValue(mainShader, ambientLoc, ambient, rl.ShaderUniformVec3)
 	rl.SetShaderValue(mainShader, lightColLoc, lightCol, rl.ShaderUniformVec3)
 	rl.SetShaderValueMatrix(mainShader, lightVPLoc, lightVP)
-	shadowBiasValue := float32(0.0015)
+	// 0.0015 caused heavy self-shadowing across most of the mesh because
+	// the depth attachment (sampled as RGB color, not a true depth texture)
+	// quantizes precision. 0.008 reliably eliminates self-shadow acne on
+	// the meshes tested so far while still catching real occlusion.
+	shadowBiasValue := float32(0.008)
 	if transparent {
 		shadowBiasValue = 1.0 // disables shadows in calcShadow()
 	}
