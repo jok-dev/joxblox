@@ -3,6 +3,7 @@ package renderdoc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -225,5 +226,57 @@ func TestParseCreateShaderResourceViewBuildsMap(t *testing.T) {
 	}
 	if got := report.SRVToTexture["99002"]; got != "12346" {
 		t.Errorf("SRV 99002 → %q, want 12346", got)
+	}
+}
+
+func TestParsePSSetShaderResourcesPopulatesDrawCall(t *testing.T) {
+	xmlData := `<rdc>
+<chunk name="ID3D11Device::CreateShaderResourceView">
+  <ResourceId name="pResource">12345</ResourceId>
+  <ResourceId name="ppSRView">99001</ResourceId>
+</chunk>
+<chunk name="ID3D11Device::CreateShaderResourceView">
+  <ResourceId name="pResource">12346</ResourceId>
+  <ResourceId name="ppSRView">99002</ResourceId>
+</chunk>
+<chunk name="ID3D11DeviceContext::PSSetShaderResources">
+  <uint name="StartSlot">0</uint>
+  <uint name="NumViews">2</uint>
+  <array name="ppShaderResourceViews">
+    <ResourceId>99001</ResourceId>
+    <ResourceId>99002</ResourceId>
+  </array>
+</chunk>
+<chunk name="ID3D11DeviceContext::DrawIndexed">
+  <uint name="IndexCount">36</uint>
+  <uint name="StartIndexLocation">0</uint>
+  <int name="BaseVertexLocation">0</int>
+</chunk>
+</rdc>`
+	report, err := parseMeshXML(strings.NewReader(xmlData))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(report.DrawCalls) != 1 {
+		t.Fatalf("draw calls: got %d, want 1", len(report.DrawCalls))
+	}
+	dc := report.DrawCalls[0]
+	want := []string{"12345", "12346"}
+	if len(dc.PSTextureIDs) != len(want) {
+		t.Fatalf("PSTextureIDs len: got %d, want %d (%v)", len(dc.PSTextureIDs), len(want), dc.PSTextureIDs)
+	}
+	for i, id := range want {
+		if dc.PSTextureIDs[i] != id {
+			t.Errorf("slot %d: got %q, want %q", i, dc.PSTextureIDs[i], id)
+		}
+	}
+}
+
+func TestMergePSBindingsOverlaysAndGrows(t *testing.T) {
+	current := []string{"a", "b", "c"}
+	got := mergePSBindings(current, 1, []string{"X", "Y", "Z"})
+	want := []string{"a", "X", "Y", "Z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("merge: got %v, want %v", got, want)
 	}
 }

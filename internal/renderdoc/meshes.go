@@ -65,6 +65,10 @@ type DrawCall struct {
 	IndexBufferOffset  int
 	VertexBuffers      []DrawCallVertexBuffer
 	InputLayoutID      string
+	// PSTextureIDs lists the texture resource IDs bound to the PS stage at
+	// draw time, in slot order (empty strings for unbound slots). Resolved
+	// from the SRV bindings via MeshReport.SRVToTexture.
+	PSTextureIDs []string
 }
 
 // MeshReport collects the parse output needed to build the Meshes view.
@@ -106,6 +110,7 @@ func parseMeshXML(reader io.Reader) (*MeshReport, error) {
 		offset     int
 	}
 	var currentLayoutID string
+	var currentPSSrvIDs []string
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -163,6 +168,12 @@ func parseMeshXML(reader io.Reader) (*MeshReport, error) {
 				return nil, parseErr
 			}
 			currentLayoutID = id
+		case "ID3D11DeviceContext::PSSetShaderResources":
+			startSlot, srvIDs, parseErr := parsePSSetShaderResourcesChunk(decoder)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			currentPSSrvIDs = mergePSBindings(currentPSSrvIDs, startSlot, srvIDs)
 		case "ID3D11DeviceContext::DrawIndexed", "ID3D11DeviceContext::DrawIndexedInstanced":
 			dc, parseErr := parseDrawIndexedChunk(decoder)
 			if parseErr != nil {
@@ -176,6 +187,7 @@ func parseMeshXML(reader io.Reader) (*MeshReport, error) {
 			dc.IndexBufferOffset = currentIB.offset
 			dc.InputLayoutID = currentLayoutID
 			dc.VertexBuffers = append([]DrawCallVertexBuffer(nil), currentVBs...)
+			dc.PSTextureIDs = resolvePSTextureIDs(currentPSSrvIDs, report.SRVToTexture)
 			report.DrawCalls = append(report.DrawCalls, *dc)
 		}
 	}
@@ -684,4 +696,97 @@ func hashMeshBuffers(dc DrawCall, buffers map[string]BufferInfo, reader BufferRe
 	// Using the full digest avoids silent collision-merges between genuinely
 	// different meshes that happen to share their first 16 hex chars.
 	return hex.EncodeToString(hasher.Sum(nil)), vbBytes, len(ibData), nil
+}
+
+// parsePSSetShaderResourcesChunk reads one PSSetShaderResources chunk and
+// returns (startSlot, srvIDs). srvIDs is in slot order starting at startSlot.
+// Empty SRV IDs (unbound slots) are preserved as empty strings.
+func parsePSSetShaderResourcesChunk(decoder *xml.Decoder) (int, []string, error) {
+	startSlot := 0
+	var srvIDs []string
+	depth := 1
+	inArray := false
+	for depth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			return 0, nil, fmt.Errorf("read pssetshaderresources: %w", err)
+		}
+		switch typed := token.(type) {
+		case xml.StartElement:
+			depth++
+			switch typed.Name.Local {
+			case "uint":
+				if attr(typed, "name") == "StartSlot" {
+					value, readErr := readIntElement(decoder)
+					if readErr != nil {
+						return 0, nil, readErr
+					}
+					depth--
+					startSlot = value
+				} else if skipErr := skipElement(decoder); skipErr != nil {
+					return 0, nil, skipErr
+				} else {
+					depth--
+				}
+			case "array":
+				if attr(typed, "name") == "ppShaderResourceViews" {
+					inArray = true
+				}
+			case "ResourceId":
+				if inArray {
+					value, readErr := readTextElement(decoder)
+					if readErr != nil {
+						return 0, nil, readErr
+					}
+					depth--
+					srvIDs = append(srvIDs, strings.TrimSpace(value))
+				} else if skipErr := skipElement(decoder); skipErr != nil {
+					return 0, nil, skipErr
+				} else {
+					depth--
+				}
+			}
+		case xml.EndElement:
+			depth--
+			if typed.Name.Local == "array" {
+				inArray = false
+			}
+		}
+	}
+	return startSlot, srvIDs, nil
+}
+
+// mergePSBindings overlays a PSSetShaderResources call onto the current
+// bindings: writes srvIDs into slots [startSlot, startSlot+len(srvIDs)),
+// preserving any earlier slots, and grows the slice if needed.
+func mergePSBindings(current []string, startSlot int, srvIDs []string) []string {
+	required := startSlot + len(srvIDs)
+	if len(current) < required {
+		grown := make([]string, required)
+		copy(grown, current)
+		current = grown
+	}
+	for i, id := range srvIDs {
+		current[startSlot+i] = id
+	}
+	return current
+}
+
+// resolvePSTextureIDs maps a slice of bound SRV IDs to their underlying
+// texture IDs. SRVs not in the map (or empty entries) become empty strings,
+// preserving slot indices.
+func resolvePSTextureIDs(srvIDs []string, srvToTexture map[string]string) []string {
+	if len(srvIDs) == 0 {
+		return nil
+	}
+	out := make([]string, len(srvIDs))
+	for i, srvID := range srvIDs {
+		if srvID == "" {
+			continue
+		}
+		if texID, ok := srvToTexture[srvID]; ok {
+			out[i] = texID
+		}
+	}
+	return out
 }
