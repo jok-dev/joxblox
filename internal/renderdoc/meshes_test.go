@@ -207,14 +207,23 @@ func TestBuildMeshesDedupesByHash(t *testing.T) {
 }
 
 func TestParseCreateShaderResourceViewBuildsMap(t *testing.T) {
+	// Mirrors the real RenderDoc XML shape: pResource comes first, then a
+	// pDesc struct with nested children, then pView with the new SRV id.
 	xmlData := `<rdc>
 <chunk name="ID3D11Device::CreateShaderResourceView">
   <ResourceId name="pResource">12345</ResourceId>
-  <ResourceId name="ppSRView">99001</ResourceId>
+  <struct name="pDesc">
+    <enum name="Format" string="DXGI_FORMAT_UNKNOWN">0</enum>
+    <enum name="ViewDimension" string="D3D11_SRV_DIMENSION_BUFFER">1</enum>
+  </struct>
+  <ResourceId name="pView">99001</ResourceId>
 </chunk>
 <chunk name="ID3D11Device::CreateShaderResourceView">
   <ResourceId name="pResource">12346</ResourceId>
-  <ResourceId name="ppSRView">99002</ResourceId>
+  <struct name="pDesc">
+    <enum name="Format" string="DXGI_FORMAT_UNKNOWN">0</enum>
+  </struct>
+  <ResourceId name="pView">99002</ResourceId>
 </chunk>
 </rdc>`
 	report, err := parseMeshXML(strings.NewReader(xmlData))
@@ -230,16 +239,20 @@ func TestParseCreateShaderResourceViewBuildsMap(t *testing.T) {
 }
 
 func TestParsePSSetShaderResourcesPopulatesDrawCall(t *testing.T) {
+	// Mirrors the real RenderDoc XML shape: PSSetShaderResources starts with
+	// a Context ResourceId before StartSlot/NumViews, and the array entries
+	// are nameless ResourceId children.
 	xmlData := `<rdc>
 <chunk name="ID3D11Device::CreateShaderResourceView">
   <ResourceId name="pResource">12345</ResourceId>
-  <ResourceId name="ppSRView">99001</ResourceId>
+  <ResourceId name="pView">99001</ResourceId>
 </chunk>
 <chunk name="ID3D11Device::CreateShaderResourceView">
   <ResourceId name="pResource">12346</ResourceId>
-  <ResourceId name="ppSRView">99002</ResourceId>
+  <ResourceId name="pView">99002</ResourceId>
 </chunk>
 <chunk name="ID3D11DeviceContext::PSSetShaderResources">
+  <ResourceId name="Context">7</ResourceId>
   <uint name="StartSlot">0</uint>
   <uint name="NumViews">2</uint>
   <array name="ppShaderResourceViews">

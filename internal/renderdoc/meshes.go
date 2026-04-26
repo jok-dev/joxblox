@@ -367,7 +367,10 @@ func parseCreateSRVChunk(decoder *xml.Decoder) (string, string, error) {
 				switch name {
 				case "pResource":
 					texID = strings.TrimSpace(value)
-				case "ppSRView":
+				case "pView":
+					// RenderDoc XML emits the created SRV under the
+					// "pView" attribute (despite the D3D11 API naming the
+					// out parameter ppSRView). Don't confuse the two.
 					srvID = strings.TrimSpace(value)
 				}
 			}
