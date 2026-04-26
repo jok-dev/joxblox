@@ -1625,3 +1625,61 @@ func ExtractMeshPreviewFromFileWithLimit(filePath string, maxTriangles int) (Mes
 	}
 	return BuildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
 }
+
+// NewMeshPreviewWithToolbar wraps a fresh MeshPreviewWidget in a vertical
+// container topped by a three-button viewmode segmented control
+// (Lit · Color · Normals). Returns the container for layout and the inner
+// widget so callers can still drive it (SetData, SetWireframe, etc).
+func NewMeshPreviewWithToolbar() (fyne.CanvasObject, *MeshPreviewWidget) {
+	viewer := NewMeshPreviewWidget()
+	toolbar := newViewmodeToolbar(viewer)
+	return container.NewBorder(toolbar, nil, nil, nil, viewer), viewer
+}
+
+func newViewmodeToolbar(viewer *MeshPreviewWidget) fyne.CanvasObject {
+	var buttons []*viewmodeButton
+	setMode := func(mode int) {
+		viewer.SetViewmode(mode)
+		for _, btn := range buttons {
+			btn.Refresh()
+		}
+	}
+	isActive := func(mode int) func() bool {
+		return func() bool { return viewer.Viewmode() == mode }
+	}
+	buttons = []*viewmodeButton{
+		newViewmodeButton("Lit", isActive(MeshViewmodeLitClay), func() { setMode(MeshViewmodeLitClay) }),
+		newViewmodeButton("Color", isActive(MeshViewmodeVertexColor), func() { setMode(MeshViewmodeVertexColor) }),
+		newViewmodeButton("Normals", isActive(MeshViewmodeNormals), func() { setMode(MeshViewmodeNormals) }),
+	}
+	return container.NewHBox(widget.NewLabel("View:"), buttons[0], buttons[1], buttons[2])
+}
+
+// viewmodeButton is a small button that re-derives its highlighted state
+// from an external predicate on every Refresh(). Lets a row of buttons
+// share one source-of-truth (the widget's current viewmode) without
+// each button needing to listen for changes.
+type viewmodeButton struct {
+	widget.Button
+	label    string
+	isActive func() bool
+}
+
+func newViewmodeButton(label string, isActive func() bool, onTap func()) *viewmodeButton {
+	btn := &viewmodeButton{label: label, isActive: isActive}
+	btn.OnTapped = onTap
+	btn.SetText(label)
+	btn.ExtendBaseWidget(btn)
+	return btn
+}
+
+func (b *viewmodeButton) Refresh() {
+	if b.isActive != nil && b.isActive() {
+		b.Importance = widget.HighImportance
+		b.SetText("● " + b.label)
+	} else {
+		b.Importance = widget.MediumImportance
+		b.SetText(b.label)
+	}
+	b.Button.Refresh()
+}
