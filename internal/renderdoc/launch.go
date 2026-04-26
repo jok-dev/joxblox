@@ -2,7 +2,9 @@ package renderdoc
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 )
@@ -53,4 +55,33 @@ func locateRobloxStudioIn(envValue, versionsRoot string) (string, error) {
 	}
 
 	return "", errors.New("RobloxStudioBeta.exe not found — install Roblox Studio or set the JOXBLOX_ROBLOX_STUDIO environment variable")
+}
+
+// LaunchStudioWithRenderDoc spawns `renderdoccmd capture <studioPath>` detached.
+// Returns the started *exec.Cmd (not waited on). The caller should not Wait()
+// on it — Studio runs independently. Note: the Studio path resolution order
+// (preference -> env -> scan) is the caller's responsibility; this function
+// just launches whatever path it's given.
+func LaunchStudioWithRenderDoc(studioPath string) (*exec.Cmd, error) {
+	if _, err := os.Stat(studioPath); err != nil {
+		return nil, fmt.Errorf("Studio executable not found at %q: %w", studioPath, err)
+	}
+
+	cmdPath, err := locateRenderdoccmd()
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := buildLaunchCommand(cmdPath, studioPath)
+	configureLaunchSysProcAttr(cmd)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if startErr := cmd.Start(); startErr != nil {
+		return nil, fmt.Errorf("start renderdoccmd: %w", startErr)
+	}
+	return cmd, nil
+}
+
+func buildLaunchCommand(renderdoccmdPath, studioPath string) *exec.Cmd {
+	return exec.Command(renderdoccmdPath, "capture", studioPath)
 }
