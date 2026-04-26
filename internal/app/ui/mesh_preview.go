@@ -33,6 +33,15 @@ import (
 const MaxMeshPreviewTriangles = 20000
 const MinMeshPreviewRenderDimension = 32
 
+// Mesh preview viewmodes — values match the subprocess's ViewmodeXxx
+// constants (0=VertexColor, 1=LitClay, 2=Normals). The subprocess
+// tolerates unknown values by falling back to VertexColor.
+const (
+	MeshViewmodeVertexColor = 0
+	MeshViewmodeLitClay     = 1
+	MeshViewmodeNormals     = 2
+)
+
 const (
 	PreviewWidth  = 440
 	PreviewHeight = 300
@@ -102,6 +111,7 @@ type MeshPreviewWidget struct {
 	zoom           float64
 	rightMouseDown bool
 	wireframe      bool
+	viewmode       int
 	pickToken      atomic.Uint64
 	renderToken    atomic.Uint64
 	process        *meshRendererProcess
@@ -140,6 +150,7 @@ func NewMeshPreviewWidget() *MeshPreviewWidget {
 		yaw:           initialYaw,
 		pitch:         initialPitch,
 		zoom:          initialZoom,
+		viewmode:      MeshViewmodeLitClay,
 	}
 	viewer.image.FillMode = canvas.ImageFillStretch
 	viewer.image.ScaleMode = canvas.ImageScaleFastest
@@ -293,6 +304,15 @@ func (viewer *MeshPreviewWidget) applyData(data MeshPreviewData, resetView bool)
 		viewer.pitch = 0.3
 		viewer.zoom = 1.0
 		viewer.cameraX, viewer.cameraY, viewer.cameraZ = meshPreviewInitialCameraPosition(viewer.yaw, viewer.pitch, viewer.zoom)
+		// Multi-batch scenes (e.g. Roblox places) carry meaningful per-part
+		// colors that the user wants to see by default. Single-mesh loads
+		// have no informative vertex color, so default to lit clay so the
+		// shape reads.
+		if len(data.Batches) > 0 {
+			viewer.viewmode = MeshViewmodeVertexColor
+		} else {
+			viewer.viewmode = MeshViewmodeLitClay
+		}
 	}
 	go func() {
 		viewer.startProcessAndLoad()
@@ -361,6 +381,30 @@ func (viewer *MeshPreviewWidget) SetWireframe(enabled bool) {
 	}
 	viewer.wireframe = enabled
 	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) SetViewmode(mode int) {
+	if viewer == nil {
+		return
+	}
+	switch mode {
+	case MeshViewmodeVertexColor, MeshViewmodeLitClay, MeshViewmodeNormals:
+		// valid
+	default:
+		mode = MeshViewmodeVertexColor
+	}
+	if viewer.viewmode == mode {
+		return
+	}
+	viewer.viewmode = mode
+	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) Viewmode() int {
+	if viewer == nil {
+		return MeshViewmodeVertexColor
+	}
+	return viewer.viewmode
 }
 
 func (viewer *MeshPreviewWidget) SetOpacity(nextOpacity float64) {
@@ -698,12 +742,13 @@ func (viewer *MeshPreviewWidget) render() {
 	pitchSnapshot := viewer.pitch
 	opacitySnapshot := viewer.opacity
 	wireframeSnapshot := viewer.wireframe
+	viewmodeSnapshot := viewer.viewmode
 	bg := color.NRGBAModel.Convert(viewer.background.FillColor).(color.NRGBA)
 	bgHex := fmt.Sprintf("%02x%02x%02x", bg.R, bg.G, bg.B)
 	renderID := viewer.renderToken.Add(1)
 
 	go func() {
-		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex, wireframeSnapshot)
+		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex, wireframeSnapshot, viewmodeSnapshot)
 		if renderErr != nil {
 			debug.Logf("mesh renderer subprocess render failed: %s", renderErr.Error())
 			return
@@ -997,7 +1042,7 @@ func (p *meshRendererProcess) recolorScene(batchColors []color.NRGBA) error {
 	return nil
 }
 
-func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string, wireframe bool) (image.Image, error) {
+func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string, wireframe bool, viewmode int) (image.Image, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.alive {
@@ -1008,7 +1053,7 @@ func (p *meshRendererProcess) render(width int, height int, cameraX float64, cam
 	if wireframe {
 		wireframeFlag = 1
 	}
-	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s %d\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex, wireframeFlag)
+	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s %d %d\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex, wireframeFlag, viewmode)
 	if _, err := io.WriteString(p.stdin, cmd); err != nil {
 		p.alive = false
 		return nil, fmt.Errorf("write render: %w", err)
