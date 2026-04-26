@@ -190,6 +190,19 @@ func main() {
 	shadowBiasLoc = rl.GetShaderLocation(mainShader, "shadowBias")
 	viewmodeLoc = rl.GetShaderLocation(mainShader, "viewmode")
 
+	// Force raylib's standard-slot locations to point at our shader's
+	// matching uniforms/attributes. Raylib's DrawModel auto-injects matModel
+	// and matNormal each draw via these slot indices; if auto-detection by
+	// name fails (and in practice it does for our setup, leaving normals
+	// effectively unbound), every fragment computes dot(zero, light)=0 and
+	// the mesh renders as a uniform ambient-only silhouette — exactly the
+	// "lighting looks completely flat" symptom we hit.
+	mainShader.UpdateLocation(rl.ShaderLocMatrixModel, rl.GetShaderLocation(mainShader, "matModel"))
+	mainShader.UpdateLocation(rl.ShaderLocMatrixNormal, rl.GetShaderLocation(mainShader, "matNormal"))
+	mainShader.UpdateLocation(rl.ShaderLocVectorView, viewPosLoc)
+	mainShader.UpdateLocation(rl.ShaderLocVertexNormal, rl.GetShaderLocationAttrib(mainShader, "vertexNormal"))
+	mainShader.UpdateLocation(rl.ShaderLocVertexColor, rl.GetShaderLocationAttrib(mainShader, "vertexColor"))
+
 	depthShader = rl.LoadShaderFromMemory(depthVertSrc, depthFragSrc)
 	depthShaderLoaded = true
 
