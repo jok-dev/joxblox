@@ -15,7 +15,16 @@ import (
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	xdraw "golang.org/x/image/draw"
 )
+
+// materialThumbnailMaxDim is the largest dimension we keep cached preview
+// images at. Decoding a 4K BC texture yields a 4096×4096 NRGBA buffer
+// (~64 MB) — caching that as-is means every table cell render and every
+// preview update has to rescale 4K→32px on the UI thread, which freezes
+// Fyne for noticeable beats. Downsampling once at decode time turns each
+// cache hit into a near-zero-cost paint.
+const materialThumbnailMaxDim = 256
 
 type materialsTabState struct {
 	materials        []renderdoc.Material
@@ -51,6 +60,7 @@ func newMaterialPreview() *materialPreview {
 	mk := func(title string) (*canvas.Image, *widget.Label, *fyne.Container) {
 		img := canvas.NewImageFromImage(nil)
 		img.FillMode = canvas.ImageFillContain
+		img.ScaleMode = canvas.ImageScaleFastest
 		img.SetMinSize(fyne.NewSize(256, 256))
 		lbl := widget.NewLabel(title)
 		return img, lbl, container.NewBorder(lbl, nil, nil, nil, img)
@@ -115,6 +125,7 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 		func() fyne.CanvasObject {
 			img := canvas.NewImageFromImage(nil)
 			img.FillMode = canvas.ImageFillContain
+			img.ScaleMode = canvas.ImageScaleFastest
 			img.SetMinSize(fyne.NewSize(32, 32))
 			label := widget.NewLabel("")
 			return container.NewMax(label, img)
@@ -335,17 +346,48 @@ func startTextureDecode(state *materialsTabState, tex renderdoc.TextureInfo, onC
 	store := state.bufferStore
 	go func() {
 		decoded, err := renderdoc.DecodeTexturePreview(tex, store)
+		var thumbnail image.Image
+		if err == nil && decoded != nil {
+			thumbnail = downsampleForCache(decoded)
+		}
 		fyne.Do(func() {
 			delete(state.decodeInFlight, tex.ResourceID)
-			if err != nil || decoded == nil {
+			if thumbnail == nil {
 				return
 			}
-			state.thumbnailCache[tex.ResourceID] = decoded
+			state.thumbnailCache[tex.ResourceID] = thumbnail
 			if onCached != nil {
 				onCached()
 			}
 		})
 	}()
+}
+
+// downsampleForCache produces a small RGBA copy of img, capped at
+// materialThumbnailMaxDim on its longest edge. Aspect ratio is preserved.
+// Source images smaller than the cap are returned unchanged. Runs on the
+// background goroutine so the UI thread never sees a 4K rescale.
+func downsampleForCache(src image.Image) image.Image {
+	srcBounds := src.Bounds()
+	w, h := srcBounds.Dx(), srcBounds.Dy()
+	if w <= materialThumbnailMaxDim && h <= materialThumbnailMaxDim {
+		return src
+	}
+	scale := float64(materialThumbnailMaxDim) / float64(w)
+	if h > w {
+		scale = float64(materialThumbnailMaxDim) / float64(h)
+	}
+	dstW := int(float64(w) * scale)
+	dstH := int(float64(h) * scale)
+	if dstW < 1 {
+		dstW = 1
+	}
+	if dstH < 1 {
+		dstH = 1
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, dstW, dstH))
+	xdraw.BiLinear.Scale(dst, dst.Bounds(), src, srcBounds, xdraw.Src, nil)
+	return dst
 }
 
 func materialColorHash(state *materialsTabState, mat renderdoc.Material) string {
