@@ -91,7 +91,6 @@ type AssetView struct {
 	assetDownloadFileName     string
 	downloadOriginalAsset     bool
 	interpolationSelect       *widget.Select
-	wireframeCheck            *widget.Check
 	currentPreviewResource    fyne.Resource
 	meshPreviewLoadToken      atomic.Uint64
 	currentMeshPreviewData    MeshPreviewData
@@ -327,14 +326,9 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 	})
 	view.interpolationSelect.SetSelected(DefaultSampleMode)
 	view.interpolationSelect.Disable()
-	view.wireframeCheck = widget.NewCheck("Wireframe", func(checked bool) {
-		view.MeshPreview.SetWireframe(checked)
-	})
-	view.wireframeCheck.SetChecked(false)
-	view.wireframeCheck.Hide()
 	previewVariantControl := container.NewGridWrap(fyne.NewSize(240, 36), view.previewVariantSelect)
 	interpolationControl := container.NewGridWrap(fyne.NewSize(160, 36), view.interpolationSelect)
-	expandButtonRow := container.NewHBox(layout.NewSpacer(), view.wireframeCheck, previewVariantControl, interpolationControl, view.uploadImageButton, view.downloadImageButton, view.expandImageButton)
+	expandButtonRow := container.NewHBox(layout.NewSpacer(), previewVariantControl, interpolationControl, view.uploadImageButton, view.downloadImageButton, view.expandImageButton)
 	previewBody := container.NewVBox(view.PreviewContainer, view.audioControls)
 	view.PreviewBox = container.NewBorder(nil, expandButtonRow, nil, nil, previewBody)
 	hierarchyMinHeight := canvas.NewRectangle(color.Transparent)
@@ -365,10 +359,8 @@ func (view *AssetView) Clear() {
 	view.MeshPreview.Clear()
 	view.MeshPreviewWithToolbar.Hide()
 	view.currentMeshPreviewData = MeshPreviewData{}
-	if view.wireframeCheck != nil {
-		view.wireframeCheck.SetChecked(false)
-		view.wireframeCheck.Hide()
-	}
+	view.MeshPreview.SetWireframe(false)
+	view.MeshPreview.SetDoubleSided(false)
 	view.PreviewPlaceholder.Show()
 	view.PreviewContainer.Refresh()
 	updateMetadataRows(view.metadataRows, loader.AssetViewData{})
@@ -574,10 +566,6 @@ func (view *AssetView) showMeshPreview(downloadBytes []byte) {
 				view.PreviewImage.Hide()
 				view.PreviewPlaceholder.Hide()
 				view.expandImageButton.Enable()
-				if view.wireframeCheck != nil {
-					view.MeshPreview.SetWireframe(view.wireframeCheck.Checked)
-					view.wireframeCheck.Show()
-				}
 				view.PreviewContainer.Refresh()
 				return
 			}

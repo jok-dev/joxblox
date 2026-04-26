@@ -111,6 +111,7 @@ type MeshPreviewWidget struct {
 	zoom           float64
 	rightMouseDown bool
 	wireframe      bool
+	doubleSided    bool
 	viewmode       int
 	pickToken      atomic.Uint64
 	renderToken    atomic.Uint64
@@ -381,6 +382,28 @@ func (viewer *MeshPreviewWidget) SetWireframe(enabled bool) {
 	}
 	viewer.wireframe = enabled
 	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) Wireframe() bool {
+	if viewer == nil {
+		return false
+	}
+	return viewer.wireframe
+}
+
+func (viewer *MeshPreviewWidget) SetDoubleSided(enabled bool) {
+	if viewer == nil || viewer.doubleSided == enabled {
+		return
+	}
+	viewer.doubleSided = enabled
+	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) DoubleSided() bool {
+	if viewer == nil {
+		return false
+	}
+	return viewer.doubleSided
 }
 
 func (viewer *MeshPreviewWidget) SetViewmode(mode int) {
@@ -743,12 +766,13 @@ func (viewer *MeshPreviewWidget) render() {
 	opacitySnapshot := viewer.opacity
 	wireframeSnapshot := viewer.wireframe
 	viewmodeSnapshot := viewer.viewmode
+	doubleSidedSnapshot := viewer.doubleSided
 	bg := color.NRGBAModel.Convert(viewer.background.FillColor).(color.NRGBA)
 	bgHex := fmt.Sprintf("%02x%02x%02x", bg.R, bg.G, bg.B)
 	renderID := viewer.renderToken.Add(1)
 
 	go func() {
-		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex, wireframeSnapshot, viewmodeSnapshot)
+		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex, wireframeSnapshot, viewmodeSnapshot, doubleSidedSnapshot)
 		if renderErr != nil {
 			debug.Logf("mesh renderer subprocess render failed: %s", renderErr.Error())
 			return
@@ -1042,7 +1066,7 @@ func (p *meshRendererProcess) recolorScene(batchColors []color.NRGBA) error {
 	return nil
 }
 
-func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string, wireframe bool, viewmode int) (image.Image, error) {
+func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string, wireframe bool, viewmode int, doubleSided bool) (image.Image, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.alive {
@@ -1053,7 +1077,11 @@ func (p *meshRendererProcess) render(width int, height int, cameraX float64, cam
 	if wireframe {
 		wireframeFlag = 1
 	}
-	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s %d %d\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex, wireframeFlag, viewmode)
+	doubleSidedFlag := 0
+	if doubleSided {
+		doubleSidedFlag = 1
+	}
+	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s %d %d %d\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex, wireframeFlag, viewmode, doubleSidedFlag)
 	if _, err := io.WriteString(p.stdin, cmd); err != nil {
 		p.alive = false
 		return nil, fmt.Errorf("write render: %w", err)
@@ -1652,7 +1680,15 @@ func newViewmodeToolbar(viewer *MeshPreviewWidget) fyne.CanvasObject {
 		newViewmodeButton("Color", isActive(MeshViewmodeVertexColor), func() { setMode(MeshViewmodeVertexColor) }),
 		newViewmodeButton("Normals", isActive(MeshViewmodeNormals), func() { setMode(MeshViewmodeNormals) }),
 	}
-	return container.NewHBox(widget.NewLabel("View:"), buttons[0], buttons[1], buttons[2])
+	wireframeCheck := widget.NewCheck("Wireframe", func(checked bool) { viewer.SetWireframe(checked) })
+	wireframeCheck.SetChecked(viewer.Wireframe())
+	doubleSidedCheck := widget.NewCheck("Double sided", func(checked bool) { viewer.SetDoubleSided(checked) })
+	doubleSidedCheck.SetChecked(viewer.DoubleSided())
+	return container.NewHBox(
+		widget.NewLabel("View:"), buttons[0], buttons[1], buttons[2],
+		widget.NewSeparator(),
+		wireframeCheck, doubleSidedCheck,
+	)
 }
 
 // viewmodeButton is a small button that re-derives its highlighted state

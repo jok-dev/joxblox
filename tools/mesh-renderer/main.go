@@ -629,6 +629,7 @@ type renderArgs struct {
 	BgHex         string
 	Wireframe     bool
 	Viewmode      int
+	DoubleSided   bool
 }
 
 // parseRenderArgs parses a "RENDER ..." command line. Tolerates the older
@@ -666,6 +667,10 @@ func parseRenderArgs(parts []string) (renderArgs, error) {
 			args.Viewmode = ViewmodeVertexColor
 		}
 	}
+	if len(parts) >= 15 {
+		flag, _ := strconv.Atoi(parts[14])
+		args.DoubleSided = flag != 0
+	}
 	return args, nil
 }
 
@@ -692,6 +697,7 @@ func handleRender(parts []string) {
 	bgHex := args.BgHex
 	wireframe := args.Wireframe
 	viewmode := args.Viewmode
+	doubleSided := args.DoubleSided
 
 	if width < 1 || width > 4096 {
 		width = 440
@@ -742,6 +748,11 @@ func handleRender(parts []string) {
 	rl.BeginMode3D(camera)
 	if transparent {
 		rl.DisableDepthTest()
+	}
+	// Double-sided rendering: turn off backface culling so triangles draw
+	// from both sides. Useful for inspecting open meshes / inverted normals.
+	if doubleSided {
+		rl.DisableBackfaceCulling()
 	}
 	fillLightDirVec := rl.Vector3Normalize(rl.NewVector3(
 		camera.Target.X-camera.Position.X,
@@ -797,6 +808,9 @@ func handleRender(parts []string) {
 	}
 	if transparent {
 		rl.EnableDepthTest()
+	}
+	if doubleSided {
+		rl.EnableBackfaceCulling()
 	}
 	// Subtle ground reference. Draws after geometry so it doesn't fight
 	// the model's depth, but still inside BeginMode3D so it gets the
