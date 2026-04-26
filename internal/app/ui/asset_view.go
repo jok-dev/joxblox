@@ -360,7 +360,7 @@ func (view *AssetView) Clear() {
 	view.MeshPreviewWithToolbar.Hide()
 	view.currentMeshPreviewData = MeshPreviewData{}
 	view.MeshPreview.SetWireframe(false)
-	view.MeshPreview.SetDoubleSided(false)
+	view.MeshPreview.SetDoubleSided(true)
 	view.PreviewPlaceholder.Show()
 	view.PreviewContainer.Refresh()
 	updateMetadataRows(view.metadataRows, loader.AssetViewData{})

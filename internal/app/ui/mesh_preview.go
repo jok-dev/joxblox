@@ -152,6 +152,7 @@ func NewMeshPreviewWidget() *MeshPreviewWidget {
 		pitch:         initialPitch,
 		zoom:          initialZoom,
 		viewmode:      MeshViewmodeLitClay,
+		doubleSided:   true,
 	}
 	viewer.image.FillMode = canvas.ImageFillStretch
 	viewer.image.ScaleMode = canvas.ImageScaleFastest
