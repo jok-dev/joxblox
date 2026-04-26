@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/assetmatch"
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
@@ -52,9 +53,10 @@ type renderdocTabState struct {
 	sourceImage image.Image
 	// corpus + match overlay populated when a Scan tab scan completes
 	// AND a capture is loaded. Both can be nil — the column shows "—" then.
-	corpus          *assetmatch.TextureCorpus
-	matchByTexID    map[string]int64   // best match per texture resource ID
-	matchAllByTexID map[string][]int64 // all candidates within threshold
+	corpus                  *assetmatch.TextureCorpus
+	matchByTexID            map[string]int64   // best match per texture resource ID
+	matchAllByTexID         map[string][]int64 // all candidates within threshold
+	openInSingleAssetButton *widget.Button     // shown when current texture has a match
 }
 
 var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM", "Studio Asset"}
@@ -205,7 +207,21 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 		modeButtons[0], modeButtons[1], modeButtons[2], modeButtons[3], modeButtons[4],
 	)
 
-	previewHeader := container.NewVBox(channelToggleRow, previewInfoLabel)
+	openInSingleAssetButton := widget.NewButton("Open in Single Asset", func() {
+		if state.selectedRow < 0 || state.selectedRow >= len(state.displayTextures) {
+			return
+		}
+		tex := state.displayTextures[state.selectedRow]
+		id, ok := state.matchByTexID[tex.ResourceID]
+		if !ok || ui.OpenSingleAsset == nil {
+			return
+		}
+		ui.OpenSingleAsset(id)
+	})
+	openInSingleAssetButton.Hide()
+	state.openInSingleAssetButton = openInSingleAssetButton
+
+	previewHeader := container.NewVBox(channelToggleRow, previewInfoLabel, openInSingleAssetButton)
 	previewPane := container.NewBorder(previewHeader, nil, nil, nil, previewCanvas)
 
 	var table *widget.Table
@@ -497,6 +513,13 @@ func triggerPreview(state *renderdocTabState, texture renderdoc.TextureInfo, pre
 				return
 			}
 			infoLabel.SetText(previewInfoText(state, texture, img))
+			if state.openInSingleAssetButton != nil {
+				if _, ok := state.matchByTexID[texture.ResourceID]; ok {
+					state.openInSingleAssetButton.Show()
+				} else {
+					state.openInSingleAssetButton.Hide()
+				}
+			}
 			state.sourceImage = img
 			previewCanvas.Image = applyChannelMode(img, state.channelMode)
 			previewCanvas.Refresh()

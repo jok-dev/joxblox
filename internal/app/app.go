@@ -98,7 +98,8 @@ func Run() {
 		},
 	)
 	reportGenerationTab := container.NewTabItem(tabTitleReportGeneration, reportGenerationContent)
-	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, singleasset.NewSingleAssetTab(window))
+	singleAssetContent, loadSingleAssetByID := singleasset.NewSingleAssetTab(window)
+	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, singleAssetContent)
 	scanContent, scanFileActions, allScanFileActions, selectScanContext, loadScanRBXLFile := scan.NewScanTab(window)
 	scanTab := container.NewTabItem(tabTitleScan, scanContent)
 	rbxlHeatmapContent, loadHeatmapRBXLFile := heatmaptab.NewRBXLHeatmapTab(window)
@@ -110,6 +111,12 @@ func Run() {
 	renderdocTab := container.NewTabItem(tabTitleRenderDoc, renderdoctab.NewRenderDocTab(window))
 	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, lodViewerTab, optimizeTab, imageUploaderTab, renderdocTab)
 	tabs.Select(reportGenerationTab)
+	ui.OpenSingleAsset = func(assetID int64) {
+		tabs.Select(singleAssetTab)
+		if loadSingleAssetByID != nil {
+			loadSingleAssetByID(assetID)
+		}
+	}
 	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64) {
 		tabs.Select(scanTab)
 		if loadScanRBXLFile != nil {

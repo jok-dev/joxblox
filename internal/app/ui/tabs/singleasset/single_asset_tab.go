@@ -2,6 +2,7 @@ package singleasset
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"joxblox/internal/app/loader"
@@ -17,7 +18,10 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-func NewSingleAssetTab(window fyne.Window) fyne.CanvasObject {
+// NewSingleAssetTab returns the tab content plus a loadByID callback that
+// other tabs can use to programmatically load an asset (e.g. the
+// "Open in Single Asset" button on the RenderDoc Materials sub-tab).
+func NewSingleAssetTab(window fyne.Window) (fyne.CanvasObject, func(assetID int64)) {
 	assetInput := widget.NewEntry()
 	assetInput.SetPlaceHolder("Paste an asset ID, rbxassetid URL, or rbxthumb URL")
 
@@ -158,5 +162,10 @@ func NewSingleAssetTab(window fyne.Window) fyne.CanvasObject {
 		assetDetailsView.NoteLabel,
 	)
 
-	return container.NewVScroll(tabContent)
+	loadByID := func(assetID int64) {
+		assetInput.SetText(strconv.FormatInt(assetID, 10))
+		loadAsset()
+	}
+
+	return container.NewVScroll(tabContent), loadByID
 }

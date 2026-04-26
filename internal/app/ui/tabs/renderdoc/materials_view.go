@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
 	"joxblox/internal/assetmatch"
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
@@ -51,9 +52,10 @@ type materialsTabState struct {
 	// corpus + per-texture match overlay populated when a Scan tab scan
 	// completes AND a capture is loaded. Materials surface the Color
 	// slot's matched ID; nil corpus → "—" everywhere.
-	corpus          *assetmatch.TextureCorpus
-	matchByTexID    map[string]int64
-	matchAllByTexID map[string][]int64
+	corpus                  *assetmatch.TextureCorpus
+	matchByTexID            map[string]int64
+	matchAllByTexID         map[string][]int64
+	openInSingleAssetButton *widget.Button
 }
 
 var materialColumnHeaders = []string{"Color", "Normal", "MR", "Color Hash", "Draws", "Meshes", "VRAM", "Studio Asset"}
@@ -135,7 +137,20 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 	filterEntry.SetPlaceHolder("Filter by texture ID or hash")
 
 	preview := newMaterialPreview()
-	previewPane := preview.container
+	openInSingleAssetButton := widget.NewButton("Open in Single Asset", func() {
+		if state.selectedRow < 0 || state.selectedRow >= len(state.displayMaterials) {
+			return
+		}
+		mat := state.displayMaterials[state.selectedRow]
+		id, ok := state.matchByTexID[mat.ColorTextureID]
+		if !ok || ui.OpenSingleAsset == nil {
+			return
+		}
+		ui.OpenSingleAsset(id)
+	})
+	openInSingleAssetButton.Hide()
+	state.openInSingleAssetButton = openInSingleAssetButton
+	previewPane := container.NewBorder(nil, openInSingleAssetButton, nil, nil, preview.container)
 
 	var table *widget.Table
 	table = widget.NewTableWithHeaders(
@@ -491,6 +506,13 @@ func updateMaterialPreview(state *materialsTabState, mat renderdoc.Material, pre
 	setPreviewMap(state, mat.ColorTextureID, preview.colorImg, preview.colorLabel, "Color", gen, table)
 	setPreviewMap(state, mat.NormalTextureID, preview.normalImg, preview.normalLabel, "Normal", gen, table)
 	setPreviewMap(state, mat.MRTextureID, preview.mrImg, preview.mrLabel, "MR", gen, table)
+	if state.openInSingleAssetButton != nil {
+		if _, ok := state.matchByTexID[mat.ColorTextureID]; ok && mat.ColorTextureID != "" {
+			state.openInSingleAssetButton.Show()
+		} else {
+			state.openInSingleAssetButton.Hide()
+		}
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Draws: %d   Meshes: %d   VRAM: %s\n",
