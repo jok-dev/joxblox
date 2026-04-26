@@ -3,9 +3,12 @@ package renderdoc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"image"
 	"runtime"
 	"sync"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 // pixelHashHexChars is the truncated SHA-256 hex length used for texture
@@ -92,6 +95,9 @@ func ComputeTextureHashes(report *Report, store *BufferStore, onProgress func(do
 				img, err := DecodeTexturePreview(texture, store)
 				if err == nil && img != nil {
 					report.Textures[idx].PixelHash = HashImagePixels(img)
+				if dHash, dHashErr := computeImageDHash(img); dHashErr == nil {
+					report.Textures[idx].DHash = dHash
+				}
 					// Content-based re-tagging. Patterns we recognise:
 					//   - DXT5nm-swizzled normals (BC3 with R=255 and B=0
 					//     uniform across the image).
@@ -295,4 +301,33 @@ func ApplyBuiltinHashes(report *Report, hashCategories map[string]TextureCategor
 		agg.Bytes += texture.Bytes
 		report.ByCategory[texture.Category] = agg
 	}
+}
+
+// computeImageDHash returns a 64-bit perceptual hash of img using the same
+// 9×8 grayscale-difference algorithm as loader.ComputeImageDHash, but
+// taking an already-decoded image so we don't waste a second decode pass.
+// Returns 0 + error when the image is too small to hash meaningfully.
+func computeImageDHash(img image.Image) (uint64, error) {
+	const dHashWidth = 9
+	const dHashHeight = 8
+	bounds := img.Bounds()
+	if bounds.Dx() < dHashWidth || bounds.Dy() < dHashHeight {
+		return 0, fmt.Errorf("image too small for dHash (%dx%d)", bounds.Dx(), bounds.Dy())
+	}
+	resized := image.NewGray(image.Rect(0, 0, dHashWidth, dHashHeight))
+	xdraw.BiLinear.Scale(resized, resized.Bounds(), img, bounds, xdraw.Over, nil)
+
+	var hash uint64
+	bitIndex := 0
+	for y := 0; y < dHashHeight; y++ {
+		for x := 0; x < dHashWidth-1; x++ {
+			left := resized.GrayAt(x, y).Y
+			right := resized.GrayAt(x+1, y).Y
+			if left < right {
+				hash |= 1 << bitIndex
+			}
+			bitIndex++
+		}
+	}
+	return hash, nil
 }

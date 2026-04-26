@@ -36,6 +36,12 @@ type TextureInfo struct {
 	// BufferStore is available. Lets the UI spot identical textures and
 	// filter out well-known defaults by content.
 	PixelHash string
+	// DHash is the 64-bit perceptual hash (dHash) of the decoded base
+	// mip, computed in the same pass as PixelHash. Used for cross-
+	// referencing captured textures against a Roblox place's scan
+	// results — exact pixel hashes don't survive BC compression
+	// roundtripping but dHash with a small Hamming threshold does.
+	DHash uint64
 }
 
 // TextureUpload captures one ID3D11DeviceContext::UpdateSubresource chunk.
