@@ -18,6 +18,7 @@ import (
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/fsnotify/fsnotify"
+	nativeDialog "github.com/sqweek/dialog"
 )
 
 const (
@@ -268,9 +269,28 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 		}()
 	})
 
+	openButton := widget.NewButton("Open .rdc…", func() {
+		path, pickErr := nativeDialog.File().
+			Filter(rdcFileFilterLabel, "rdc").
+			Title("Select RenderDoc capture (.rdc)").
+			Load()
+		if pickErr != nil {
+			if !errors.Is(pickErr, nativeDialog.Cancelled) {
+				fyneDialog.ShowError(pickErr, window)
+			}
+			return
+		}
+		if loadCapture != nil {
+			loadCapture(path)
+		}
+	})
+
 	startCaptureFolderWatcher(l.sessionDir, l.refreshLister)
 
-	topRow := container.NewBorder(nil, nil, studioLabel, launchButton, statusLabel)
+	topRow := container.NewBorder(nil, nil, studioLabel,
+		container.NewHBox(openButton, launchButton),
+		statusLabel,
+	)
 	capturesHeaderRow := container.NewBorder(nil, nil, nil,
 		container.NewHBox(autoLoadCheck, openFolderButton),
 		l.header,

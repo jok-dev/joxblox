@@ -1,7 +1,6 @@
 package renderdoctab
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	"sort"
@@ -16,7 +15,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	nativeDialog "github.com/sqweek/dialog"
 )
 
 type materialsTabState struct {
@@ -173,12 +171,8 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 		countLabel.SetText(fmt.Sprintf("Showing %d of %d materials", len(state.displayMaterials), len(state.materials)))
 	}
 
-	var loadButton *widget.Button
 	onLoadFinished := func(textureReport *renderdoc.Report, meshReport *renderdoc.MeshReport, materials []renderdoc.Material, loadedPath string, xmlPath string, store *renderdoc.BufferStore, loadErr error) {
 		progressBar.Hide()
-		if loadButton != nil {
-			loadButton.Enable()
-		}
 		if loadErr != nil {
 			pathLabel.SetText(fmt.Sprintf("Load failed: %s", loadedPath))
 			fyneDialog.ShowError(loadErr, window)
@@ -218,22 +212,11 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 	}
 
 	loadFromPath := func(path string) {
-		go loadMaterialsCaptureFromPath(window, progressBar, loadButton, path, onLoadFinished)
+		go loadMaterialsCaptureFromPath(window, progressBar, nil, path, onLoadFinished)
 	}
 
-	loadButton = widget.NewButton("Load .rdc…", func() {
-		path, err := nativeDialog.File().Filter(rdcFileFilterLabel, "rdc").Title("Select RenderDoc capture (.rdc)").Load()
-		if err != nil {
-			if !errors.Is(err, nativeDialog.Cancelled) {
-				fyneDialog.ShowError(err, window)
-			}
-			return
-		}
-		loadFromPath(path)
-	})
-
 	header := container.NewVBox(
-		container.NewBorder(nil, nil, nil, loadButton, pathLabel),
+		pathLabel,
 		summaryLabel,
 		progressBar,
 		filterEntry,

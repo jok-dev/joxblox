@@ -15,7 +15,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	nativeDialog "github.com/sqweek/dialog"
 )
 
 type meshesTabState struct {
@@ -122,12 +121,8 @@ func newMeshesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Canva
 		countLabel.SetText(fmt.Sprintf("Showing %d of %d meshes", len(state.displayMeshes), len(state.meshes)))
 	}
 
-	var loadButton *widget.Button
 	onLoadFinished := func(report *renderdoc.MeshReport, meshes []renderdoc.MeshInfo, loadedPath, xmlPath string, newStore *renderdoc.BufferStore, loadErr error) {
 		progressBar.Hide()
-		if loadButton != nil {
-			loadButton.Enable()
-		}
 		if loadErr != nil {
 			pathLabel.SetText(fmt.Sprintf("Load failed: %s", loadedPath))
 			fyneDialog.ShowError(loadErr, window)
@@ -163,15 +158,11 @@ func newMeshesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Canva
 	}
 
 	loadFromPath := func(path string) {
-		go loadMeshCaptureFromPath(window, progressBar, loadButton, path, onLoadFinished)
+		go loadMeshCaptureFromPath(window, progressBar, nil, path, onLoadFinished)
 	}
 
-	loadButton = widget.NewButton("Load .rdc…", func() {
-		go pickAndLoadMeshCapture(window, progressBar, loadButton, onLoadFinished)
-	})
-
 	header := container.NewVBox(
-		container.NewBorder(nil, nil, nil, loadButton, pathLabel),
+		pathLabel,
 		summaryLabel,
 		progressBar,
 		filterEntry,
@@ -386,23 +377,8 @@ func buildMeshPreviewData(report *renderdoc.MeshReport, mesh renderdoc.MeshInfo,
 	}, nil
 }
 
-func pickAndLoadMeshCapture(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, onFinished func(*renderdoc.MeshReport, []renderdoc.MeshInfo, string, string, *renderdoc.BufferStore, error)) {
-	capturePath, err := nativeDialog.File().
-		Filter("RenderDoc capture", "rdc").
-		Title("Select RenderDoc capture (.rdc)").
-		Load()
-	if err != nil {
-		if errors.Is(err, nativeDialog.Cancelled) {
-			return
-		}
-		fyne.Do(func() { fyneDialog.ShowError(err, window) })
-		return
-	}
-	loadMeshCaptureFromPath(window, progressBar, loadButton, capturePath, onFinished)
-}
-
-// loadMeshCaptureFromPath runs the convert -> parse -> build pipeline for the
-// Meshes view. Used by the file-picker flow and by the launcher's capture list.
+// loadMeshCaptureFromPath runs the convert -> parse -> build pipeline for
+// the Meshes view. Invoked by the launcher's load dispatch.
 func loadMeshCaptureFromPath(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, capturePath string, onFinished func(*renderdoc.MeshReport, []renderdoc.MeshInfo, string, string, *renderdoc.BufferStore, error)) {
 	fyne.Do(func() {
 		progressBar.Show()

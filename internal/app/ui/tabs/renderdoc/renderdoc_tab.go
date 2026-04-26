@@ -22,7 +22,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	nativeDialog "github.com/sqweek/dialog"
 )
 
 const rdcFileFilterLabel = "RenderDoc capture"
@@ -86,18 +85,18 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 		container.NewTabItem("Materials", materialsView),
 	)
 
-	loadIntoActiveSubTab := func(path string) {
-		switch tabs.SelectedIndex() {
-		case texturesIndex:
-			loadTexturesFromPath(path)
-		case meshesIndex:
-			loadMeshesFromPath(path)
-		case materialsIndex:
-			loadMaterialsFromPath(path)
-		}
+	// Loading dispatches to all three sub-tabs at once so a single click
+	// populates Textures, Meshes, and Materials in parallel. Each sub-tab
+	// owns its own background goroutine + buffer store; they don't share
+	// parsed state today (3× convert+parse on load), but the wall-clock cost
+	// is dominated by the single longest pipeline since they run concurrently.
+	loadAllSubTabs := func(path string) {
+		loadTexturesFromPath(path)
+		loadMeshesFromPath(path)
+		loadMaterialsFromPath(path)
 	}
 
-	lc = newLauncher(window, loadIntoActiveSubTab)
+	lc = newLauncher(window, loadAllSubTabs)
 	tabs.OnSelected = func(*container.TabItem) {
 		lc.setActiveSubTab(tabs.SelectedIndex())
 	}
@@ -297,12 +296,8 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 		countLabel.SetText(fmt.Sprintf("Showing %d of %d textures", len(state.displayTextures), len(state.allTextures)))
 	}
 
-	var loadButton *widget.Button
 	onLoadFinished := func(report *renderdoc.Report, loadedPath string, xmlPath string, newStore *renderdoc.BufferStore, loadErr error) {
 		progressBar.Hide()
-		if loadButton != nil {
-			loadButton.Enable()
-		}
 		if loadErr != nil {
 			pathLabel.SetText(fmt.Sprintf("Load failed: %s", loadedPath))
 			fyneDialog.ShowError(loadErr, window)
@@ -353,15 +348,11 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 		pathLabel.SetText(message)
 	}
 	loadFromPath := func(path string) {
-		go loadCaptureFromPath(window, progressBar, loadButton, path, statusFn, onLoadFinished)
+		go loadCaptureFromPath(window, progressBar, nil, path, statusFn, onLoadFinished)
 	}
 
-	loadButton = widget.NewButton("Load .rdc…", func() {
-		go pickAndLoadCapture(window, progressBar, loadButton, statusFn, onLoadFinished)
-	})
-
 	header := container.NewVBox(
-		container.NewBorder(nil, nil, nil, loadButton, pathLabel),
+		pathLabel,
 		summaryLabel,
 		categoryLabel,
 		progressBar,
@@ -855,23 +846,9 @@ func nonEmptyOr(value, fallback string) string {
 	return value
 }
 
-func pickAndLoadCapture(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, onStatusChanged func(string), onFinished func(*renderdoc.Report, string, string, *renderdoc.BufferStore, error)) {
-	capturePath, pickErr := pickCapturePath()
-	if pickErr != nil {
-		if errors.Is(pickErr, nativeDialog.Cancelled) {
-			return
-		}
-		fyne.Do(func() {
-			fyneDialog.ShowError(pickErr, window)
-		})
-		return
-	}
-	loadCaptureFromPath(window, progressBar, loadButton, capturePath, onStatusChanged, onFinished)
-}
-
 // loadCaptureFromPath runs the convert -> parse -> hash pipeline for a given
-// capture path. Used by the file-picker flow and by the launcher's capture
-// list. Progress is reported via onStatusChanged; completion (success or
+// capture path. Invoked by the launcher's load dispatch. Progress is
+// reported via onStatusChanged; completion (success or
 // failure) via onFinished, both invoked on the UI thread.
 func loadCaptureFromPath(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, capturePath string, onStatusChanged func(string), onFinished func(*renderdoc.Report, string, string, *renderdoc.BufferStore, error)) {
 	fyne.Do(func() {
@@ -932,13 +909,3 @@ func loadCaptureFromPath(window fyne.Window, progressBar *widget.ProgressBarInfi
 	})
 }
 
-func pickCapturePath() (string, error) {
-	path, err := nativeDialog.File().
-		Filter(rdcFileFilterLabel, "rdc").
-		Title("Select RenderDoc capture (.rdc)").
-		Load()
-	if err == nil {
-		return path, nil
-	}
-	return "", err
-}
