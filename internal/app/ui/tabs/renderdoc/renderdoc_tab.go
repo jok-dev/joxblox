@@ -52,15 +52,17 @@ type renderdocTabState struct {
 
 var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM"}
 
-// NewRenderDocTab builds the RenderDoc tab with two sub-tabs: Textures
-// (existing UI) and Meshes (new).
+// NewRenderDocTab builds the RenderDoc tab. A launcher row sits above two
+// sub-tabs: Textures (existing UI) and Meshes (new).
 func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 	textures := newTexturesSubTab(window)
 	meshes := newMeshesSubTab(window)
-	return container.NewAppTabs(
+	tabs := container.NewAppTabs(
 		container.NewTabItem("Textures", textures),
 		container.NewTabItem("Meshes", meshes),
 	)
+	launcher := newLauncherRow(window)
+	return container.NewBorder(launcher, nil, nil, nil, tabs)
 }
 
 // newTexturesSubTab builds the Textures sub-tab. The window is used to parent
