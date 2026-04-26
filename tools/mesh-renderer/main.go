@@ -768,6 +768,11 @@ func handleRender(parts []string) {
 	if transparent {
 		rl.EnableDepthTest()
 	}
+	// Subtle ground reference. Draws after geometry so it doesn't fight
+	// the model's depth, but still inside BeginMode3D so it gets the
+	// camera transform. Sits at world y=0 — meshes are normalized to
+	// roughly the unit cube, so y=0 reads as the visual ground.
+	rl.DrawGrid(20, 1.0)
 	rl.EndMode3D()
 	rl.EndTextureMode()
 
