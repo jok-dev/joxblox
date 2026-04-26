@@ -64,17 +64,20 @@ const mainVertSrc = `
 #version 330
 in vec3 vertexPosition;
 in vec3 vertexNormal;
+in vec4 vertexColor;
 uniform mat4 mvp;
 uniform mat4 matModel;
 uniform mat3 matNormal;
 uniform mat4 lightVP;
 out vec3 fragPosition;
 out vec3 fragNormal;
+out vec4 fragColor;
 out vec4 fragPosLightSpace;
 void main() {
     vec4 worldPos = matModel * vec4(vertexPosition, 1.0);
     fragPosition = worldPos.xyz;
     fragNormal = normalize(matNormal * vertexNormal);
+    fragColor = vertexColor;
     fragPosLightSpace = lightVP * worldPos;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
@@ -84,6 +87,7 @@ const mainFragSrc = `
 #version 330
 in vec3 fragPosition;
 in vec3 fragNormal;
+in vec4 fragColor;
 in vec4 fragPosLightSpace;
 uniform vec3 lightDir;
 uniform vec3 fillLightDir;
@@ -125,7 +129,7 @@ void main() {
     rim = pow(rim, 3.0) * 0.15;
     float shadow = calcShadow(fragPosLightSpace);
     vec3 lit = ambientCol + key * (1.0 - shadow * 0.65) + fill + rim;
-    finalColor = vec4(lit * baseCol, 1.0);
+    finalColor = vec4(lit * baseCol * fragColor.rgb, 1.0);
 }
 `
 
@@ -425,6 +429,12 @@ func createModelFromRawData(positions []float32, indices32 []uint32, colors []ui
 	}
 	rl.UploadMesh(&mesh, false)
 	modelData.model = rl.LoadModelFromMesh(mesh)
+	// Override the default unlit material shader with our Phong shader so
+	// DrawModel actually runs the lighting code we already loaded.
+	materials := modelData.model.GetMaterials()
+	if len(materials) > 0 {
+		materials[0].Shader = mainShader
+	}
 	return modelData, nil
 }
 
@@ -582,6 +592,29 @@ func handleRender(parts []string) {
 	if transparent {
 		rl.DisableDepthTest()
 	}
+
+	// Per-frame Phong uniforms. Key light is fixed in world space (so the
+	// shading reads consistently as the camera orbits); fill light tracks
+	// the camera so faces pointed at the viewer always pick up some light.
+	keyLightDir := rl.Vector3Normalize(rl.NewVector3(-0.4, 0.8, 0.5))
+	fillLightDirVec := rl.Vector3Normalize(rl.NewVector3(
+		camera.Target.X-camera.Position.X,
+		(camera.Target.Y-camera.Position.Y)+0.4,
+		camera.Target.Z-camera.Position.Z,
+	))
+	ambient := []float32{0.18, 0.19, 0.22}
+	lightCol := []float32{1.0, 0.97, 0.92}
+	viewPos := []float32{float32(cameraX), float32(cameraY), float32(cameraZ)}
+	rl.SetShaderValue(mainShader, lightDirLoc, []float32{keyLightDir.X, keyLightDir.Y, keyLightDir.Z}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, fillLightDirLoc, []float32{fillLightDirVec.X, fillLightDirVec.Y, fillLightDirVec.Z}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, viewPosLoc, viewPos, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, ambientLoc, ambient, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, lightColLoc, lightCol, rl.ShaderUniformVec3)
+	// Shadows wired in Task 2; until then, bind an identity light matrix and
+	// a max-distance bias so calcShadow() never reports occlusion.
+	rl.SetShaderValueMatrix(mainShader, lightVPLoc, rl.MatrixIdentity())
+	rl.SetShaderValue(mainShader, shadowBiasLoc, []float32{1.0}, rl.ShaderUniformFloat)
+
 	opacityTint := rl.NewColor(255, 255, 255, uint8(clampFloat64(opacity, 0.1, 1.0)*255.0))
 	for _, batchIndex := range drawOrder {
 		meshModel := loadedScene[batchIndex]
@@ -589,6 +622,9 @@ func handleRender(parts []string) {
 		if meshModel.sceneMode {
 			tint = modelTint(meshModel.baseColor, opacity)
 		}
+		// Push baseCol so the Phong shader knows the per-model tint.
+		baseColValue := meshModel.baseColor
+		rl.SetShaderValue(mainShader, baseColLoc, []float32{baseColValue[0], baseColValue[1], baseColValue[2]}, rl.ShaderUniformVec3)
 		if wireframe {
 			rl.DrawModelWires(meshModel.model, rl.Vector3{}, 1.0, tint)
 		} else {
