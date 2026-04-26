@@ -82,16 +82,23 @@ func newMaterialPreview() *materialPreview {
 }
 
 func (p *materialPreview) reset() {
-	p.colorImg.Image = nil
-	p.normalImg.Image = nil
-	p.mrImg.Image = nil
-	p.colorImg.Refresh()
-	p.normalImg.Refresh()
-	p.mrImg.Refresh()
+	clearPreviewImage(p.colorImg)
+	clearPreviewImage(p.normalImg)
+	clearPreviewImage(p.mrImg)
 	p.colorLabel.SetText("Color: —")
 	p.normalLabel.SetText("Normal: —")
 	p.mrLabel.SetText("MR: —")
 	p.infoEntry.SetText("Select a material to preview.")
+}
+
+// clearPreviewImage visually blanks a canvas.Image. Setting Image=nil and
+// Refresh() doesn't reliably wipe the last-painted frame in Fyne 2.6, so
+// we hide the canvas as well — the labelled placeholder ("Normal: —")
+// makes the empty slot obvious.
+func clearPreviewImage(img *canvas.Image) {
+	img.Image = nil
+	img.Refresh()
+	img.Hide()
 }
 
 func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
@@ -432,8 +439,7 @@ func updateMaterialPreview(state *materialsTabState, mat renderdoc.Material, pre
 
 func setPreviewMap(state *materialsTabState, texID string, img *canvas.Image, label *widget.Label, kind string, gen int, table *widget.Table) {
 	if texID == "" {
-		img.Image = nil
-		img.Refresh()
+		clearPreviewImage(img)
 		label.SetText(kind + ": —")
 		return
 	}
@@ -441,10 +447,10 @@ func setPreviewMap(state *materialsTabState, texID string, img *canvas.Image, la
 	if cached, ok := state.thumbnailCache[texID]; ok && cached != nil {
 		img.Image = cached
 		img.Refresh()
+		img.Show()
 		return
 	}
-	img.Image = nil
-	img.Refresh()
+	clearPreviewImage(img)
 	tex, ok := state.textureByID[texID]
 	if !ok {
 		return
@@ -463,6 +469,7 @@ func setPreviewMap(state *materialsTabState, texID string, img *canvas.Image, la
 		if decoded, ok := state.thumbnailCache[texID]; ok {
 			img.Image = decoded
 			img.Refresh()
+			img.Show()
 		}
 		if table != nil {
 			table.Refresh()
