@@ -28,6 +28,7 @@ var (
 
 	mainShader       rl.Shader
 	mainShaderLoaded bool
+	viewmodeLoc      int32
 	lightDirLoc      int32
 	fillLightDirLoc  int32
 	viewPosLoc       int32
@@ -97,6 +98,7 @@ uniform vec3 lightCol;
 uniform vec3 baseCol;
 uniform sampler2D shadowMap;
 uniform float shadowBias;
+uniform int viewmode;
 out vec4 finalColor;
 
 float calcShadow(vec4 posLS) {
@@ -118,6 +120,11 @@ float calcShadow(vec4 posLS) {
 
 void main() {
     vec3 norm = normalize(fragNormal);
+    if (viewmode == 2) {
+        // Normals debug view: skip lighting entirely.
+        finalColor = vec4(norm * 0.5 + 0.5, 1.0);
+        return;
+    }
     vec3 viewDir = normalize(viewPos - fragPosition);
     float diff = max(dot(norm, lightDir), 0.0);
     vec3 halfDir = normalize(lightDir + viewDir);
@@ -129,7 +136,10 @@ void main() {
     rim = pow(rim, 3.0) * 0.15;
     float shadow = calcShadow(fragPosLightSpace);
     vec3 lit = ambientCol + key * (1.0 - shadow * 0.65) + fill + rim;
-    finalColor = vec4(lit * baseCol * fragColor.rgb, 1.0);
+    // Lit Clay forces vertex color to white so the gray baseCol reads
+    // as a uniform clay surface; Vertex Color uses the per-vertex tint.
+    vec3 vertCol = (viewmode == 1) ? vec3(1.0) : fragColor.rgb;
+    finalColor = vec4(lit * baseCol * vertCol, 1.0);
 }
 `
 
@@ -169,6 +179,7 @@ func main() {
 	lightVPLoc = rl.GetShaderLocation(mainShader, "lightVP")
 	shadowMapLoc = rl.GetShaderLocation(mainShader, "shadowMap")
 	shadowBiasLoc = rl.GetShaderLocation(mainShader, "shadowBias")
+	viewmodeLoc = rl.GetShaderLocation(mainShader, "viewmode")
 
 	depthShader = rl.LoadShaderFromMemory(depthVertSrc, depthFragSrc)
 	depthShaderLoaded = true
@@ -567,32 +578,94 @@ func handlePick(parts []string) {
 	respond(fmt.Sprintf("PICKED %d", bestBatch))
 }
 
+// Viewmode controls how the fragment shader colors fragments.
+//   - VertexColor: standard Phong shading multiplied by per-vertex color
+//   - LitClay: standard Phong shading with vertex color forced white so
+//     the per-model baseCol reads as a uniform clay surface
+//   - Normals: skip lighting entirely; color = surface-normal mapped to RGB
+const (
+	ViewmodeVertexColor = 0
+	ViewmodeLitClay     = 1
+	ViewmodeNormals     = 2
+)
+
+type renderArgs struct {
+	Width         int
+	Height        int
+	CameraX       float64
+	CameraY       float64
+	CameraZ       float64
+	SelectedBatch int
+	Yaw           float64
+	Pitch         float64
+	Zoom          float64
+	Opacity       float64
+	BgHex         string
+	Wireframe     bool
+	Viewmode      int
+}
+
+// parseRenderArgs parses a "RENDER ..." command line. Tolerates the older
+// 12-arg form (no wireframe, no viewmode) and the 13-arg form (wireframe
+// only) so an old Go ↔ new subprocess pairing keeps working during dev.
+// Unknown viewmode values fall back to VertexColor.
+func parseRenderArgs(parts []string) (renderArgs, error) {
+	if len(parts) < 12 {
+		return renderArgs{}, fmt.Errorf("RENDER requires width height cam_x cam_y cam_z selected_batch yaw pitch zoom opacity bg_hex [wireframe] [viewmode]")
+	}
+	args := renderArgs{
+		BgHex:    parts[11],
+		Viewmode: ViewmodeVertexColor,
+	}
+	args.Width, _ = strconv.Atoi(parts[1])
+	args.Height, _ = strconv.Atoi(parts[2])
+	args.CameraX, _ = strconv.ParseFloat(parts[3], 64)
+	args.CameraY, _ = strconv.ParseFloat(parts[4], 64)
+	args.CameraZ, _ = strconv.ParseFloat(parts[5], 64)
+	args.SelectedBatch, _ = strconv.Atoi(parts[6])
+	args.Yaw, _ = strconv.ParseFloat(parts[7], 64)
+	args.Pitch, _ = strconv.ParseFloat(parts[8], 64)
+	args.Zoom, _ = strconv.ParseFloat(parts[9], 64)
+	args.Opacity, _ = strconv.ParseFloat(parts[10], 64)
+	if len(parts) >= 13 {
+		flag, _ := strconv.Atoi(parts[12])
+		args.Wireframe = flag != 0
+	}
+	if len(parts) >= 14 {
+		mode, _ := strconv.Atoi(parts[13])
+		switch mode {
+		case ViewmodeVertexColor, ViewmodeLitClay, ViewmodeNormals:
+			args.Viewmode = mode
+		default:
+			args.Viewmode = ViewmodeVertexColor
+		}
+	}
+	return args, nil
+}
+
 func handleRender(parts []string) {
 	if len(loadedScene) == 0 {
 		respond("ERR no mesh loaded")
 		return
 	}
-	if len(parts) < 12 {
-		respond("ERR RENDER requires width height cam_x cam_y cam_z selected_batch yaw pitch zoom opacity bg_hex [wireframe]")
+	args, parseErr := parseRenderArgs(parts)
+	if parseErr != nil {
+		respond("ERR " + parseErr.Error())
 		return
 	}
-
-	width, _ := strconv.Atoi(parts[1])
-	height, _ := strconv.Atoi(parts[2])
-	cameraX, _ := strconv.ParseFloat(parts[3], 64)
-	cameraY, _ := strconv.ParseFloat(parts[4], 64)
-	cameraZ, _ := strconv.ParseFloat(parts[5], 64)
-	selectedBatch, _ := strconv.Atoi(parts[6])
-	yaw, _ := strconv.ParseFloat(parts[7], 64)
-	pitch, _ := strconv.ParseFloat(parts[8], 64)
-	zoom, _ := strconv.ParseFloat(parts[9], 64)
-	opacity, _ := strconv.ParseFloat(parts[10], 64)
-	bgHex := parts[11]
-	wireframe := false
-	if len(parts) >= 13 {
-		wireframeFlag, _ := strconv.Atoi(parts[12])
-		wireframe = wireframeFlag != 0
-	}
+	width := args.Width
+	height := args.Height
+	cameraX := args.CameraX
+	cameraY := args.CameraY
+	cameraZ := args.CameraZ
+	selectedBatch := args.SelectedBatch
+	yaw := args.Yaw
+	pitch := args.Pitch
+	zoom := args.Zoom
+	opacity := args.Opacity
+	bgHex := args.BgHex
+	wireframe := args.Wireframe
+	viewmode := args.Viewmode
 
 	if width < 1 || width > 4096 {
 		width = 440
@@ -664,6 +737,7 @@ func handleRender(parts []string) {
 	}
 	rl.SetShaderValue(mainShader, shadowBiasLoc, []float32{shadowBiasValue}, rl.ShaderUniformFloat)
 	rl.SetShaderValueTexture(mainShader, shadowMapLoc, shadowMap.Texture)
+	rl.SetShaderValue(mainShader, viewmodeLoc, []float32{float32(viewmode)}, rl.ShaderUniformInt)
 
 	opacityTint := rl.NewColor(255, 255, 255, uint8(clampFloat64(opacity, 0.1, 1.0)*255.0))
 	for _, batchIndex := range drawOrder {
@@ -673,7 +747,14 @@ func handleRender(parts []string) {
 			tint = modelTint(meshModel.baseColor, opacity)
 		}
 		// Push baseCol so the Phong shader knows the per-model tint.
-		baseColValue := meshModel.baseColor
+		// Lit Clay overrides with a neutral gray so the uniform clay
+		// surface reads cleanly regardless of the model's base color.
+		var baseColValue [3]float32
+		if viewmode == ViewmodeLitClay {
+			baseColValue = [3]float32{0.78, 0.78, 0.80}
+		} else {
+			baseColValue = meshModel.baseColor
+		}
 		rl.SetShaderValue(mainShader, baseColLoc, []float32{baseColValue[0], baseColValue[1], baseColValue[2]}, rl.ShaderUniformVec3)
 		if wireframe {
 			rl.DrawModelWires(meshModel.model, rl.Vector3{}, 1.0, tint)
