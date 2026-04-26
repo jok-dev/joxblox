@@ -10,8 +10,10 @@ import (
 	"sync/atomic"
 
 	"joxblox/internal/app/ui"
+	renderdoctab "joxblox/internal/app/ui/tabs/renderdoc"
 	"joxblox/internal/debug"
 	"joxblox/internal/format"
+	"joxblox/internal/renderdoc"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -164,6 +166,34 @@ func showSettingsDialog(window fyne.Window) {
 	cacheFolderSizeLabel := widget.NewLabel("Current folder size: -")
 	cacheFolderSizeLabel.Wrapping = fyne.TextWrapWord
 
+	studioPathEntry := widget.NewEntry()
+	studioPathEntry.SetPlaceHolder("Path to RobloxStudioBeta.exe (or use Auto-detect)")
+	studioPathEntry.SetText(renderdoctab.LoadStudioPath())
+
+	studioBrowseButton := widget.NewButton("Browse...", func() {
+		picked, pickErr := nativeDialog.File().
+			Filter("Roblox Studio executable", "exe").
+			Title("Select RobloxStudioBeta.exe").
+			Load()
+		if pickErr != nil {
+			if errors.Is(pickErr, nativeDialog.Cancelled) {
+				return
+			}
+			dialog.ShowError(pickErr, window)
+			return
+		}
+		studioPathEntry.SetText(picked)
+	})
+
+	studioAutoDetectButton := widget.NewButton("Auto-detect", func() {
+		detected, err := renderdoc.LocateRobloxStudio()
+		if err != nil {
+			dialog.ShowError(err, window)
+			return
+		}
+		studioPathEntry.SetText(detected)
+	})
+
 	lookSensitivityValueLabel := widget.NewLabel(fmt.Sprintf("%.4f", currentLookSensitivity))
 	lookSensitivitySlider := widget.NewSlider(ui.MeshPreviewMinimumMouseLookSensitivity, ui.MeshPreviewMaximumMouseLookSensitivity)
 	lookSensitivitySlider.Step = ui.MeshPreviewMouseLookSensitivityStep
@@ -230,7 +260,16 @@ func showSettingsDialog(window fyne.Window) {
 		cacheFolderEntry,
 	)
 
+	studioPathRow := container.NewBorder(
+		nil, nil, nil,
+		container.NewHBox(studioBrowseButton, studioAutoDetectButton),
+		studioPathEntry,
+	)
+
 	formContent := container.NewVBox(
+		widget.NewLabel("Roblox Studio Path"),
+		studioPathRow,
+		widget.NewSeparator(),
 		cacheEnabledCheck,
 		widget.NewSeparator(),
 		widget.NewLabel("3D Preview Mouse Look Sensitivity"),
@@ -265,6 +304,7 @@ func showSettingsDialog(window fyne.Window) {
 			statusLabel.SetText(err.Error())
 			return
 		}
+		renderdoctab.SaveStudioPath(studioPathEntry.Text)
 		if err := saveMeshPreviewMouseLookSensitivity(lookSensitivitySlider.Value); err != nil {
 			statusLabel.SetText(err.Error())
 			return

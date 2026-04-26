@@ -6,6 +6,8 @@ require (
 	fyne.io/fyne/v2 v2.6.0
 	github.com/dweymouth/fyne-tooltip v0.4.0
 	github.com/faiface/beep v1.1.0
+	github.com/fsnotify/fsnotify v1.7.0
+	github.com/klauspost/compress v1.18.5
 	github.com/sqweek/dialog v0.0.0-20260123140253-64c163d53aac
 	github.com/zalando/go-keyring v0.2.7
 	golang.org/x/image v0.38.0
@@ -18,7 +20,6 @@ require (
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fredbi/uri v1.1.0 // indirect
-	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/fyne-io/gl-js v0.1.0 // indirect
 	github.com/fyne-io/glfw-js v0.2.0 // indirect
 	github.com/fyne-io/image v0.1.1 // indirect
@@ -36,7 +37,6 @@ require (
 	github.com/jfreymuth/oggvorbis v1.0.1 // indirect
 	github.com/jfreymuth/vorbis v1.0.0 // indirect
 	github.com/jsummers/gobmp v0.0.0-20230614200233-a9de23ed2e25 // indirect
-	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.5.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect

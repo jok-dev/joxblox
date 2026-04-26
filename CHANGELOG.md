@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Materials` sub-tab in the RenderDoc tab — groups PS-bound textures into deduplicated PBR materials (Color + Normal + MR), with per-material draw counts, mesh usage, and VRAM totals
+
 ## v1.1.0 - 2026-03-26
 
 Expanded `Joxblox` with new RBXL analysis, optimization, and mesh-inspection workflows for larger asset review sessions.

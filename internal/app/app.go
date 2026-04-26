@@ -209,23 +209,7 @@ func Run() {
 	}
 	authPanel := newAuthPanel(window)
 	mainContent := container.NewBorder(nil, authPanel, nil, nil, tabs)
-	var setLayoutMode func(showConsole bool)
-	debugConsolePanel := ui.NewDebugConsolePanel(func(showConsole bool) {
-		if setLayoutMode != nil {
-			setLayoutMode(showConsole)
-		}
-	})
-	resizableLayout := container.NewVSplit(mainContent, debugConsolePanel)
-	resizableLayout.Offset = 0.82
-	collapsedLayout := container.NewBorder(nil, debugConsolePanel, nil, nil, mainContent)
-	setLayoutMode = func(showConsole bool) {
-		if showConsole {
-			window.SetContent(fynetooltip.AddWindowToolTipLayer(resizableLayout, window.Canvas()))
-			return
-		}
-		window.SetContent(fynetooltip.AddWindowToolTipLayer(collapsedLayout, window.Canvas()))
-	}
-	setLayoutMode(false)
+	window.SetContent(fynetooltip.AddWindowToolTipLayer(mainContent, window.Canvas()))
 	debug.Logf("Application started")
 	window.ShowAndRun()
 }

@@ -22,7 +22,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
-	nativeDialog "github.com/sqweek/dialog"
 )
 
 const rdcFileFilterLabel = "RenderDoc capture"
@@ -52,9 +51,62 @@ type renderdocTabState struct {
 
 var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM"}
 
-// NewRenderDocTab builds the RenderDoc tab. The window is used to parent
-// dialogs shown from background goroutines.
+// NewRenderDocTab builds the RenderDoc tab. A launcher row sits above two
+// sub-tabs: Textures (existing UI) and Meshes (new). The launcher's capture
+// list dispatches loads to whichever sub-tab is currently selected and shows
+// an indicator next to the capture currently loaded in that sub-tab.
 func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
+	const (
+		materialsIndex = 0
+		texturesIndex  = 1
+		meshesIndex    = 2
+	)
+
+	var lc *launcher
+	texturesView, loadTexturesFromPath := newTexturesSubTab(window, func(path string) {
+		if lc != nil {
+			lc.setLoaded(texturesIndex, path)
+		}
+	})
+	meshesView, loadMeshesFromPath := newMeshesSubTab(window, func(path string) {
+		if lc != nil {
+			lc.setLoaded(meshesIndex, path)
+		}
+	})
+	materialsView, loadMaterialsFromPath := newMaterialsSubTab(window, func(path string) {
+		if lc != nil {
+			lc.setLoaded(materialsIndex, path)
+		}
+	})
+
+	tabs := container.NewAppTabs(
+		container.NewTabItem("Materials", materialsView),
+		container.NewTabItem("Textures", texturesView),
+		container.NewTabItem("Meshes", meshesView),
+	)
+
+	// Loading dispatches to all three sub-tabs at once so a single click
+	// populates Textures, Meshes, and Materials in parallel. Each sub-tab
+	// owns its own background goroutine + buffer store; they don't share
+	// parsed state today (3× convert+parse on load), but the wall-clock cost
+	// is dominated by the single longest pipeline since they run concurrently.
+	loadAllSubTabs := func(path string) {
+		loadTexturesFromPath(path)
+		loadMeshesFromPath(path)
+		loadMaterialsFromPath(path)
+	}
+
+	lc = newLauncher(window, loadAllSubTabs)
+	tabs.OnSelected = func(*container.TabItem) {
+		lc.setActiveSubTab(tabs.SelectedIndex())
+	}
+
+	return container.NewBorder(lc.canvas, nil, nil, nil, tabs)
+}
+
+// newTexturesSubTab builds the Textures sub-tab. The window is used to parent
+// dialogs shown from background goroutines.
+func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
 	state := &renderdocTabState{
 		sortColumn:     "VRAM",
 		sortDescending: true,
@@ -244,12 +296,8 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 		countLabel.SetText(fmt.Sprintf("Showing %d of %d textures", len(state.displayTextures), len(state.allTextures)))
 	}
 
-	var loadButton *widget.Button
 	onLoadFinished := func(report *renderdoc.Report, loadedPath string, xmlPath string, newStore *renderdoc.BufferStore, loadErr error) {
 		progressBar.Hide()
-		if loadButton != nil {
-			loadButton.Enable()
-		}
 		if loadErr != nil {
 			pathLabel.SetText(fmt.Sprintf("Load failed: %s", loadedPath))
 			fyneDialog.ShowError(loadErr, window)
@@ -291,17 +339,20 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 		previewCanvas.Image = nil
 		previewCanvas.Refresh()
 		table.Refresh()
+		if onLoaded != nil {
+			onLoaded(loadedPath)
+		}
 	}
 
-	loadButton = widget.NewButton("Load .rdc…", func() {
-		onStatus := func(message string) {
-			pathLabel.SetText(message)
-		}
-		go pickAndLoadCapture(window, progressBar, loadButton, onStatus, onLoadFinished)
-	})
+	statusFn := func(message string) {
+		pathLabel.SetText(message)
+	}
+	loadFromPath := func(path string) {
+		go loadCaptureFromPath(window, progressBar, nil, path, statusFn, onLoadFinished)
+	}
 
 	header := container.NewVBox(
-		container.NewBorder(nil, nil, nil, loadButton, pathLabel),
+		pathLabel,
 		summaryLabel,
 		categoryLabel,
 		progressBar,
@@ -314,7 +365,7 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 	// scanning the list.
 	split := container.NewHSplit(interactiveTable, previewPane)
 	split.Offset = 0.65
-	return container.NewBorder(header, footer, nil, nil, split)
+	return container.NewBorder(header, footer, nil, nil, split), loadFromPath
 }
 
 // arrowSelectTable wraps widget.Table so Up/Down arrow keys actually change
@@ -795,18 +846,11 @@ func nonEmptyOr(value, fallback string) string {
 	return value
 }
 
-func pickAndLoadCapture(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, onStatusChanged func(string), onFinished func(*renderdoc.Report, string, string, *renderdoc.BufferStore, error)) {
-	capturePath, pickErr := pickCapturePath()
-	if pickErr != nil {
-		if errors.Is(pickErr, nativeDialog.Cancelled) {
-			return
-		}
-		fyne.Do(func() {
-			fyneDialog.ShowError(pickErr, window)
-		})
-		return
-	}
-
+// loadCaptureFromPath runs the convert -> parse -> hash pipeline for a given
+// capture path. Invoked by the launcher's load dispatch. Progress is
+// reported via onStatusChanged; completion (success or
+// failure) via onFinished, both invoked on the UI thread.
+func loadCaptureFromPath(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, capturePath string, onStatusChanged func(string), onFinished func(*renderdoc.Report, string, string, *renderdoc.BufferStore, error)) {
 	fyne.Do(func() {
 		progressBar.Show()
 		if loadButton != nil {
@@ -865,13 +909,3 @@ func pickAndLoadCapture(window fyne.Window, progressBar *widget.ProgressBarInfin
 	})
 }
 
-func pickCapturePath() (string, error) {
-	path, err := nativeDialog.File().
-		Filter(rdcFileFilterLabel, "rdc").
-		Title("Select RenderDoc capture (.rdc)").
-		Load()
-	if err == nil {
-		return path, nil
-	}
-	return "", err
-}

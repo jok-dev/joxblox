@@ -191,6 +191,8 @@ var DefaultRobloxBuiltinHashes = map[string]TextureCategory{
 	"82db2db8b5428749": CategoryBuiltin,
 	"57b7080aebff8f8e": CategoryBuiltin,
 	"ea1dea91141b50e8": CategoryBuiltin,
+	// Reported by user; likely a default skybox face.
+	"cc2d1541a7f1f115": CategoryBuiltin,
 }
 
 // Thresholds for detecting DXT5nm-swizzled normals from a decoded base mip.
