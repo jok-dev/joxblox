@@ -69,14 +69,24 @@ func newLauncherRow(window fyne.Window) fyne.CanvasObject {
 					statusLabel.SetText(fmt.Sprintf("Launched (PID %d)", cmd.Process.Pid))
 				}
 			})
-			// Reap the renderdoccmd process in the background so we don't leave
-			// a zombie/handle slot. Studio exit is observed but doesn't drive UI.
+			// Reap the renderdoccmd process so we don't leave a zombie/handle slot,
+			// and reset the status label once Studio exits so a stale PID doesn't linger.
 			if cmd != nil {
-				go func() { _ = cmd.Wait() }()
+				go func() {
+					_ = cmd.Wait()
+					fyne.Do(func() {
+						statusLabel.SetText("Ready")
+					})
+				}()
 			}
 			time.Sleep(1 * time.Second)
 			fyne.Do(func() {
 				launchButton.Enable()
+				// After an error the dialog is dismissed and the button is re-enabled;
+				// clear the "Error" status so the label tracks the button.
+				if err != nil {
+					statusLabel.SetText("Ready")
+				}
 			})
 		}()
 	})
