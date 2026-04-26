@@ -50,9 +50,12 @@ func TestMatchBeyondThresholdReturnsNothing(t *testing.T) {
 }
 
 func TestMatchMultipleCandidatesSortedByDistance(t *testing.T) {
+	if DefaultMatchHammingDistance < 1 {
+		t.Skip("by-distance ordering is only observable when threshold allows non-exact matches")
+	}
 	// Two candidates within threshold, sorted by distance ascending.
-	// The second has distance 1 unconditionally so the test passes
-	// at any threshold ≥ 1.
+	// The second has distance 1 so the test stays valid at any
+	// threshold ≥ 1.
 	corpus := newTextureCorpusFromMap(map[uint64][]int64{
 		0xDEADBEEFCAFEBABE:               {12345},
 		uint64(0xDEADBEEFCAFEBABE) ^ 0b1: {67890},
