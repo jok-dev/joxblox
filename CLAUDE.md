@@ -33,6 +33,7 @@ Tip: check ./latest.log for latest logs of last run
 - Always use the same logic for showing byte sizes, show mb if >1mb, kb if >1kb and if not then show bytes
 - Make sure that any feature that uses assets also supports rbxthumb:// notation since this returns different asset sizes than just using the asset id itself! don't strip this from ids it's important!
 - Make sure to use the same shared methods as other systems in the app so that each feature uses the same backend and therefore has the same consistent behavior and features
+- Be conservative with `SetMinSize` on widgets that bubble up to the main window's content (lists, scrolls, canvases inside top-level tabs). Large mins prevent the user from downscaling the window. Set a comfortable default size via `window.Resize` instead, and keep widget min sizes small (~80px or less for list scrolls).
 
 ## Private Test Fixtures - NEVER Leak
 

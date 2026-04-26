@@ -23,7 +23,7 @@ import (
 const (
 	preferenceKeyRenderDocStudioPath = "renderdoc.studio_path"
 	captureFileStem                  = "capture"
-	captureListMinHeight             = 160
+	captureListMinHeight             = 80
 	loadedIndicator                  = "● "
 	notLoadedIndicator               = "   "
 )
