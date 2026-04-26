@@ -98,7 +98,11 @@ uniform vec3 lightCol;
 uniform vec3 baseCol;
 uniform sampler2D shadowMap;
 uniform float shadowBias;
-uniform int viewmode;
+// Sent as a float (not int) because raylib-go's SetShaderValue treats
+// the value buffer as float32 bytes regardless of the declared uniform
+// type, so passing int via ShaderUniformInt reinterprets 1.0f as
+// 1065353216 in the shader. Branching on float values avoids that.
+uniform float viewmode;
 out vec4 finalColor;
 
 float calcShadow(vec4 posLS) {
@@ -120,8 +124,8 @@ float calcShadow(vec4 posLS) {
 
 void main() {
     vec3 norm = normalize(fragNormal);
-    if (viewmode == 2) {
-        // Normals debug view: skip lighting entirely.
+    if (viewmode > 1.5) {
+        // Normals debug view (viewmode = 2): skip lighting entirely.
         finalColor = vec4(norm * 0.5 + 0.5, 1.0);
         return;
     }
@@ -140,9 +144,10 @@ void main() {
     // rendering a final scene. Heavy shadowing read as "broken lighting"
     // rather than depth cue in early testing.
     vec3 lit = ambientCol + key * (1.0 - shadow * 0.35) + fill + rim;
-    // Lit Clay forces vertex color to white so the gray baseCol reads
-    // as a uniform clay surface; Vertex Color uses the per-vertex tint.
-    vec3 vertCol = (viewmode == 1) ? vec3(1.0) : fragColor.rgb;
+    // Lit Clay (viewmode = 1) forces vertex color to white so the gray
+    // baseCol reads as a uniform clay surface; Vertex Color uses the
+    // per-vertex tint.
+    vec3 vertCol = (viewmode > 0.5) ? vec3(1.0) : fragColor.rgb;
     finalColor = vec4(lit * baseCol * vertCol, 1.0);
 }
 `
@@ -745,7 +750,7 @@ func handleRender(parts []string) {
 	}
 	rl.SetShaderValue(mainShader, shadowBiasLoc, []float32{shadowBiasValue}, rl.ShaderUniformFloat)
 	rl.SetShaderValueTexture(mainShader, shadowMapLoc, shadowMap.Texture)
-	rl.SetShaderValue(mainShader, viewmodeLoc, []float32{float32(viewmode)}, rl.ShaderUniformInt)
+	rl.SetShaderValue(mainShader, viewmodeLoc, []float32{float32(viewmode)}, rl.ShaderUniformFloat)
 
 	opacityTint := rl.NewColor(255, 255, 255, uint8(clampFloat64(opacity, 0.1, 1.0)*255.0))
 	for _, batchIndex := range drawOrder {
