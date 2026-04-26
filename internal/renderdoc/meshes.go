@@ -74,6 +74,11 @@ type MeshReport struct {
 	Buffers      map[string]BufferInfo
 	InputLayouts map[string]InputLayoutInfo
 	DrawCalls    []DrawCall
+	// SRVToTexture maps a Shader Resource View resource ID to the underlying
+	// texture resource ID it views. Built from CreateShaderResourceView chunks
+	// so PSSetShaderResources bindings (which name SRVs, not textures) can be
+	// resolved to texture IDs at draw time.
+	SRVToTexture map[string]string
 }
 
 // ParseMeshReportFromXMLFile parses the capture XML file at path and
@@ -93,6 +98,7 @@ func parseMeshXML(reader io.Reader) (*MeshReport, error) {
 		Buffers:      map[string]BufferInfo{},
 		InputLayouts: map[string]InputLayoutInfo{},
 		DrawCalls:    []DrawCall{},
+		SRVToTexture: map[string]string{},
 	}
 	var currentVBs []DrawCallVertexBuffer
 	var currentIB struct {
@@ -128,6 +134,14 @@ func parseMeshXML(reader io.Reader) (*MeshReport, error) {
 			}
 			if info != nil && info.ResourceID != "" {
 				report.InputLayouts[info.ResourceID] = *info
+			}
+		case "ID3D11Device::CreateShaderResourceView":
+			srvID, texID, parseErr := parseCreateSRVChunk(decoder)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			if srvID != "" && texID != "" {
+				report.SRVToTexture[srvID] = texID
 			}
 		case "ID3D11DeviceContext::IASetVertexBuffers":
 			vbs, parseErr := parseIASetVertexBuffersChunk(decoder)
@@ -316,6 +330,40 @@ func parseCreateInputLayoutChunk(decoder *xml.Decoder) (*InputLayoutInfo, error)
 		return nil, nil
 	}
 	return info, nil
+}
+
+// parseCreateSRVChunk extracts (srvID, textureID) from a
+// CreateShaderResourceView chunk. Returns ("","",nil) if either ID is missing.
+func parseCreateSRVChunk(decoder *xml.Decoder) (string, string, error) {
+	var srvID, texID string
+	depth := 1
+	for depth > 0 {
+		token, err := decoder.Token()
+		if err != nil {
+			return "", "", fmt.Errorf("read createshaderresourceview: %w", err)
+		}
+		switch typed := token.(type) {
+		case xml.StartElement:
+			depth++
+			if typed.Name.Local == "ResourceId" {
+				name := attr(typed, "name")
+				value, readErr := readTextElement(decoder)
+				if readErr != nil {
+					return "", "", readErr
+				}
+				depth--
+				switch name {
+				case "pResource":
+					texID = strings.TrimSpace(value)
+				case "ppSRView":
+					srvID = strings.TrimSpace(value)
+				}
+			}
+		case xml.EndElement:
+			depth--
+		}
+	}
+	return srvID, texID, nil
 }
 
 type indexBufferBinding struct {

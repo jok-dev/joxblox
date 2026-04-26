@@ -204,3 +204,26 @@ func TestBuildMeshesDedupesByHash(t *testing.T) {
 		t.Errorf("Hash = %q, want %q", meshes[0].Hash, expectedHash)
 	}
 }
+
+func TestParseCreateShaderResourceViewBuildsMap(t *testing.T) {
+	xmlData := `<rdc>
+<chunk name="ID3D11Device::CreateShaderResourceView">
+  <ResourceId name="pResource">12345</ResourceId>
+  <ResourceId name="ppSRView">99001</ResourceId>
+</chunk>
+<chunk name="ID3D11Device::CreateShaderResourceView">
+  <ResourceId name="pResource">12346</ResourceId>
+  <ResourceId name="ppSRView">99002</ResourceId>
+</chunk>
+</rdc>`
+	report, err := parseMeshXML(strings.NewReader(xmlData))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := report.SRVToTexture["99001"]; got != "12345" {
+		t.Errorf("SRV 99001 → %q, want 12345", got)
+	}
+	if got := report.SRVToTexture["99002"]; got != "12346" {
+		t.Errorf("SRV 99002 → %q, want 12346", got)
+	}
+}
