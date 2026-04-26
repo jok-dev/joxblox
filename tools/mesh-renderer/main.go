@@ -68,7 +68,6 @@ in vec3 vertexNormal;
 in vec4 vertexColor;
 uniform mat4 mvp;
 uniform mat4 matModel;
-uniform mat3 matNormal;
 uniform mat4 lightVP;
 out vec3 fragPosition;
 out vec3 fragNormal;
@@ -77,7 +76,13 @@ out vec4 fragPosLightSpace;
 void main() {
     vec4 worldPos = matModel * vec4(vertexPosition, 1.0);
     fragPosition = worldPos.xyz;
-    fragNormal = normalize(matNormal * vertexNormal);
+    // Compute the normal matrix inline from matModel rather than rely on
+    // raylib's auto-populated matNormal — that uniform's location resolved
+    // fine but raylib never wrote a value into it for our shader, so
+    // matNormal stayed at the GLSL default (zero matrix), zeroing every
+    // fragment's normal and producing the "completely flat" symptom.
+    mat3 normalMatrix = mat3(transpose(inverse(matModel)));
+    fragNormal = normalize(normalMatrix * vertexNormal);
     fragColor = vertexColor;
     fragPosLightSpace = lightVP * worldPos;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
@@ -198,7 +203,6 @@ func main() {
 	// the mesh renders as a uniform ambient-only silhouette — exactly the
 	// "lighting looks completely flat" symptom we hit.
 	mainShader.UpdateLocation(rl.ShaderLocMatrixModel, rl.GetShaderLocation(mainShader, "matModel"))
-	mainShader.UpdateLocation(rl.ShaderLocMatrixNormal, rl.GetShaderLocation(mainShader, "matNormal"))
 	mainShader.UpdateLocation(rl.ShaderLocVectorView, viewPosLoc)
 	mainShader.UpdateLocation(rl.ShaderLocVertexNormal, rl.GetShaderLocationAttrib(mainShader, "vertexNormal"))
 	mainShader.UpdateLocation(rl.ShaderLocVertexColor, rl.GetShaderLocationAttrib(mainShader, "vertexColor"))
