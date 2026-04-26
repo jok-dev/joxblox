@@ -58,8 +58,9 @@ var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category"
 // an indicator next to the capture currently loaded in that sub-tab.
 func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 	const (
-		texturesIndex = 0
-		meshesIndex   = 1
+		texturesIndex  = 0
+		meshesIndex    = 1
+		materialsIndex = 2
 	)
 
 	var lc *launcher
@@ -73,10 +74,16 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 			lc.setLoaded(meshesIndex, path)
 		}
 	})
+	materialsView, loadMaterialsFromPath := newMaterialsSubTab(window, func(path string) {
+		if lc != nil {
+			lc.setLoaded(materialsIndex, path)
+		}
+	})
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Textures", texturesView),
 		container.NewTabItem("Meshes", meshesView),
+		container.NewTabItem("Materials", materialsView),
 	)
 
 	loadIntoActiveSubTab := func(path string) {
@@ -85,6 +92,8 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 			loadTexturesFromPath(path)
 		case meshesIndex:
 			loadMeshesFromPath(path)
+		case materialsIndex:
+			loadMaterialsFromPath(path)
 		}
 	}
 
