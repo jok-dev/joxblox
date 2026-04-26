@@ -34,7 +34,7 @@ func NewLodViewerTab(window fyne.Window) fyne.CanvasObject {
 	controlsLabel := widget.NewLabel(ui.MeshPreviewControlsText())
 	controlsLabel.Wrapping = fyne.TextWrapWord
 
-	previewWidget := ui.NewMeshPreviewWidget()
+	previewContainer, previewWidget := ui.NewMeshPreviewWithToolbar()
 	previewWidget.SetFocusCanvas(window.Canvas())
 
 	loadingSpinner := widget.NewProgressBarInfinite()
@@ -228,7 +228,7 @@ func NewLodViewerTab(window fyne.Window) fyne.CanvasObject {
 		nil,               // bottom
 		nil,               // left
 		lodSelectorColumn, // right
-		container.NewMax(previewWidget),
+		container.NewMax(previewContainer),
 	)
 
 	// VScroll so the mesh preview's 440x300 MinSize + footer controls don't
