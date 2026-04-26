@@ -22,6 +22,9 @@ Tip: check ./latest.log for latest logs of last run
 - Validate external inputs and fail safely.
 - Keep security-related behavior explicit and easy to audit.
 
+## Collaboration
+- When presenting a design or plan, show the whole thing in one message. Don't break it into approval-gated sections.
+
 ## Quality Checks
 - Format code consistently before finishing changes.
 - Verify build/test passes after substantive edits.
