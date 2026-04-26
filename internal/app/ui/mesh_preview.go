@@ -33,6 +33,15 @@ import (
 const MaxMeshPreviewTriangles = 20000
 const MinMeshPreviewRenderDimension = 32
 
+// Mesh preview viewmodes — values match the subprocess's ViewmodeXxx
+// constants (0=VertexColor, 1=LitClay, 2=Normals). The subprocess
+// tolerates unknown values by falling back to VertexColor.
+const (
+	MeshViewmodeVertexColor = 0
+	MeshViewmodeLitClay     = 1
+	MeshViewmodeNormals     = 2
+)
+
 const (
 	PreviewWidth  = 440
 	PreviewHeight = 300
@@ -102,6 +111,8 @@ type MeshPreviewWidget struct {
 	zoom           float64
 	rightMouseDown bool
 	wireframe      bool
+	doubleSided    bool
+	viewmode       int
 	pickToken      atomic.Uint64
 	renderToken    atomic.Uint64
 	process        *meshRendererProcess
@@ -140,6 +151,8 @@ func NewMeshPreviewWidget() *MeshPreviewWidget {
 		yaw:           initialYaw,
 		pitch:         initialPitch,
 		zoom:          initialZoom,
+		viewmode:      MeshViewmodeLitClay,
+		doubleSided:   true,
 	}
 	viewer.image.FillMode = canvas.ImageFillStretch
 	viewer.image.ScaleMode = canvas.ImageScaleFastest
@@ -293,6 +306,15 @@ func (viewer *MeshPreviewWidget) applyData(data MeshPreviewData, resetView bool)
 		viewer.pitch = 0.3
 		viewer.zoom = 1.0
 		viewer.cameraX, viewer.cameraY, viewer.cameraZ = meshPreviewInitialCameraPosition(viewer.yaw, viewer.pitch, viewer.zoom)
+		// Multi-batch scenes (e.g. Roblox places) carry meaningful per-part
+		// colors that the user wants to see by default. Single-mesh loads
+		// have no informative vertex color, so default to lit clay so the
+		// shape reads.
+		if len(data.Batches) > 0 {
+			viewer.viewmode = MeshViewmodeVertexColor
+		} else {
+			viewer.viewmode = MeshViewmodeLitClay
+		}
 	}
 	go func() {
 		viewer.startProcessAndLoad()
@@ -361,6 +383,52 @@ func (viewer *MeshPreviewWidget) SetWireframe(enabled bool) {
 	}
 	viewer.wireframe = enabled
 	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) Wireframe() bool {
+	if viewer == nil {
+		return false
+	}
+	return viewer.wireframe
+}
+
+func (viewer *MeshPreviewWidget) SetDoubleSided(enabled bool) {
+	if viewer == nil || viewer.doubleSided == enabled {
+		return
+	}
+	viewer.doubleSided = enabled
+	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) DoubleSided() bool {
+	if viewer == nil {
+		return false
+	}
+	return viewer.doubleSided
+}
+
+func (viewer *MeshPreviewWidget) SetViewmode(mode int) {
+	if viewer == nil {
+		return
+	}
+	switch mode {
+	case MeshViewmodeVertexColor, MeshViewmodeLitClay, MeshViewmodeNormals:
+		// valid
+	default:
+		mode = MeshViewmodeVertexColor
+	}
+	if viewer.viewmode == mode {
+		return
+	}
+	viewer.viewmode = mode
+	viewer.render()
+}
+
+func (viewer *MeshPreviewWidget) Viewmode() int {
+	if viewer == nil {
+		return MeshViewmodeVertexColor
+	}
+	return viewer.viewmode
 }
 
 func (viewer *MeshPreviewWidget) SetOpacity(nextOpacity float64) {
@@ -698,12 +766,14 @@ func (viewer *MeshPreviewWidget) render() {
 	pitchSnapshot := viewer.pitch
 	opacitySnapshot := viewer.opacity
 	wireframeSnapshot := viewer.wireframe
+	viewmodeSnapshot := viewer.viewmode
+	doubleSidedSnapshot := viewer.doubleSided
 	bg := color.NRGBAModel.Convert(viewer.background.FillColor).(color.NRGBA)
 	bgHex := fmt.Sprintf("%02x%02x%02x", bg.R, bg.G, bg.B)
 	renderID := viewer.renderToken.Add(1)
 
 	go func() {
-		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex, wireframeSnapshot)
+		rendered, renderErr := proc.render(width, height, cameraXSnapshot, cameraYSnapshot, cameraZSnapshot, selectedBatchSnapshot, yawSnapshot, pitchSnapshot, 1.0, opacitySnapshot, bgHex, wireframeSnapshot, viewmodeSnapshot, doubleSidedSnapshot)
 		if renderErr != nil {
 			debug.Logf("mesh renderer subprocess render failed: %s", renderErr.Error())
 			return
@@ -997,7 +1067,7 @@ func (p *meshRendererProcess) recolorScene(batchColors []color.NRGBA) error {
 	return nil
 }
 
-func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string, wireframe bool) (image.Image, error) {
+func (p *meshRendererProcess) render(width int, height int, cameraX float64, cameraY float64, cameraZ float64, selectedBatch int, yaw float64, pitch float64, zoom float64, opacity float64, bgHex string, wireframe bool, viewmode int, doubleSided bool) (image.Image, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.alive {
@@ -1008,7 +1078,11 @@ func (p *meshRendererProcess) render(width int, height int, cameraX float64, cam
 	if wireframe {
 		wireframeFlag = 1
 	}
-	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s %d\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex, wireframeFlag)
+	doubleSidedFlag := 0
+	if doubleSided {
+		doubleSidedFlag = 1
+	}
+	cmd := fmt.Sprintf("RENDER %d %d %.6f %.6f %.6f %d %.6f %.6f %.6f %.6f %s %d %d %d\n", width, height, cameraX, cameraY, cameraZ, selectedBatch, yaw, pitch, zoom, format.Clamp(opacity, 0.1, 1.0), bgHex, wireframeFlag, viewmode, doubleSidedFlag)
 	if _, err := io.WriteString(p.stdin, cmd); err != nil {
 		p.alive = false
 		return nil, fmt.Errorf("write render: %w", err)
@@ -1579,4 +1653,70 @@ func ExtractMeshPreviewFromFileWithLimit(filePath string, maxTriangles int) (Mes
 		return MeshPreviewData{}, err
 	}
 	return BuildMeshPreviewData(raw.Positions, raw.Indices, raw.TriangleCount, raw.PreviewTriangleCount)
+}
+
+// NewMeshPreviewWithToolbar wraps a fresh MeshPreviewWidget in a vertical
+// container topped by a three-button viewmode segmented control
+// (Lit · Color · Normals). Returns the container for layout and the inner
+// widget so callers can still drive it (SetData, SetWireframe, etc).
+func NewMeshPreviewWithToolbar() (fyne.CanvasObject, *MeshPreviewWidget) {
+	viewer := NewMeshPreviewWidget()
+	toolbar := newViewmodeToolbar(viewer)
+	return container.NewBorder(toolbar, nil, nil, nil, viewer), viewer
+}
+
+func newViewmodeToolbar(viewer *MeshPreviewWidget) fyne.CanvasObject {
+	var buttons []*viewmodeButton
+	setMode := func(mode int) {
+		viewer.SetViewmode(mode)
+		for _, btn := range buttons {
+			btn.Refresh()
+		}
+	}
+	isActive := func(mode int) func() bool {
+		return func() bool { return viewer.Viewmode() == mode }
+	}
+	buttons = []*viewmodeButton{
+		newViewmodeButton("Lit", isActive(MeshViewmodeLitClay), func() { setMode(MeshViewmodeLitClay) }),
+		newViewmodeButton("Color", isActive(MeshViewmodeVertexColor), func() { setMode(MeshViewmodeVertexColor) }),
+		newViewmodeButton("Normals", isActive(MeshViewmodeNormals), func() { setMode(MeshViewmodeNormals) }),
+	}
+	wireframeCheck := widget.NewCheck("Wireframe", func(checked bool) { viewer.SetWireframe(checked) })
+	wireframeCheck.SetChecked(viewer.Wireframe())
+	doubleSidedCheck := widget.NewCheck("Double sided", func(checked bool) { viewer.SetDoubleSided(checked) })
+	doubleSidedCheck.SetChecked(viewer.DoubleSided())
+	return container.NewHBox(
+		widget.NewLabel("View:"), buttons[0], buttons[1], buttons[2],
+		widget.NewSeparator(),
+		wireframeCheck, doubleSidedCheck,
+	)
+}
+
+// viewmodeButton is a small button that re-derives its highlighted state
+// from an external predicate on every Refresh(). Lets a row of buttons
+// share one source-of-truth (the widget's current viewmode) without
+// each button needing to listen for changes.
+type viewmodeButton struct {
+	widget.Button
+	label    string
+	isActive func() bool
+}
+
+func newViewmodeButton(label string, isActive func() bool, onTap func()) *viewmodeButton {
+	btn := &viewmodeButton{label: label, isActive: isActive}
+	btn.OnTapped = onTap
+	btn.SetText(label)
+	btn.ExtendBaseWidget(btn)
+	return btn
+}
+
+func (b *viewmodeButton) Refresh() {
+	if b.isActive != nil && b.isActive() {
+		b.Importance = widget.HighImportance
+		b.SetText("● " + b.label)
+	} else {
+		b.Importance = widget.MediumImportance
+		b.SetText(b.label)
+	}
+	b.Button.Refresh()
 }

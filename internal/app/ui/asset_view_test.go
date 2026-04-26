@@ -51,7 +51,7 @@ func TestAssetViewSetDataClearsStaleMeshPreviewStateForTextures(t *testing.T) {
 	if len(view.currentMeshPreviewData.RawPositions) != 0 || len(view.currentMeshPreviewData.RawIndices) != 0 {
 		t.Fatalf("expected stale mesh preview state to be cleared for texture assets")
 	}
-	if view.MeshPreview.Visible() {
+	if view.MeshPreviewWithToolbar.Visible() {
 		t.Fatalf("expected mesh preview to stay hidden for texture assets")
 	}
 }

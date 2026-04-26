@@ -131,9 +131,9 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	currentHeatSpread := rbxlHeatmapDefaultSpread
 	currentHeatMode := modelHeatmapModeTriangles
 	var currentRenderState *modelHeatmapRenderState
-	viewer := ui.NewMeshPreviewWidget()
+	viewerContainer, viewer := ui.NewMeshPreviewWithToolbar()
 	viewer.SetFocusCanvas(window.Canvas())
-	viewer.Hide()
+	viewerContainer.Hide()
 
 	filePathLabel := widget.NewLabel("No .rbxl/.rbxm file selected.")
 	filePathLabel.Wrapping = fyne.TextTruncate
@@ -180,7 +180,7 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	setPreviewReady := func(previewData ui.MeshPreviewData, infos []modelHeatmapBatchInfo, summary modelHeatmapSceneSummary) {
 		batchInfos = infos
 		viewer.SetData(previewData)
-		viewer.Show()
+		viewerContainer.Show()
 		placeholderLabel.Hide()
 		partInfoLabel.SetText("Click a part to view its info.")
 		summaryLabel.SetText(formatModelHeatmapSummary(summary))
@@ -188,7 +188,7 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 	setPreviewEmpty := func(message string) {
 		currentRenderState = nil
 		viewer.Clear()
-		viewer.Hide()
+		viewerContainer.Hide()
 		placeholderLabel.SetText(message)
 		placeholderLabel.Show()
 	}
@@ -207,7 +207,7 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 		}
 		batchInfos = infos
 		viewer.UpdateSceneColors(previewData)
-		viewer.Show()
+		viewerContainer.Show()
 		placeholderLabel.Hide()
 		if selectedBatch := viewer.SelectedBatch(); selectedBatch >= 0 && selectedBatch < len(batchInfos) {
 			partInfoLabel.SetText(formatModelHeatmapPartInfo(batchInfos[selectedBatch], currentHeatMode))
@@ -441,7 +441,7 @@ func NewModelHeatmapTab(window fyne.Window) fyne.CanvasObject {
 
 	previewStack := container.NewMax(
 		container.NewCenter(placeholderLabel),
-		container.NewPadded(viewer),
+		container.NewPadded(viewerContainer),
 	)
 	// The control strip sums to ~1000px of fixed-width grids, which would
 	// otherwise force the whole window to stay that wide (AppTabs inherits

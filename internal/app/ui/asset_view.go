@@ -35,12 +35,13 @@ const (
 )
 
 type AssetView struct {
-	PreviewImage       *canvas.Image
-	MeshPreview        *MeshPreviewWidget
-	PreviewPlaceholder *widget.Label
-	PreviewContainer   fyne.CanvasObject
-	PreviewBox         fyne.CanvasObject
-	HierarchySection   fyne.CanvasObject
+	PreviewImage           *canvas.Image
+	MeshPreview            *MeshPreviewWidget
+	MeshPreviewWithToolbar fyne.CanvasObject
+	PreviewPlaceholder     *widget.Label
+	PreviewContainer       fyne.CanvasObject
+	PreviewBox             fyne.CanvasObject
+	HierarchySection       fyne.CanvasObject
 
 	metadataRows map[string]*metadataRow
 
@@ -90,7 +91,6 @@ type AssetView struct {
 	assetDownloadFileName     string
 	downloadOriginalAsset     bool
 	interpolationSelect       *widget.Select
-	wireframeCheck            *widget.Check
 	currentPreviewResource    fyne.Resource
 	meshPreviewLoadToken      atomic.Uint64
 	currentMeshPreviewData    MeshPreviewData
@@ -131,13 +131,13 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 	previewImage.FillMode = canvas.ImageFillContain
 	previewImage.ScaleMode = canvas.ImageScaleFastest
 	previewImage.SetMinSize(fyne.NewSize(PreviewWidth, PreviewHeight))
-	meshPreview := NewMeshPreviewWidget()
-	meshPreview.Hide()
+	meshPreviewWithToolbar, meshPreview := NewMeshPreviewWithToolbar()
+	meshPreviewWithToolbar.Hide()
 	previewPlaceholder := widget.NewLabel(placeholderText)
 	previewContainer := container.NewMax(
 		container.NewCenter(previewPlaceholder),
 		container.NewCenter(previewImage),
-		container.NewCenter(meshPreview),
+		container.NewCenter(meshPreviewWithToolbar),
 	)
 
 	assetDeliveryJSONValue := newReadOnlyMultilineEntry(6)
@@ -183,6 +183,7 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 	view := &AssetView{
 		PreviewImage:               previewImage,
 		MeshPreview:                meshPreview,
+		MeshPreviewWithToolbar:     meshPreviewWithToolbar,
 		PreviewPlaceholder:         previewPlaceholder,
 		PreviewContainer:           previewContainer,
 		PreviewBox:                 nil,
@@ -325,14 +326,9 @@ func NewAssetView(placeholderText string, includeFileRow bool) *AssetView {
 	})
 	view.interpolationSelect.SetSelected(DefaultSampleMode)
 	view.interpolationSelect.Disable()
-	view.wireframeCheck = widget.NewCheck("Wireframe", func(checked bool) {
-		view.MeshPreview.SetWireframe(checked)
-	})
-	view.wireframeCheck.SetChecked(false)
-	view.wireframeCheck.Hide()
 	previewVariantControl := container.NewGridWrap(fyne.NewSize(240, 36), view.previewVariantSelect)
 	interpolationControl := container.NewGridWrap(fyne.NewSize(160, 36), view.interpolationSelect)
-	expandButtonRow := container.NewHBox(layout.NewSpacer(), view.wireframeCheck, previewVariantControl, interpolationControl, view.uploadImageButton, view.downloadImageButton, view.expandImageButton)
+	expandButtonRow := container.NewHBox(layout.NewSpacer(), previewVariantControl, interpolationControl, view.uploadImageButton, view.downloadImageButton, view.expandImageButton)
 	previewBody := container.NewVBox(view.PreviewContainer, view.audioControls)
 	view.PreviewBox = container.NewBorder(nil, expandButtonRow, nil, nil, previewBody)
 	hierarchyMinHeight := canvas.NewRectangle(color.Transparent)
@@ -361,12 +357,10 @@ func (view *AssetView) Clear() {
 	view.PreviewImage.Refresh()
 	view.PreviewImage.Hide()
 	view.MeshPreview.Clear()
-	view.MeshPreview.Hide()
+	view.MeshPreviewWithToolbar.Hide()
 	view.currentMeshPreviewData = MeshPreviewData{}
-	if view.wireframeCheck != nil {
-		view.wireframeCheck.SetChecked(false)
-		view.wireframeCheck.Hide()
-	}
+	view.MeshPreview.SetWireframe(false)
+	view.MeshPreview.SetDoubleSided(true)
 	view.PreviewPlaceholder.Show()
 	view.PreviewContainer.Refresh()
 	updateMetadataRows(view.metadataRows, loader.AssetViewData{})
@@ -493,7 +487,7 @@ func (view *AssetView) SetData(data loader.AssetViewData) {
 	}
 	view.currentMeshPreviewData = MeshPreviewData{}
 	view.MeshPreview.Clear()
-	view.MeshPreview.Hide()
+	view.MeshPreviewWithToolbar.Hide()
 	if mesh.IsMeshAssetType(assetTypeID) && len(downloadBytes) > 0 {
 		view.showMeshPreview(downloadBytes)
 	} else if previewResource != nil {
@@ -542,7 +536,7 @@ func (view *AssetView) showMeshPreview(downloadBytes []byte) {
 	view.interpolationSelect.Disable()
 	view.PreviewImage.Hide()
 	view.MeshPreview.Clear()
-	view.MeshPreview.Hide()
+	view.MeshPreviewWithToolbar.Hide()
 	view.expandImageButton.Disable()
 	if view.downloadOriginalAsset && len(view.assetDownloadBytes) > 0 {
 		view.setOriginalOnlyPreviewVariant()
@@ -568,20 +562,16 @@ func (view *AssetView) showMeshPreview(downloadBytes []byte) {
 			if previewErr == nil {
 				view.currentMeshPreviewData = meshData
 				view.MeshPreview.SetData(meshData)
-				view.MeshPreview.Show()
+				view.MeshPreviewWithToolbar.Show()
 				view.PreviewImage.Hide()
 				view.PreviewPlaceholder.Hide()
 				view.expandImageButton.Enable()
-				if view.wireframeCheck != nil {
-					view.MeshPreview.SetWireframe(view.wireframeCheck.Checked)
-					view.wireframeCheck.Show()
-				}
 				view.PreviewContainer.Refresh()
 				return
 			}
 			debug.Logf("Mesh preview unavailable for asset %d: %s", selectedAssetID, previewErr.Error())
 			view.PreviewImage.Hide()
-			view.MeshPreview.Hide()
+			view.MeshPreviewWithToolbar.Hide()
 			view.PreviewPlaceholder.SetText(friendlyMeshPreviewError(previewErr))
 			view.PreviewPlaceholder.Show()
 			view.PreviewContainer.Refresh()
@@ -601,7 +591,7 @@ func (view *AssetView) showImagePreviewFallback(previewResource fyne.Resource) {
 	view.PreviewImage.Resource = previewResource
 	view.PreviewImage.Refresh()
 	view.PreviewImage.Show()
-	view.MeshPreview.Hide()
+	view.MeshPreviewWithToolbar.Hide()
 	view.PreviewPlaceholder.Hide()
 	view.downloadImageButton.Enable()
 	view.uploadImageButton.Enable()

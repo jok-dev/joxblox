@@ -28,6 +28,7 @@ var (
 
 	mainShader       rl.Shader
 	mainShaderLoaded bool
+	viewmodeLoc      int32
 	lightDirLoc      int32
 	fillLightDirLoc  int32
 	viewPosLoc       int32
@@ -64,17 +65,25 @@ const mainVertSrc = `
 #version 330
 in vec3 vertexPosition;
 in vec3 vertexNormal;
+in vec4 vertexColor;
 uniform mat4 mvp;
 uniform mat4 matModel;
-uniform mat3 matNormal;
 uniform mat4 lightVP;
 out vec3 fragPosition;
 out vec3 fragNormal;
+out vec4 fragColor;
 out vec4 fragPosLightSpace;
 void main() {
     vec4 worldPos = matModel * vec4(vertexPosition, 1.0);
     fragPosition = worldPos.xyz;
-    fragNormal = normalize(matNormal * vertexNormal);
+    // Compute the normal matrix inline from matModel rather than rely on
+    // raylib's auto-populated matNormal — that uniform's location resolved
+    // fine but raylib never wrote a value into it for our shader, so
+    // matNormal stayed at the GLSL default (zero matrix), zeroing every
+    // fragment's normal and producing the "completely flat" symptom.
+    mat3 normalMatrix = mat3(transpose(inverse(matModel)));
+    fragNormal = normalize(normalMatrix * vertexNormal);
+    fragColor = vertexColor;
     fragPosLightSpace = lightVP * worldPos;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
@@ -84,6 +93,7 @@ const mainFragSrc = `
 #version 330
 in vec3 fragPosition;
 in vec3 fragNormal;
+in vec4 fragColor;
 in vec4 fragPosLightSpace;
 uniform vec3 lightDir;
 uniform vec3 fillLightDir;
@@ -93,6 +103,11 @@ uniform vec3 lightCol;
 uniform vec3 baseCol;
 uniform sampler2D shadowMap;
 uniform float shadowBias;
+// Sent as a float (not int) because raylib-go's SetShaderValue treats
+// the value buffer as float32 bytes regardless of the declared uniform
+// type, so passing int via ShaderUniformInt reinterprets 1.0f as
+// 1065353216 in the shader. Branching on float values avoids that.
+uniform float viewmode;
 out vec4 finalColor;
 
 float calcShadow(vec4 posLS) {
@@ -114,6 +129,11 @@ float calcShadow(vec4 posLS) {
 
 void main() {
     vec3 norm = normalize(fragNormal);
+    if (viewmode > 1.5) {
+        // Normals debug view (viewmode = 2): skip lighting entirely.
+        finalColor = vec4(norm * 0.5 + 0.5, 1.0);
+        return;
+    }
     vec3 viewDir = normalize(viewPos - fragPosition);
     float diff = max(dot(norm, lightDir), 0.0);
     vec3 halfDir = normalize(lightDir + viewDir);
@@ -124,8 +144,16 @@ void main() {
     float rim = 1.0 - max(dot(norm, viewDir), 0.0);
     rim = pow(rim, 3.0) * 0.15;
     float shadow = calcShadow(fragPosLightSpace);
-    vec3 lit = ambientCol + key * (1.0 - shadow * 0.65) + fill + rim;
-    finalColor = vec4(lit * baseCol, 1.0);
+    // Soft shadow contribution: even fully shadowed surfaces still get
+    // most of the key light, since we're previewing geometry not
+    // rendering a final scene. Heavy shadowing read as "broken lighting"
+    // rather than depth cue in early testing.
+    vec3 lit = ambientCol + key * (1.0 - shadow * 0.35) + fill + rim;
+    // Lit Clay (viewmode = 1) forces vertex color to white so the gray
+    // baseCol reads as a uniform clay surface; Vertex Color uses the
+    // per-vertex tint.
+    vec3 vertCol = (viewmode > 0.5) ? vec3(1.0) : fragColor.rgb;
+    finalColor = vec4(lit * baseCol * vertCol, 1.0);
 }
 `
 
@@ -165,6 +193,19 @@ func main() {
 	lightVPLoc = rl.GetShaderLocation(mainShader, "lightVP")
 	shadowMapLoc = rl.GetShaderLocation(mainShader, "shadowMap")
 	shadowBiasLoc = rl.GetShaderLocation(mainShader, "shadowBias")
+	viewmodeLoc = rl.GetShaderLocation(mainShader, "viewmode")
+
+	// Force raylib's standard-slot locations to point at our shader's
+	// matching uniforms/attributes. Raylib's DrawModel auto-injects matModel
+	// and matNormal each draw via these slot indices; if auto-detection by
+	// name fails (and in practice it does for our setup, leaving normals
+	// effectively unbound), every fragment computes dot(zero, light)=0 and
+	// the mesh renders as a uniform ambient-only silhouette — exactly the
+	// "lighting looks completely flat" symptom we hit.
+	mainShader.UpdateLocation(rl.ShaderLocMatrixModel, rl.GetShaderLocation(mainShader, "matModel"))
+	mainShader.UpdateLocation(rl.ShaderLocVectorView, viewPosLoc)
+	mainShader.UpdateLocation(rl.ShaderLocVertexNormal, rl.GetShaderLocationAttrib(mainShader, "vertexNormal"))
+	mainShader.UpdateLocation(rl.ShaderLocVertexColor, rl.GetShaderLocationAttrib(mainShader, "vertexColor"))
 
 	depthShader = rl.LoadShaderFromMemory(depthVertSrc, depthFragSrc)
 	depthShaderLoaded = true
@@ -425,6 +466,12 @@ func createModelFromRawData(positions []float32, indices32 []uint32, colors []ui
 	}
 	rl.UploadMesh(&mesh, false)
 	modelData.model = rl.LoadModelFromMesh(mesh)
+	// Override the default unlit material shader with our Phong shader so
+	// DrawModel actually runs the lighting code we already loaded.
+	materials := modelData.model.GetMaterials()
+	if len(materials) > 0 {
+		materials[0].Shader = mainShader
+	}
 	return modelData, nil
 }
 
@@ -433,6 +480,43 @@ func buildLightVP(lightDir rl.Vector3) rl.Matrix {
 	lightView := rl.MatrixLookAt(lightPos, rl.Vector3{}, rl.Vector3{X: 0, Y: 1, Z: 0})
 	lightProj := rl.MatrixOrtho(-2.0, 2.0, -2.0, 2.0, 0.5, 10.0)
 	return rl.MatrixMultiply(lightView, lightProj)
+}
+
+// renderShadowPass populates the global shadowMap with depth values from
+// keyLightDir's perspective. Returns the light view-projection matrix that
+// callers must pass into the main shader's lightVP uniform so calcShadow()
+// can re-project fragments into shadow-map space.
+func renderShadowPass(keyLightDir rl.Vector3) rl.Matrix {
+	lightVP := buildLightVP(keyLightDir)
+	lightCamera := rl.Camera3D{
+		Position:   rl.Vector3{X: keyLightDir.X * 4, Y: keyLightDir.Y * 4, Z: keyLightDir.Z * 4},
+		Target:     rl.Vector3{},
+		Up:         rl.Vector3{X: 0, Y: 1, Z: 0},
+		Fovy:       4.0, // ortho extent ±2 (matches MatrixOrtho above)
+		Projection: rl.CameraOrthographic,
+	}
+
+	rl.BeginTextureMode(shadowMap)
+	rl.ClearBackground(rl.White)
+	rl.BeginMode3D(lightCamera)
+
+	// Swap each model's shader to the depth shader for the shadow pass,
+	// then restore the main shader after. Avoids needing a parallel set
+	// of model resources.
+	for _, meshModel := range loadedScene {
+		mats := meshModel.model.GetMaterials()
+		if len(mats) == 0 {
+			continue
+		}
+		original := mats[0].Shader
+		mats[0].Shader = depthShader
+		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, rl.White)
+		mats[0].Shader = original
+	}
+
+	rl.EndMode3D()
+	rl.EndTextureMode()
+	return lightVP
 }
 
 func buildCamera(cameraX float64, cameraY float64, cameraZ float64, yaw float64, pitch float64, zoom float64) rl.Camera3D {
@@ -520,32 +604,100 @@ func handlePick(parts []string) {
 	respond(fmt.Sprintf("PICKED %d", bestBatch))
 }
 
+// Viewmode controls how the fragment shader colors fragments.
+//   - VertexColor: standard Phong shading multiplied by per-vertex color
+//   - LitClay: standard Phong shading with vertex color forced white so
+//     the per-model baseCol reads as a uniform clay surface
+//   - Normals: skip lighting entirely; color = surface-normal mapped to RGB
+const (
+	ViewmodeVertexColor = 0
+	ViewmodeLitClay     = 1
+	ViewmodeNormals     = 2
+)
+
+type renderArgs struct {
+	Width         int
+	Height        int
+	CameraX       float64
+	CameraY       float64
+	CameraZ       float64
+	SelectedBatch int
+	Yaw           float64
+	Pitch         float64
+	Zoom          float64
+	Opacity       float64
+	BgHex         string
+	Wireframe     bool
+	Viewmode      int
+	DoubleSided   bool
+}
+
+// parseRenderArgs parses a "RENDER ..." command line. Tolerates the older
+// 12-arg form (no wireframe, no viewmode) and the 13-arg form (wireframe
+// only) so an old Go ↔ new subprocess pairing keeps working during dev.
+// Unknown viewmode values fall back to VertexColor.
+func parseRenderArgs(parts []string) (renderArgs, error) {
+	if len(parts) < 12 {
+		return renderArgs{}, fmt.Errorf("RENDER requires width height cam_x cam_y cam_z selected_batch yaw pitch zoom opacity bg_hex [wireframe] [viewmode]")
+	}
+	args := renderArgs{
+		BgHex:    parts[11],
+		Viewmode: ViewmodeVertexColor,
+	}
+	args.Width, _ = strconv.Atoi(parts[1])
+	args.Height, _ = strconv.Atoi(parts[2])
+	args.CameraX, _ = strconv.ParseFloat(parts[3], 64)
+	args.CameraY, _ = strconv.ParseFloat(parts[4], 64)
+	args.CameraZ, _ = strconv.ParseFloat(parts[5], 64)
+	args.SelectedBatch, _ = strconv.Atoi(parts[6])
+	args.Yaw, _ = strconv.ParseFloat(parts[7], 64)
+	args.Pitch, _ = strconv.ParseFloat(parts[8], 64)
+	args.Zoom, _ = strconv.ParseFloat(parts[9], 64)
+	args.Opacity, _ = strconv.ParseFloat(parts[10], 64)
+	if len(parts) >= 13 {
+		flag, _ := strconv.Atoi(parts[12])
+		args.Wireframe = flag != 0
+	}
+	if len(parts) >= 14 {
+		mode, _ := strconv.Atoi(parts[13])
+		switch mode {
+		case ViewmodeVertexColor, ViewmodeLitClay, ViewmodeNormals:
+			args.Viewmode = mode
+		default:
+			args.Viewmode = ViewmodeVertexColor
+		}
+	}
+	if len(parts) >= 15 {
+		flag, _ := strconv.Atoi(parts[14])
+		args.DoubleSided = flag != 0
+	}
+	return args, nil
+}
+
 func handleRender(parts []string) {
 	if len(loadedScene) == 0 {
 		respond("ERR no mesh loaded")
 		return
 	}
-	if len(parts) < 12 {
-		respond("ERR RENDER requires width height cam_x cam_y cam_z selected_batch yaw pitch zoom opacity bg_hex [wireframe]")
+	args, parseErr := parseRenderArgs(parts)
+	if parseErr != nil {
+		respond("ERR " + parseErr.Error())
 		return
 	}
-
-	width, _ := strconv.Atoi(parts[1])
-	height, _ := strconv.Atoi(parts[2])
-	cameraX, _ := strconv.ParseFloat(parts[3], 64)
-	cameraY, _ := strconv.ParseFloat(parts[4], 64)
-	cameraZ, _ := strconv.ParseFloat(parts[5], 64)
-	selectedBatch, _ := strconv.Atoi(parts[6])
-	yaw, _ := strconv.ParseFloat(parts[7], 64)
-	pitch, _ := strconv.ParseFloat(parts[8], 64)
-	zoom, _ := strconv.ParseFloat(parts[9], 64)
-	opacity, _ := strconv.ParseFloat(parts[10], 64)
-	bgHex := parts[11]
-	wireframe := false
-	if len(parts) >= 13 {
-		wireframeFlag, _ := strconv.Atoi(parts[12])
-		wireframe = wireframeFlag != 0
-	}
+	width := args.Width
+	height := args.Height
+	cameraX := args.CameraX
+	cameraY := args.CameraY
+	cameraZ := args.CameraZ
+	selectedBatch := args.SelectedBatch
+	yaw := args.Yaw
+	pitch := args.Pitch
+	zoom := args.Zoom
+	opacity := args.Opacity
+	bgHex := args.BgHex
+	wireframe := args.Wireframe
+	viewmode := args.Viewmode
+	doubleSided := args.DoubleSided
 
 	if width < 1 || width > 4096 {
 		width = 440
@@ -574,14 +726,60 @@ func handleRender(parts []string) {
 
 	camera := buildCamera(cameraX, cameraY, cameraZ, yaw, pitch, zoom)
 	drawOrder := sceneDrawOrder(loadedScene, camera.Position, opacity)
+	transparent := opacity < 0.999
+
+	// Per-frame Phong uniforms. Key light is fixed in world space (so the
+	// shading reads consistently as the camera orbits); fill light tracks
+	// the camera so faces pointed at the viewer always pick up some light.
+	keyLightDir := rl.Vector3Normalize(rl.NewVector3(-0.4, 0.8, 0.5))
+
+	// Shadow pass: render scene depth from the key light's POV into shadowMap.
+	// Skipped for transparent geometry — depth-test is disabled in that path
+	// and shadows on alpha-blended models look wrong.
+	var lightVP rl.Matrix
+	if !transparent {
+		lightVP = renderShadowPass(keyLightDir)
+	} else {
+		lightVP = rl.MatrixIdentity()
+	}
 
 	rl.BeginTextureMode(renderTarget)
 	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
 	rl.BeginMode3D(camera)
-	transparent := opacity < 0.999
 	if transparent {
 		rl.DisableDepthTest()
 	}
+	// Double-sided rendering: turn off backface culling so triangles draw
+	// from both sides. Useful for inspecting open meshes / inverted normals.
+	if doubleSided {
+		rl.DisableBackfaceCulling()
+	}
+	fillLightDirVec := rl.Vector3Normalize(rl.NewVector3(
+		camera.Target.X-camera.Position.X,
+		(camera.Target.Y-camera.Position.Y)+0.4,
+		camera.Target.Z-camera.Position.Z,
+	))
+	ambient := []float32{0.32, 0.33, 0.36}
+	lightCol := []float32{1.0, 0.97, 0.92}
+	viewPos := []float32{float32(cameraX), float32(cameraY), float32(cameraZ)}
+	rl.SetShaderValue(mainShader, lightDirLoc, []float32{keyLightDir.X, keyLightDir.Y, keyLightDir.Z}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, fillLightDirLoc, []float32{fillLightDirVec.X, fillLightDirVec.Y, fillLightDirVec.Z}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, viewPosLoc, viewPos, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, ambientLoc, ambient, rl.ShaderUniformVec3)
+	rl.SetShaderValue(mainShader, lightColLoc, lightCol, rl.ShaderUniformVec3)
+	rl.SetShaderValueMatrix(mainShader, lightVPLoc, lightVP)
+	// 0.0015 caused heavy self-shadowing across most of the mesh because
+	// the depth attachment (sampled as RGB color, not a true depth texture)
+	// quantizes precision. 0.008 reliably eliminates self-shadow acne on
+	// the meshes tested so far while still catching real occlusion.
+	shadowBiasValue := float32(0.008)
+	if transparent {
+		shadowBiasValue = 1.0 // disables shadows in calcShadow()
+	}
+	rl.SetShaderValue(mainShader, shadowBiasLoc, []float32{shadowBiasValue}, rl.ShaderUniformFloat)
+	rl.SetShaderValueTexture(mainShader, shadowMapLoc, shadowMap.Texture)
+	rl.SetShaderValue(mainShader, viewmodeLoc, []float32{float32(viewmode)}, rl.ShaderUniformFloat)
+
 	opacityTint := rl.NewColor(255, 255, 255, uint8(clampFloat64(opacity, 0.1, 1.0)*255.0))
 	for _, batchIndex := range drawOrder {
 		meshModel := loadedScene[batchIndex]
@@ -589,6 +787,16 @@ func handleRender(parts []string) {
 		if meshModel.sceneMode {
 			tint = modelTint(meshModel.baseColor, opacity)
 		}
+		// Push baseCol so the Phong shader knows the per-model tint.
+		// Lit Clay overrides with a neutral gray so the uniform clay
+		// surface reads cleanly regardless of the model's base color.
+		var baseColValue [3]float32
+		if viewmode == ViewmodeLitClay {
+			baseColValue = [3]float32{0.78, 0.78, 0.80}
+		} else {
+			baseColValue = meshModel.baseColor
+		}
+		rl.SetShaderValue(mainShader, baseColLoc, []float32{baseColValue[0], baseColValue[1], baseColValue[2]}, rl.ShaderUniformVec3)
 		if wireframe {
 			rl.DrawModelWires(meshModel.model, rl.Vector3{}, 1.0, tint)
 		} else {
@@ -601,6 +809,14 @@ func handleRender(parts []string) {
 	if transparent {
 		rl.EnableDepthTest()
 	}
+	if doubleSided {
+		rl.EnableBackfaceCulling()
+	}
+	// Subtle ground reference. Draws after geometry so it doesn't fight
+	// the model's depth, but still inside BeginMode3D so it gets the
+	// camera transform. Sits at world y=0 — meshes are normalized to
+	// roughly the unit cube, so y=0 reads as the visual ground.
+	rl.DrawGrid(20, 1.0)
 	rl.EndMode3D()
 	rl.EndTextureMode()
 

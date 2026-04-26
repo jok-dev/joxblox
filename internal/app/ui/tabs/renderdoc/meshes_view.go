@@ -50,13 +50,13 @@ func newMeshesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Canva
 	filterEntry := widget.NewEntry()
 	filterEntry.SetPlaceHolder("Filter by hash or layout")
 
-	previewWidget := ui.NewMeshPreviewWidget()
+	previewContainer, previewWidget := ui.NewMeshPreviewWithToolbar()
 	previewInfoLabel := widget.NewMultiLineEntry()
 	previewInfoLabel.Wrapping = fyne.TextWrapWord
 	previewInfoLabel.SetText("Select a mesh to preview.")
 	previewInfoLabel.Disable()
 
-	previewPane := container.NewBorder(previewInfoLabel, nil, nil, nil, previewWidget)
+	previewPane := container.NewBorder(previewInfoLabel, nil, nil, nil, previewContainer)
 
 	var table *widget.Table
 	table = widget.NewTableWithHeaders(

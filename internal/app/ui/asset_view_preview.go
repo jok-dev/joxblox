@@ -330,7 +330,7 @@ func (view *AssetView) showExpandedMeshWindow() {
 	}
 
 	meshWindow := guiApp.NewWindow(fmt.Sprintf("Asset %d Model", view.currentAssetID))
-	meshViewer := NewMeshPreviewWidget()
+	meshViewerContainer, meshViewer := NewMeshPreviewWithToolbar()
 	meshViewer.SetFocusCanvas(meshWindow.Canvas())
 	meshViewer.SetData(view.currentMeshPreviewData)
 	backgroundSelect := widget.NewSelect([]string{ExpandedBackgroundBlack, ExpandedBackgroundWhite}, nil)
@@ -358,7 +358,7 @@ func (view *AssetView) showExpandedMeshWindow() {
 		layout.NewSpacer(),
 		widget.NewLabel(MeshPreviewControlsText()),
 	)
-	meshWindow.SetContent(container.NewBorder(topBar, nil, nil, nil, meshViewer))
+	meshWindow.SetContent(container.NewBorder(topBar, nil, nil, nil, meshViewerContainer))
 	meshWindow.Resize(fyne.NewSize(980, 760))
 	meshWindow.SetOnClosed(func() {
 		meshViewer.Clear()
