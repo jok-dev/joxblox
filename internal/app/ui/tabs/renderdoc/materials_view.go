@@ -223,7 +223,13 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 		state.selectedRow = -1
 		applyMaterialSortAndFilter(state)
 		pathLabel.SetText(fmt.Sprintf("Loaded: %s", loadedPath))
-		summaryLabel.SetText(fmt.Sprintf("%d materials across %d draw calls", len(materials), countTotalDraws(materials)))
+		colorBytes, normalBytes, mrBytes := perCategoryAssetBytes(materials, state.textureByID)
+		summaryLabel.SetText(fmt.Sprintf("%d materials across %d draw calls   ·   Color: %s   ·   Normal: %s   ·   MR: %s",
+			len(materials), countTotalDraws(materials),
+			format.FormatSizeAuto64(colorBytes),
+			format.FormatSizeAuto64(normalBytes),
+			format.FormatSizeAuto64(mrBytes),
+		))
 		countLabel.SetText(fmt.Sprintf("Showing %d of %d materials", len(state.displayMaterials), len(state.materials)))
 		preview.reset()
 		table.Refresh()
@@ -470,6 +476,39 @@ func countTotalDraws(materials []renderdoc.Material) int {
 		total += m.DrawCallCount
 	}
 	return total
+}
+
+// perCategoryAssetBytes sums the unique-texture VRAM cost across all
+// materials, split by slot. A texture shared across multiple materials is
+// counted once. "Assets only" is implicit — BuildMaterials already filtered
+// scene-globals (built-ins, render targets, cubemaps, anything bound to ≥80%
+// of draws) out of the slot assignments, so only per-material textures
+// contribute.
+func perCategoryAssetBytes(materials []renderdoc.Material, byID map[string]renderdoc.TextureInfo) (color, normal, mr int64) {
+	colorIDs := map[string]bool{}
+	normalIDs := map[string]bool{}
+	mrIDs := map[string]bool{}
+	for _, m := range materials {
+		if m.ColorTextureID != "" {
+			colorIDs[m.ColorTextureID] = true
+		}
+		if m.NormalTextureID != "" {
+			normalIDs[m.NormalTextureID] = true
+		}
+		if m.MRTextureID != "" {
+			mrIDs[m.MRTextureID] = true
+		}
+	}
+	sumIDs := func(ids map[string]bool) int64 {
+		var total int64
+		for id := range ids {
+			if t, ok := byID[id]; ok {
+				total += t.Bytes
+			}
+		}
+		return total
+	}
+	return sumIDs(colorIDs), sumIDs(normalIDs), sumIDs(mrIDs)
 }
 
 func applyMaterialColumnWidths(table *widget.Table) {
