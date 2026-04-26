@@ -84,6 +84,7 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 		container.NewTabItem("Meshes", meshesView),
 		container.NewTabItem("Materials", materialsView),
 	)
+	tabs.SelectIndex(materialsIndex)
 
 	// Loading dispatches to all three sub-tabs at once so a single click
 	// populates Textures, Meshes, and Materials in parallel. Each sub-tab
