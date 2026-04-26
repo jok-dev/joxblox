@@ -29,7 +29,7 @@ type meshesTabState struct {
 	selectedRow    int
 }
 
-var meshColumnHeaders = []string{"ID", "Verts", "Tris", "VB bytes", "IB bytes", "Draws", "Layout", "Hash"}
+var meshColumnHeaders = []string{"ID", "Verts", "Tris", "VB bytes", "IB bytes", "Draws", "Layout", "Hash", "Studio Asset"}
 
 func newMeshesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
 	state := &meshesTabState{
@@ -197,6 +197,11 @@ func meshColumnValue(mesh renderdoc.MeshInfo, column string) string {
 		return mesh.InputLayoutID
 	case "Hash":
 		return truncateHash(mesh.Hash)
+	case "Studio Asset":
+		// Mesh-side asset matching is gated on the feasibility spike;
+		// for now the column is a placeholder so column counts stay
+		// consistent across sub-tabs.
+		return "—"
 	}
 	return ""
 }
@@ -209,7 +214,7 @@ func truncateHash(hash string) string {
 }
 
 func applyMeshColumnWidths(table *widget.Table) {
-	widths := map[int]float32{0: 80, 1: 80, 2: 80, 3: 100, 4: 100, 5: 70, 6: 90, 7: 150}
+	widths := map[int]float32{0: 80, 1: 80, 2: 80, 3: 100, 4: 100, 5: 70, 6: 90, 7: 150, 8: 110}
 	for col, w := range widths {
 		table.SetColumnWidth(col, w)
 	}
