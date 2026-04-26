@@ -445,6 +445,43 @@ func buildLightVP(lightDir rl.Vector3) rl.Matrix {
 	return rl.MatrixMultiply(lightView, lightProj)
 }
 
+// renderShadowPass populates the global shadowMap with depth values from
+// keyLightDir's perspective. Returns the light view-projection matrix that
+// callers must pass into the main shader's lightVP uniform so calcShadow()
+// can re-project fragments into shadow-map space.
+func renderShadowPass(keyLightDir rl.Vector3) rl.Matrix {
+	lightVP := buildLightVP(keyLightDir)
+	lightCamera := rl.Camera3D{
+		Position:   rl.Vector3{X: keyLightDir.X * 4, Y: keyLightDir.Y * 4, Z: keyLightDir.Z * 4},
+		Target:     rl.Vector3{},
+		Up:         rl.Vector3{X: 0, Y: 1, Z: 0},
+		Fovy:       4.0, // ortho extent ±2 (matches MatrixOrtho above)
+		Projection: rl.CameraOrthographic,
+	}
+
+	rl.BeginTextureMode(shadowMap)
+	rl.ClearBackground(rl.White)
+	rl.BeginMode3D(lightCamera)
+
+	// Swap each model's shader to the depth shader for the shadow pass,
+	// then restore the main shader after. Avoids needing a parallel set
+	// of model resources.
+	for _, meshModel := range loadedScene {
+		mats := meshModel.model.GetMaterials()
+		if len(mats) == 0 {
+			continue
+		}
+		original := mats[0].Shader
+		mats[0].Shader = depthShader
+		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, rl.White)
+		mats[0].Shader = original
+	}
+
+	rl.EndMode3D()
+	rl.EndTextureMode()
+	return lightVP
+}
+
 func buildCamera(cameraX float64, cameraY float64, cameraZ float64, yaw float64, pitch float64, zoom float64) rl.Camera3D {
 	sinYaw := float32(math.Sin(yaw))
 	cosYaw := float32(math.Cos(yaw))
@@ -584,19 +621,29 @@ func handleRender(parts []string) {
 
 	camera := buildCamera(cameraX, cameraY, cameraZ, yaw, pitch, zoom)
 	drawOrder := sceneDrawOrder(loadedScene, camera.Position, opacity)
-
-	rl.BeginTextureMode(renderTarget)
-	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
-	rl.BeginMode3D(camera)
 	transparent := opacity < 0.999
-	if transparent {
-		rl.DisableDepthTest()
-	}
 
 	// Per-frame Phong uniforms. Key light is fixed in world space (so the
 	// shading reads consistently as the camera orbits); fill light tracks
 	// the camera so faces pointed at the viewer always pick up some light.
 	keyLightDir := rl.Vector3Normalize(rl.NewVector3(-0.4, 0.8, 0.5))
+
+	// Shadow pass: render scene depth from the key light's POV into shadowMap.
+	// Skipped for transparent geometry — depth-test is disabled in that path
+	// and shadows on alpha-blended models look wrong.
+	var lightVP rl.Matrix
+	if !transparent {
+		lightVP = renderShadowPass(keyLightDir)
+	} else {
+		lightVP = rl.MatrixIdentity()
+	}
+
+	rl.BeginTextureMode(renderTarget)
+	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
+	rl.BeginMode3D(camera)
+	if transparent {
+		rl.DisableDepthTest()
+	}
 	fillLightDirVec := rl.Vector3Normalize(rl.NewVector3(
 		camera.Target.X-camera.Position.X,
 		(camera.Target.Y-camera.Position.Y)+0.4,
@@ -610,10 +657,13 @@ func handleRender(parts []string) {
 	rl.SetShaderValue(mainShader, viewPosLoc, viewPos, rl.ShaderUniformVec3)
 	rl.SetShaderValue(mainShader, ambientLoc, ambient, rl.ShaderUniformVec3)
 	rl.SetShaderValue(mainShader, lightColLoc, lightCol, rl.ShaderUniformVec3)
-	// Shadows wired in Task 2; until then, bind an identity light matrix and
-	// a max-distance bias so calcShadow() never reports occlusion.
-	rl.SetShaderValueMatrix(mainShader, lightVPLoc, rl.MatrixIdentity())
-	rl.SetShaderValue(mainShader, shadowBiasLoc, []float32{1.0}, rl.ShaderUniformFloat)
+	rl.SetShaderValueMatrix(mainShader, lightVPLoc, lightVP)
+	shadowBiasValue := float32(0.0015)
+	if transparent {
+		shadowBiasValue = 1.0 // disables shadows in calcShadow()
+	}
+	rl.SetShaderValue(mainShader, shadowBiasLoc, []float32{shadowBiasValue}, rl.ShaderUniformFloat)
+	rl.SetShaderValueTexture(mainShader, shadowMapLoc, shadowMap.Texture)
 
 	opacityTint := rl.NewColor(255, 255, 255, uint8(clampFloat64(opacity, 0.1, 1.0)*255.0))
 	for _, batchIndex := range drawOrder {
