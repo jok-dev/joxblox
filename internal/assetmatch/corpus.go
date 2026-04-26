@@ -23,11 +23,12 @@ import (
 )
 
 // DefaultMatchHammingDistance is the maximum bit-difference between two
-// 64-bit dHashes for them to be considered a match. Empirical: BC1/BC3
-// roundtrip noise typically perturbs ~3-5 bits of the perceptual hash;
-// 6 leaves headroom while keeping false positives low for visually
-// distinct textures.
-const DefaultMatchHammingDistance = 6
+// 64-bit dHashes for them to be considered a match. 1 ≈ 98.4% bit
+// similarity (63/64 bits identical) — strict enough to almost guarantee
+// the same source image, loose enough to absorb a single bit flipped by
+// BC roundtrip noise. Bump to 0 for exact-only; bump up if too many
+// real matches go missing.
+const DefaultMatchHammingDistance = 1
 
 // TextureCorpus is an immutable lookup table from dHash → Roblox asset
 // IDs. Build via BuildTextureCorpus from a slice of scan results, then

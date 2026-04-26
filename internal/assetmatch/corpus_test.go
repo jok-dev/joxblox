@@ -25,7 +25,13 @@ func TestMatchNearHashWithinThreshold(t *testing.T) {
 	corpus := newTextureCorpusFromMap(map[uint64][]int64{
 		0xDEADBEEFCAFEBABE: {12345},
 	})
-	near := uint64(0xDEADBEEFCAFEBABE) ^ 0b1111
+	// Flip exactly DefaultMatchHammingDistance bits — at-threshold,
+	// should still match. Test stays valid as the constant changes.
+	var flipMask uint64
+	for i := 0; i < DefaultMatchHammingDistance; i++ {
+		flipMask |= 1 << i
+	}
+	near := uint64(0xDEADBEEFCAFEBABE) ^ flipMask
 	got := corpus.Match(near)
 	if !reflect.DeepEqual(got, []int64{12345}) {
 		t.Errorf("Match near: got %v, want [12345]", got)
@@ -44,13 +50,15 @@ func TestMatchBeyondThresholdReturnsNothing(t *testing.T) {
 }
 
 func TestMatchMultipleCandidatesSortedByDistance(t *testing.T) {
+	// Two candidates within threshold, sorted by distance ascending.
+	// The second has distance 1 unconditionally so the test passes
+	// at any threshold ≥ 1.
 	corpus := newTextureCorpusFromMap(map[uint64][]int64{
-		0xDEADBEEFCAFEBABE:                 {12345},
-		uint64(0xDEADBEEFCAFEBABE) ^ 0b1:   {67890},
-		uint64(0xDEADBEEFCAFEBABE) ^ 0b111: {11111},
+		0xDEADBEEFCAFEBABE:               {12345},
+		uint64(0xDEADBEEFCAFEBABE) ^ 0b1: {67890},
 	})
 	got := corpus.Match(0xDEADBEEFCAFEBABE)
-	want := []int64{12345, 67890, 11111}
+	want := []int64{12345, 67890}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("multi-match order: got %v, want %v", got, want)
 	}
