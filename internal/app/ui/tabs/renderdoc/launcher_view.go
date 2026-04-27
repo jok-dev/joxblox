@@ -53,10 +53,13 @@ func capturesRootDirectory() string {
 type launcher struct {
 	canvas fyne.CanvasObject
 
-	// sessionDir is the per-app-launch directory we tell renderdoccmd to
-	// write captures into via `-c`. Created once when the launcher is
-	// constructed; old sessions' subdirs stay around under capturesRoot.
-	sessionDir string
+	// sessionDir is the per-app-launch directory path we tell renderdoccmd
+	// to write captures into via `-c`. Computed eagerly but not created on
+	// disk until the user clicks Open folder or Launch with RenderDoc;
+	// ensureSessionDir() handles the lazy mkdir + fsnotify watcher start.
+	sessionDir         string
+	sessionDirOnceErr  error
+	sessionDirOnce     sync.Once
 
 	mu              sync.Mutex
 	captures        []captureEntry
@@ -101,14 +104,28 @@ func (l *launcher) activeLoadedPath() string {
 	return l.loadedBySubTab[l.activeSubTabIdx]
 }
 
+// ensureSessionDir creates the per-launch session directory on disk
+// (idempotent) and starts the fsnotify watcher exactly once. Call from
+// any code path that's about to need the directory — Open folder,
+// Launch with RenderDoc, etc. Returns the dir path on success.
+func (l *launcher) ensureSessionDir() (string, error) {
+	l.sessionDirOnce.Do(func() {
+		if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
+			l.sessionDirOnceErr = err
+			return
+		}
+		startCaptureFolderWatcher(l.sessionDir, l.refreshLister)
+		l.refreshLister()
+	})
+	return l.sessionDir, l.sessionDirOnceErr
+}
+
 // newLauncher builds the launcher row. loadCapture is invoked when the user
 // clicks Load on a list row; it should load the given path into whichever
 // sub-tab is active.
 func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
-	sessionDir := newSessionCapturesDir()
-
 	l := &launcher{
-		sessionDir:     sessionDir,
+		sessionDir:     pickSessionCapturesDir(),
 		loadedBySubTab: make(map[int]string),
 		loadCapture:    loadCapture,
 		autoLoadLatest: loadAutoLoadPreference(),
@@ -201,11 +218,12 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	}
 
 	openFolderButton := widget.NewButton("Open folder", func() {
-		if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
+		dir, err := l.ensureSessionDir()
+		if err != nil {
 			fyneDialog.ShowError(err, window)
 			return
 		}
-		if err := exec.Command("explorer", l.sessionDir).Start(); err != nil {
+		if err := exec.Command("explorer", dir).Start(); err != nil {
 			fyneDialog.ShowError(fmt.Errorf("open captures folder: %w", err), window)
 		}
 	})
@@ -232,11 +250,12 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 			return
 		}
 
-		if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
+		dir, err := l.ensureSessionDir()
+		if err != nil {
 			fyneDialog.ShowError(fmt.Errorf("create captures dir: %w", err), window)
 			return
 		}
-		captureTemplate := filepath.Join(l.sessionDir, captureFileStem)
+		captureTemplate := filepath.Join(dir, captureFileStem)
 
 		launchButton.Disable()
 		statusLabel.SetText("Launching…")
@@ -285,7 +304,9 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 		}
 	})
 
-	startCaptureFolderWatcher(l.sessionDir, l.refreshLister)
+	// Watcher + first refresh fire from ensureSessionDir() the first time
+	// the user clicks Open folder or Launch with RenderDoc; until then
+	// there's nothing on disk to watch and the captures list stays at 0.
 
 	topRow := container.NewBorder(nil, nil, studioLabel,
 		container.NewHBox(openButton, launchButton),
@@ -299,17 +320,15 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	return l
 }
 
-// newSessionCapturesDir creates a fresh per-app-launch subdir under
-// capturesRoot. Subdir name is timestamp-based so it's human-readable when
-// the user opens the folder.
-func newSessionCapturesDir() string {
+// pickSessionCapturesDir picks a fresh per-app-launch directory path
+// under capturesRoot but does NOT create it on disk — the user might
+// never click anything that needs it, and we shouldn't pollute their
+// temp dir with empty session folders just for opening the tab.
+// ensureSessionDir creates it lazily on first need.
+func pickSessionCapturesDir() string {
 	root := capturesRootDirectory()
 	stamp := time.Now().Format("20060102-150405")
-	dir := filepath.Join(root, "session-"+stamp)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return root
-	}
-	return dir
+	return filepath.Join(root, "session-"+stamp)
 }
 
 // refreshCaptures re-scans the session captures dir, sorts newest-first, and
