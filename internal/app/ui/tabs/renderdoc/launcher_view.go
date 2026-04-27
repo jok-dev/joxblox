@@ -744,20 +744,35 @@ func (l *launcher) startRecording(window fyne.Window) {
 	go l.pollRecordingStatus()
 }
 
-// stopRecording finalizes the recording, hands the aggregate to the
-// Textures sub-tab via the ui.ShowRecordingResults hook, and resets
-// the button label.
+// stopRecording finalizes the recording off the UI thread and, on
+// completion, hands the aggregate to the Textures sub-tab via the
+// ui.ShowRecordingResults hook. Recorder.Stop() blocks on
+// processingWG.Wait() while in-flight convert/parse/decode work
+// drains, which is multi-second under load — must NOT run on the
+// Fyne UI goroutine.
 func (l *launcher) stopRecording() {
-	textures := l.recorder.Stop()
 	if l.recordButton != nil {
-		l.recordButton.SetText("Record")
+		l.recordButton.SetText("Stopping…")
+		l.recordButton.Disable()
 	}
 	if l.statusLabel != nil {
-		l.statusLabel.SetText(fmt.Sprintf("Recording stopped: %d unique textures", len(textures)))
+		l.statusLabel.SetText("Stopping recording — draining in-flight captures…")
 	}
-	if ui.ShowRecordingResults != nil {
-		ui.ShowRecordingResults(textures)
-	}
+	go func() {
+		textures := l.recorder.Stop()
+		fyne.Do(func() {
+			if l.recordButton != nil {
+				l.recordButton.SetText("Record")
+				l.recordButton.Enable()
+			}
+			if l.statusLabel != nil {
+				l.statusLabel.SetText(fmt.Sprintf("Recording stopped: %d unique textures", len(textures)))
+			}
+			if ui.ShowRecordingResults != nil {
+				ui.ShowRecordingResults(textures)
+			}
+		})
+	}()
 }
 
 // pollRecordingStatus runs while a recording is active; updates the
