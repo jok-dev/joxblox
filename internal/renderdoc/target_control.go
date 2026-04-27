@@ -41,85 +41,77 @@ const (
 
 // TriggerCapture asks any RenderDoc-attached process listening on the
 // local target-control protocol to take a frame capture on the next
-// swap. Scans every port in 38920..38927, prefers a target whose name
-// looks like Roblox Studio (multiple renderdoc-injected processes can
-// coexist on the same machine), and sends TriggerCapture to it.
+// swap. The renderdoc server only allows ONE connected client at a
+// time — so the trigger has to ride on the same connection that
+// completed the handshake; opening a fresh second connection races
+// against the server's cleanup of the prior client and gets rejected
+// with "busy".
+//
+// Strategy: walk ports 38920..38927, open a connection on each one
+// in turn, do the handshake, and if the target name looks like
+// Roblox Studio send TriggerCapture immediately on that connection.
+// If we hit a non-Studio target first, drop it and try the next port.
 func TriggerCapture() error {
-	type candidate struct {
-		port   int
-		target string
-		pid    uint32
-	}
-	var candidates []candidate
 	errs := make([]string, 0, targetControlLastPort-targetControlFirstPort+1)
 	for port := targetControlFirstPort; port <= targetControlLastPort; port++ {
-		target, pid, err := probeTargetControl(port)
+		conn, target, pid, err := dialAndCompleteHandshake(port)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("port %d: %v", port, err))
 			continue
 		}
 		debug.Logf("target-control: port %d → handshake from %q pid=%d", port, target, pid)
-		candidates = append(candidates, candidate{port: port, target: target, pid: pid})
-	}
-	if len(candidates) == 0 {
-		debug.Logf("target-control: no port responded, errors: %v", errs)
-		return fmt.Errorf("no RenderDoc target listening on ports %d-%d:\n  %s",
-			targetControlFirstPort, targetControlLastPort, strings.Join(errs, "\n  "))
-	}
-	// Prefer a target whose name looks like Roblox Studio so we don't
-	// trigger captures on the wrong renderdoc-injected process.
-	chosen := candidates[0]
-	for _, c := range candidates {
-		if strings.Contains(strings.ToLower(c.target), "robloxstudio") {
-			chosen = c
-			break
+		if !strings.Contains(strings.ToLower(target), "robloxstudio") {
+			// Wrong target. Drop the connection and try the next port —
+			// don't waste our trigger on something that isn't Studio.
+			conn.Close()
+			continue
 		}
+		debug.Logf("target-control: triggering on port %d (target %q pid=%d)", port, target, pid)
+		err = sendTriggerCapture(conn)
+		conn.Close()
+		if err != nil {
+			return fmt.Errorf("trigger on port %d (%q): %w", port, target, err)
+		}
+		return nil
 	}
-	debug.Logf("target-control: triggering on port %d (target %q pid=%d)",
-		chosen.port, chosen.target, chosen.pid)
-	if err := triggerOnPort(chosen.port); err != nil {
-		return fmt.Errorf("trigger on port %d (%q): %w", chosen.port, chosen.target, err)
-	}
-	return nil
+	debug.Logf("target-control: no Studio target found, errors: %v", errs)
+	return fmt.Errorf("no Roblox Studio renderdoc target found on ports %d-%d:\n  %s",
+		targetControlFirstPort, targetControlLastPort, strings.Join(errs, "\n  "))
 }
 
-// probeTargetControl opens a connection, completes the handshake, and
-// returns the target name + PID without sending any further commands.
-// Used by the port scan to identify which renderdoc-injected process
-// is on each port.
-func probeTargetControl(port int) (string, uint32, error) {
+// dialAndCompleteHandshake opens a TCP connection, exchanges client and
+// server handshakes, and returns the still-open connection along with
+// the target's name and PID. Caller is responsible for closing the
+// returned connection.
+//
+// The connection is kept open so the caller can send commands (like
+// TriggerCapture) on the same socket that completed the handshake.
+// renderdoc only allows one connected client at a time, and reconnecting
+// races against the server's cleanup of the prior client (gets rejected
+// with ePacket_Busy), so we MUST piggyback further work on this conn.
+func dialAndCompleteHandshake(port int) (net.Conn, string, uint32, error) {
 	conn, err := dialAndHandshake(port)
 	if err != nil {
-		return "", 0, err
+		return nil, "", 0, err
 	}
-	defer conn.Close()
 	target, pid, err := readServerHandshake(conn)
 	if err != nil {
-		return "", 0, err
+		conn.Close()
+		return nil, "", 0, err
 	}
-	return target, pid, nil
+	return conn, target, pid, nil
 }
 
-// triggerOnPort opens a fresh connection, completes the handshake, then
-// sends TriggerCapture(1). A new connection per trigger keeps the state
-// machine simple — the renderdoc server treats each connect as a
-// short-lived session.
-func triggerOnPort(port int) error {
-	conn, err := dialAndHandshake(port)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	if _, _, err := readServerHandshake(conn); err != nil {
-		return err
-	}
-	triggerPayload := appendUint32(nil, 1)
-	if err := writeChunk(conn, packetTriggerCapture, triggerPayload); err != nil {
+// sendTriggerCapture writes a TriggerCapture(numFrames=1) chunk on an
+// already-handshook connection, then briefly lingers so the server's
+// reader has a chance to consume the chunk before the caller closes
+// the socket. Closing immediately after Write can race the server's
+// read on some systems.
+func sendTriggerCapture(conn net.Conn) error {
+	payload := appendUint32(nil, 1)
+	if err := writeChunk(conn, packetTriggerCapture, payload); err != nil {
 		return fmt.Errorf("write TriggerCapture: %w", err)
 	}
-	// Linger briefly so the server's reader has a chance to consume our
-	// chunk before we close the socket. Closing immediately after Write
-	// can race the server's read on some systems.
 	time.Sleep(50 * time.Millisecond)
 	return nil
 }
