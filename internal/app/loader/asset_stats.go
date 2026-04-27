@@ -14,6 +14,10 @@ func BuildAssetStatsFromPreview(assetID int64, previewResult *AssetPreviewResult
 	}
 	stats.AssetTypeID = previewResult.AssetTypeID
 	stats.AssetTypeName = strings.TrimSpace(previewResult.AssetTypeName)
+	// Stats represents the source asset's dimensions (stable across
+	// runs). Image is whatever preview actually loaded — could be a
+	// smaller thumbnail when AssetDelivery falls back. Prefer Stats so
+	// PixelCount / Width / Height reflect the source, not the preview.
 	statsInfo := previewResult.Stats
 	if statsInfo == nil {
 		statsInfo = previewResult.Image
@@ -21,13 +25,13 @@ func BuildAssetStatsFromPreview(assetID int64, previewResult *AssetPreviewResult
 	if statsInfo != nil {
 		stats.TotalBytes = statsInfo.BytesSize
 	}
-	if previewResult.Image != nil && previewResult.Image.Width > 0 && previewResult.Image.Height > 0 {
-		stats.TextureBytes = previewResult.Image.BytesSize
-		stats.PixelCount = int64(previewResult.Image.Width * previewResult.Image.Height)
-		stats.Width = previewResult.Image.Width
-		stats.Height = previewResult.Image.Height
-		stats.HasAlphaChannel = previewResult.Image.HasAlphaChannel
-		stats.NonOpaqueAlphaPixels = previewResult.Image.NonOpaqueAlphaPixels
+	if statsInfo != nil && statsInfo.Width > 0 && statsInfo.Height > 0 {
+		stats.TextureBytes = statsInfo.BytesSize
+		stats.PixelCount = int64(statsInfo.Width * statsInfo.Height)
+		stats.Width = statsInfo.Width
+		stats.Height = statsInfo.Height
+		stats.HasAlphaChannel = statsInfo.HasAlphaChannel
+		stats.NonOpaqueAlphaPixels = statsInfo.NonOpaqueAlphaPixels
 	}
 	if mesh.IsMeshAssetType(previewResult.AssetTypeID) && len(previewResult.DownloadBytes) > 0 {
 		stats.MeshBytes = stats.TotalBytes
