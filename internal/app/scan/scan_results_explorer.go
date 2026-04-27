@@ -81,12 +81,11 @@ type ScanResultsExplorer struct {
 	typeFilterSelect                 *widget.Select
 	instanceTypeFilterSelect         *widget.Select
 	propertyNameFilterSelect         *widget.Select
-	statsRowsLabel                   *widget.Label
-	statsShownLabel                  *widget.Label
 	statsFailedLabel                 *widget.Label
 	statsDuplicateLabel              *widget.Label
 	statsDuplicateSizeLabel          *widget.Label
 	statsSizeLabel                   *widget.Label
+	statsGPUMemoryLabel              *widget.Label
 	statsTrianglesLabel              *widget.Label
 	statsTotalTrianglesLabel         *widget.Label
 	searchEntry                      *widget.Entry
@@ -132,12 +131,11 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 	explorer.instanceTypeFilterSelect.SetSelected(loader.ScanFilterAllOption)
 	explorer.propertyNameFilterSelect = widget.NewSelect([]string{loader.ScanFilterAllOption}, nil)
 	explorer.propertyNameFilterSelect.SetSelected(loader.ScanFilterAllOption)
-	explorer.statsRowsLabel = widget.NewLabel("Rows: 0")
-	explorer.statsShownLabel = widget.NewLabel("Shown: 0")
 	explorer.statsFailedLabel = widget.NewLabel("Failed: 0")
 	explorer.statsDuplicateLabel = widget.NewLabel("Duplicates: 0")
 	explorer.statsDuplicateSizeLabel = widget.NewLabel("Duplicate Size: 0 B")
 	explorer.statsSizeLabel = widget.NewLabel("Shown Size: 0 B")
+	explorer.statsGPUMemoryLabel = widget.NewLabel("Shown GPU Memory: 0 B")
 	explorer.statsTrianglesLabel = widget.NewLabel("Shown Triangles: 0")
 	explorer.statsTotalTrianglesLabel = widget.NewLabel("Shown Total Triangles: 0")
 	explorer.showOnlyDuplicatesCheck = widget.NewCheck("Show only duplicates", func(checked bool) {
@@ -380,10 +378,6 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 		filterRow.Add(container.NewGridWrap(fyne.NewSize(110, 36), explorer.largeTextureThresholdEntry))
 	}
 	statsRow := container.NewHBox(
-		explorer.statsRowsLabel,
-		widget.NewSeparator(),
-		explorer.statsShownLabel,
-		widget.NewSeparator(),
 		explorer.statsFailedLabel,
 		widget.NewSeparator(),
 		explorer.statsDuplicateLabel,
@@ -391,6 +385,8 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 		explorer.statsDuplicateSizeLabel,
 		widget.NewSeparator(),
 		explorer.statsSizeLabel,
+		widget.NewSeparator(),
+		explorer.statsGPUMemoryLabel,
 		widget.NewSeparator(),
 		explorer.statsTrianglesLabel,
 		widget.NewSeparator(),
@@ -785,10 +781,9 @@ func (explorer *ScanResultsExplorer) countDuplicateBytes(hashCounts map[string]i
 }
 
 func (explorer *ScanResultsExplorer) updateStatsLabels() {
-	totalRowsCount := len(explorer.allResults)
-	shownRowsCount := len(explorer.displayResults)
 	failedRowsCount := 0
 	shownBytesTotal := 0
+	shownGPUBytesTotal := int64(0)
 	shownTrianglesTotal := uint64(0)
 	shownTotalTrianglesTotal := uint64(0)
 	for _, row := range explorer.displayResults {
@@ -802,6 +797,7 @@ func (explorer *ScanResultsExplorer) updateStatsLabels() {
 		} else if row.BytesSize > 0 {
 			shownBytesTotal += row.BytesSize
 		}
+		shownGPUBytesTotal += loader.ScanResultGPUMemoryBytes(row)
 		if row.MeshNumFaces > 0 {
 			shownTrianglesTotal += uint64(row.MeshNumFaces)
 			if row.UseCount > 0 {
@@ -809,12 +805,11 @@ func (explorer *ScanResultsExplorer) updateStatsLabels() {
 			}
 		}
 	}
-	explorer.statsRowsLabel.SetText(fmt.Sprintf("Rows: %d", totalRowsCount))
-	explorer.statsShownLabel.SetText(fmt.Sprintf("Shown: %d", shownRowsCount))
 	explorer.statsFailedLabel.SetText(fmt.Sprintf("Failed: %d", failedRowsCount))
 	explorer.statsDuplicateLabel.SetText(fmt.Sprintf("Duplicates: %d", explorer.duplicateRowsCount))
 	explorer.statsDuplicateSizeLabel.SetText(fmt.Sprintf("Duplicate Size: %s", format.FormatSizeAuto(explorer.duplicateBytesTotal)))
 	explorer.statsSizeLabel.SetText(fmt.Sprintf("Shown Size: %s", format.FormatSizeAuto(shownBytesTotal)))
+	explorer.statsGPUMemoryLabel.SetText(fmt.Sprintf("Shown GPU Memory: %s", format.FormatSizeAuto64(shownGPUBytesTotal)))
 	explorer.statsTrianglesLabel.SetText(fmt.Sprintf("Shown Triangles: %d", shownTrianglesTotal))
 	explorer.statsTotalTrianglesLabel.SetText(fmt.Sprintf("Shown Total Triangles: %d", shownTotalTrianglesTotal))
 }
