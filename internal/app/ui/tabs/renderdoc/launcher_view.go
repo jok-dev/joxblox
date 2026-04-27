@@ -7,10 +7,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"joxblox/internal/app/ui"
 	"joxblox/internal/renderdoc"
 
 	"fyne.io/fyne/v2"
@@ -70,6 +72,15 @@ type launcher struct {
 	// studioRunning is true between a successful Launch and the launched
 	// Studio process exiting. Drives the Capture button's enable state.
 	studioRunning bool
+
+	// Recording-mode state. recorder is constructed once on launcher init.
+	// recordButton + intervalEntry + statusLabel are surfaced from the
+	// closure-scoped construction below so the start/stop helpers can
+	// reach them without threading them through every callsite.
+	recorder      *renderdoc.Recorder
+	recordButton  *widget.Button
+	intervalEntry *widget.Entry
+	statusLabel   *widget.Label
 
 	header        *widget.Label
 	list          *widget.List
@@ -132,12 +143,14 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 		loadedBySubTab: make(map[int]string),
 		loadCapture:    loadCapture,
 		autoLoadLatest: loadAutoLoadPreference(),
+		recorder:       renderdoc.NewRecorder(),
 	}
 
 	studioLabel := widget.NewLabel(formatStudioVersionLabel(LoadStudioPath()))
 
 	statusLabel := widget.NewLabel("Ready")
 	statusLabel.Wrapping = fyne.TextWrapWord
+	l.statusLabel = statusLabel
 
 	l.header = widget.NewLabel("Captures: 0")
 
@@ -247,6 +260,22 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 		}
 	})
 	captureButton.Disable()
+
+	intervalEntry := widget.NewEntry()
+	intervalEntry.SetText("1.0")
+	intervalEntry.SetPlaceHolder("Interval (s)")
+	l.intervalEntry = intervalEntry
+
+	var recordButton *widget.Button
+	recordButton = widget.NewButton("Record", func() {
+		if l.recorder.IsActive() {
+			l.stopRecording()
+		} else {
+			l.startRecording(window)
+		}
+	})
+	recordButton.Disable()
+	l.recordButton = recordButton
 	launchButton = widget.NewButton("Launch with RenderDoc", func() {
 		studioPath := strings.TrimSpace(LoadStudioPath())
 		studioLabel.SetText(formatStudioVersionLabel(studioPath))
@@ -284,6 +313,9 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 					if captureButton != nil {
 						captureButton.Enable()
 					}
+					if recordButton != nil {
+						recordButton.Enable()
+					}
 				}
 			})
 
@@ -297,6 +329,12 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 						l.mu.Unlock()
 						if captureButton != nil {
 							captureButton.Disable()
+						}
+						if recordButton != nil {
+							recordButton.Disable()
+						}
+						if l.recorder != nil && l.recorder.IsActive() {
+							l.stopRecording()
 						}
 					})
 				}()
@@ -333,7 +371,11 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	// there's nothing on disk to watch and the captures list stays at 0.
 
 	topRow := container.NewBorder(nil, nil, studioLabel,
-		container.NewHBox(openButton, launchButton, captureButton),
+		container.NewHBox(
+			openButton, launchButton, captureButton, recordButton,
+			widget.NewLabel("Interval (s):"),
+			container.NewGridWrap(fyne.NewSize(60, 36), intervalEntry),
+		),
 		statusLabel,
 	)
 	capturesHeaderRow := container.NewBorder(nil, nil, nil,
@@ -403,7 +445,20 @@ func (l *launcher) refreshCaptures() {
 		l.list.Refresh()
 	})
 
-	if autoLoad && !firstScan && loadCapture != nil {
+	if l.recorder != nil && l.recorder.IsActive() {
+		// While recording, every freshly-arrived .rdc in the session dir
+		// (NOT files already inside recording-<id>/) routes to the
+		// recorder. The auto-load path is bypassed entirely.
+		for _, item := range items {
+			if _, existed := previousPaths[item.Path]; existed {
+				continue
+			}
+			if filepath.Dir(item.Path) != l.sessionDir {
+				continue
+			}
+			go l.recorder.ProcessCapture(item.Path)
+		}
+	} else if autoLoad && !firstScan && loadCapture != nil {
 		if newest, ok := newestFreshAddition(items, previousPaths); ok {
 			pathToLoad := newest.Path
 			// fsnotify fires on file create before renderdoc has finished
@@ -648,4 +703,84 @@ func SaveStudioPath(path string) {
 		return
 	}
 	currentApp.Preferences().SetString(preferenceKeyRenderDocStudioPath, strings.TrimSpace(path))
+}
+
+// startRecording enables the recorder, kicks off the timer goroutine
+// that fires F12 every interval, and starts the status-polling
+// goroutine. Caller must guarantee Studio is running (the Record
+// button's enable state enforces this).
+func (l *launcher) startRecording(window fyne.Window) {
+	dir, err := l.ensureSessionDir()
+	if err != nil {
+		fyneDialog.ShowError(err, window)
+		return
+	}
+	intervalSec, parseErr := strconv.ParseFloat(strings.TrimSpace(l.intervalEntry.Text), 64)
+	if parseErr != nil || intervalSec < 0.25 || intervalSec > 10.0 {
+		fyneDialog.ShowError(fmt.Errorf("invalid interval (use 0.25-10.0 seconds): %v", parseErr), window)
+		return
+	}
+	interval := time.Duration(intervalSec * float64(time.Second))
+	if err := l.recorder.Start(dir, interval); err != nil {
+		fyneDialog.ShowError(err, window)
+		return
+	}
+	l.recordButton.SetText("Stop Recording")
+
+	stop := l.recorder.TriggerStop()
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				_ = renderdoc.TriggerCapture()
+			}
+		}
+	}()
+
+	go l.pollRecordingStatus()
+}
+
+// stopRecording finalizes the recording, hands the aggregate to the
+// Textures sub-tab via the ui.ShowRecordingResults hook, and resets
+// the button label.
+func (l *launcher) stopRecording() {
+	textures := l.recorder.Stop()
+	if l.recordButton != nil {
+		l.recordButton.SetText("Record")
+	}
+	if l.statusLabel != nil {
+		l.statusLabel.SetText(fmt.Sprintf("Recording stopped: %d unique textures", len(textures)))
+	}
+	if ui.ShowRecordingResults != nil {
+		ui.ShowRecordingResults(textures)
+	}
+}
+
+// pollRecordingStatus runs while a recording is active; updates the
+// launcher's status label every 500ms with live counters.
+func (l *launcher) pollRecordingStatus() {
+	for {
+		snap := l.recorder.Snapshot()
+		if !snap.Active {
+			return
+		}
+		fyne.Do(func() {
+			text := fmt.Sprintf("Recording: %d captures, %d unique textures",
+				snap.CaptureCount, snap.UniqueTextures)
+			if snap.QueueDepth > 0 {
+				text += fmt.Sprintf(" (queue: %d)", snap.QueueDepth)
+			}
+			if snap.DroppedCount > 0 {
+				text += fmt.Sprintf(" (%d dropped — backlog)", snap.DroppedCount)
+			}
+			if l.statusLabel != nil {
+				l.statusLabel.SetText(text)
+			}
+		})
+		time.Sleep(500 * time.Millisecond)
+	}
 }
