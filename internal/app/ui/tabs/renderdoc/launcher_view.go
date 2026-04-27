@@ -382,11 +382,47 @@ func (l *launcher) refreshCaptures() {
 	if autoLoad && !firstScan && loadCapture != nil {
 		if newest, ok := newestFreshAddition(items, previousPaths); ok {
 			pathToLoad := newest.Path
-			fyne.Do(func() {
-				loadCapture(pathToLoad)
-			})
+			// fsnotify fires on file create before renderdoc has finished
+			// writing the .rdc. Loading too early hits "unexpected EOF" /
+			// "invalid capture" failures from renderdoccmd convert. Wait
+			// off-thread for the file size to stop growing, then dispatch
+			// the load on the UI thread.
+			go func() {
+				if waitForFileStable(pathToLoad, 250*time.Millisecond, 2, 30*time.Second) {
+					fyne.Do(func() {
+						loadCapture(pathToLoad)
+					})
+				}
+			}()
 		}
 	}
+}
+
+// waitForFileStable blocks until the file at path has the same non-zero
+// size for requiredStablePolls consecutive polls, or returns false on
+// timeout. Used to detect "the writer is done" without an explicit
+// signal — renderdoc just writes and closes, no rename or temp file.
+func waitForFileStable(path string, pollInterval time.Duration, requiredStablePolls int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	var prevSize int64 = -1
+	stable := 0
+	for time.Now().Before(deadline) {
+		info, err := os.Stat(path)
+		if err == nil {
+			currentSize := info.Size()
+			if currentSize > 0 && currentSize == prevSize {
+				stable++
+				if stable >= requiredStablePolls {
+					return true
+				}
+			} else {
+				stable = 0
+				prevSize = currentSize
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return false
 }
 
 // newestFreshAddition picks the newest entry whose path wasn't in the previous
