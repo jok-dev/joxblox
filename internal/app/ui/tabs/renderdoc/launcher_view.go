@@ -256,13 +256,13 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	var launchButton *widget.Button
 	var captureButton *widget.Button
 	captureButton = widget.NewButton("Capture (F12)", func() {
-		debug.Logf("renderdoc capture button clicked")
+		debug.Logf("capture button clicked")
 		if err := renderdoc.TriggerCapture(); err != nil {
-			debug.Logf("renderdoc capture trigger failed: %s", err.Error())
+			debug.Logf("capture trigger failed: %s", err.Error())
 			fyneDialog.ShowError(err, window)
 			return
 		}
-		debug.Logf("renderdoc capture trigger sent (F12)")
+		debug.Logf("capture trigger succeeded")
 	})
 	captureButton.Disable()
 

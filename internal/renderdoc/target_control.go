@@ -19,7 +19,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"time"
+
+	"joxblox/internal/debug"
 )
 
 const (
@@ -39,19 +42,21 @@ const (
 // TriggerCapture asks any RenderDoc-attached process listening on the
 // local target-control protocol to take a frame capture on the next
 // swap. Tries each port in 38920..38927 (renderdoc's reserved range);
-// returns nil on the first successful trigger. Returns an error when
-// no target accepts a connection within the dial timeout.
+// returns nil on the first successful trigger. Returns an error
+// summary when no target accepts a connection or completes a handshake.
 func TriggerCapture() error {
-	var lastErr error
+	errs := make([]string, 0, targetControlLastPort-targetControlFirstPort+1)
 	for port := targetControlFirstPort; port <= targetControlLastPort; port++ {
 		err := triggerCaptureOnPort(port)
 		if err == nil {
+			debug.Logf("target-control: port %d → TriggerCapture sent", port)
 			return nil
 		}
-		lastErr = err
+		errs = append(errs, fmt.Sprintf("port %d: %v", port, err))
 	}
-	return fmt.Errorf("no RenderDoc target listening on ports %d-%d (last error: %v)",
-		targetControlFirstPort, targetControlLastPort, lastErr)
+	debug.Logf("target-control: no port worked, errors: %v", errs)
+	return fmt.Errorf("no RenderDoc target accepted on ports %d-%d:\n  %s",
+		targetControlFirstPort, targetControlLastPort, strings.Join(errs, "\n  "))
 }
 
 func triggerCaptureOnPort(port int) error {
