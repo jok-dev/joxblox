@@ -14,7 +14,7 @@ import (
 
 const (
 	recorderMaxQueueDepth = 20
-	recorderWorkerSlots   = 2
+	recorderWorkerSlots   = 4
 	recorderMaxErrorQueue = 5
 )
 
