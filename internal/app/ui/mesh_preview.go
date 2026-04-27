@@ -51,6 +51,11 @@ var GetPrimaryWindow func() fyne.Window
 var LoadMouseLookSensitivity func() float64
 var GetRepositoryRootPath func() (string, error)
 
+// OpenSingleAsset asks the main app to switch to the Single Asset tab
+// and start loading the given asset ID. Set by app.go at startup;
+// callers must nil-check.
+var OpenSingleAsset func(assetID int64)
+
 // PrimaryWindow returns GetPrimaryWindow when it is set and non-nil, otherwise the first Fyne window.
 func PrimaryWindow() fyne.Window {
 	if GetPrimaryWindow != nil {

@@ -53,10 +53,13 @@ func capturesRootDirectory() string {
 type launcher struct {
 	canvas fyne.CanvasObject
 
-	// sessionDir is the per-app-launch directory we tell renderdoccmd to
-	// write captures into via `-c`. Created once when the launcher is
-	// constructed; old sessions' subdirs stay around under capturesRoot.
-	sessionDir string
+	// sessionDir is the per-app-launch directory path we tell renderdoccmd
+	// to write captures into via `-c`. Computed eagerly but not created on
+	// disk until the user clicks Open folder or Launch with RenderDoc;
+	// ensureSessionDir() handles the lazy mkdir + fsnotify watcher start.
+	sessionDir         string
+	sessionDirOnceErr  error
+	sessionDirOnce     sync.Once
 
 	mu              sync.Mutex
 	captures        []captureEntry
@@ -64,6 +67,9 @@ type launcher struct {
 	activeSubTabIdx int
 	autoLoadLatest  bool
 	firstScanDone   bool
+	// studioRunning is true between a successful Launch and the launched
+	// Studio process exiting. Drives the Capture button's enable state.
+	studioRunning bool
 
 	header        *widget.Label
 	list          *widget.List
@@ -101,14 +107,28 @@ func (l *launcher) activeLoadedPath() string {
 	return l.loadedBySubTab[l.activeSubTabIdx]
 }
 
+// ensureSessionDir creates the per-launch session directory on disk
+// (idempotent) and starts the fsnotify watcher exactly once. Call from
+// any code path that's about to need the directory — Open folder,
+// Launch with RenderDoc, etc. Returns the dir path on success.
+func (l *launcher) ensureSessionDir() (string, error) {
+	l.sessionDirOnce.Do(func() {
+		if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
+			l.sessionDirOnceErr = err
+			return
+		}
+		startCaptureFolderWatcher(l.sessionDir, l.refreshLister)
+		l.refreshLister()
+	})
+	return l.sessionDir, l.sessionDirOnceErr
+}
+
 // newLauncher builds the launcher row. loadCapture is invoked when the user
 // clicks Load on a list row; it should load the given path into whichever
 // sub-tab is active.
 func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
-	sessionDir := newSessionCapturesDir()
-
 	l := &launcher{
-		sessionDir:     sessionDir,
+		sessionDir:     pickSessionCapturesDir(),
 		loadedBySubTab: make(map[int]string),
 		loadCapture:    loadCapture,
 		autoLoadLatest: loadAutoLoadPreference(),
@@ -201,11 +221,12 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	}
 
 	openFolderButton := widget.NewButton("Open folder", func() {
-		if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
+		dir, err := l.ensureSessionDir()
+		if err != nil {
 			fyneDialog.ShowError(err, window)
 			return
 		}
-		if err := exec.Command("explorer", l.sessionDir).Start(); err != nil {
+		if err := exec.Command("explorer", dir).Start(); err != nil {
 			fyneDialog.ShowError(fmt.Errorf("open captures folder: %w", err), window)
 		}
 	})
@@ -219,6 +240,13 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	autoLoadCheck.SetChecked(l.autoLoadLatest)
 
 	var launchButton *widget.Button
+	var captureButton *widget.Button
+	captureButton = widget.NewButton("Capture (F12)", func() {
+		if err := renderdoc.TriggerCapture(); err != nil {
+			fyneDialog.ShowError(err, window)
+		}
+	})
+	captureButton.Disable()
 	launchButton = widget.NewButton("Launch with RenderDoc", func() {
 		studioPath := strings.TrimSpace(LoadStudioPath())
 		studioLabel.SetText(formatStudioVersionLabel(studioPath))
@@ -232,11 +260,12 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 			return
 		}
 
-		if err := os.MkdirAll(l.sessionDir, 0o755); err != nil {
+		dir, err := l.ensureSessionDir()
+		if err != nil {
 			fyneDialog.ShowError(fmt.Errorf("create captures dir: %w", err), window)
 			return
 		}
-		captureTemplate := filepath.Join(l.sessionDir, captureFileStem)
+		captureTemplate := filepath.Join(dir, captureFileStem)
 
 		launchButton.Disable()
 		statusLabel.SetText("Launching…")
@@ -249,13 +278,27 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 					fyneDialog.ShowError(err, window)
 				} else {
 					statusLabel.SetText(fmt.Sprintf("Launched (PID %d)", cmd.Process.Pid))
+					l.mu.Lock()
+					l.studioRunning = true
+					l.mu.Unlock()
+					if captureButton != nil {
+						captureButton.Enable()
+					}
 				}
 			})
 
 			if cmd != nil {
 				go func() {
 					_ = cmd.Wait()
-					fyne.Do(func() { statusLabel.SetText("Ready") })
+					fyne.Do(func() {
+						statusLabel.SetText("Ready")
+						l.mu.Lock()
+						l.studioRunning = false
+						l.mu.Unlock()
+						if captureButton != nil {
+							captureButton.Disable()
+						}
+					})
 				}()
 			}
 
@@ -285,10 +328,12 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 		}
 	})
 
-	startCaptureFolderWatcher(l.sessionDir, l.refreshLister)
+	// Watcher + first refresh fire from ensureSessionDir() the first time
+	// the user clicks Open folder or Launch with RenderDoc; until then
+	// there's nothing on disk to watch and the captures list stays at 0.
 
 	topRow := container.NewBorder(nil, nil, studioLabel,
-		container.NewHBox(openButton, launchButton),
+		container.NewHBox(openButton, launchButton, captureButton),
 		statusLabel,
 	)
 	capturesHeaderRow := container.NewBorder(nil, nil, nil,
@@ -299,17 +344,15 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	return l
 }
 
-// newSessionCapturesDir creates a fresh per-app-launch subdir under
-// capturesRoot. Subdir name is timestamp-based so it's human-readable when
-// the user opens the folder.
-func newSessionCapturesDir() string {
+// pickSessionCapturesDir picks a fresh per-app-launch directory path
+// under capturesRoot but does NOT create it on disk — the user might
+// never click anything that needs it, and we shouldn't pollute their
+// temp dir with empty session folders just for opening the tab.
+// ensureSessionDir creates it lazily on first need.
+func pickSessionCapturesDir() string {
 	root := capturesRootDirectory()
 	stamp := time.Now().Format("20060102-150405")
-	dir := filepath.Join(root, "session-"+stamp)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return root
-	}
-	return dir
+	return filepath.Join(root, "session-"+stamp)
 }
 
 // refreshCaptures re-scans the session captures dir, sorts newest-first, and
@@ -363,11 +406,47 @@ func (l *launcher) refreshCaptures() {
 	if autoLoad && !firstScan && loadCapture != nil {
 		if newest, ok := newestFreshAddition(items, previousPaths); ok {
 			pathToLoad := newest.Path
-			fyne.Do(func() {
-				loadCapture(pathToLoad)
-			})
+			// fsnotify fires on file create before renderdoc has finished
+			// writing the .rdc. Loading too early hits "unexpected EOF" /
+			// "invalid capture" failures from renderdoccmd convert. Wait
+			// off-thread for the file size to stop growing, then dispatch
+			// the load on the UI thread.
+			go func() {
+				if waitForFileStable(pathToLoad, 250*time.Millisecond, 2, 30*time.Second) {
+					fyne.Do(func() {
+						loadCapture(pathToLoad)
+					})
+				}
+			}()
 		}
 	}
+}
+
+// waitForFileStable blocks until the file at path has the same non-zero
+// size for requiredStablePolls consecutive polls, or returns false on
+// timeout. Used to detect "the writer is done" without an explicit
+// signal — renderdoc just writes and closes, no rename or temp file.
+func waitForFileStable(path string, pollInterval time.Duration, requiredStablePolls int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	var prevSize int64 = -1
+	stable := 0
+	for time.Now().Before(deadline) {
+		info, err := os.Stat(path)
+		if err == nil {
+			currentSize := info.Size()
+			if currentSize > 0 && currentSize == prevSize {
+				stable++
+				if stable >= requiredStablePolls {
+					return true
+				}
+			} else {
+				stable = 0
+				prevSize = currentSize
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return false
 }
 
 // newestFreshAddition picks the newest entry whose path wasn't in the previous

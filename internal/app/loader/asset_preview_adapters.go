@@ -102,17 +102,17 @@ func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResu
 	if meshFaces > 0 && result.TotalBytesSize > 0 {
 		result.MeshBytes = result.TotalBytesSize
 	}
+	// Source-of-truth pixel/alpha info comes from statsInfo
+	// (= previewResult.Stats with Image as a fallback). Don't overwrite
+	// with previewResult.Image alone — when AssetDelivery falls back to
+	// a thumbnail, Image's dimensions are the thumbnail's (~150×150)
+	// instead of the asset's, which made Shown GPU Memory swing wildly
+	// between runs depending on which fetch path won.
 	if statsInfo.Width > 0 && statsInfo.Height > 0 {
 		result.PixelCount = int64(statsInfo.Width * statsInfo.Height)
 		result.TextureBytes = statsInfo.BytesSize
 		result.HasAlphaChannel = statsInfo.HasAlphaChannel
 		result.NonOpaqueAlphaPixels = statsInfo.NonOpaqueAlphaPixels
-	}
-	if previewResult.Image != nil && previewResult.Image.Width > 0 && previewResult.Image.Height > 0 {
-		result.PixelCount = int64(previewResult.Image.Width * previewResult.Image.Height)
-		result.TextureBytes = previewResult.Image.BytesSize
-		result.HasAlphaChannel = previewResult.Image.HasAlphaChannel
-		result.NonOpaqueAlphaPixels = previewResult.Image.NonOpaqueAlphaPixels
 	}
 	result.Resource = resource
 	result.DownloadBytes = append([]byte(nil), previewResult.DownloadBytes...)

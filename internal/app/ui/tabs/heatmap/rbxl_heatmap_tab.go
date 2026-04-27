@@ -136,6 +136,7 @@ type heatMetricMaximums struct {
 	TotalBytes         float64
 	TextureBytes       float64
 	TexturePixels      float64
+	GPUTextureMemory   float64
 	MeshBytes          float64
 	MeshTriangles      float64
 	UniqueTextureCount float64
@@ -151,6 +152,7 @@ const (
 	heatMetricTotalBytes         rbxlHeatMetric = "Total Byte Size"
 	heatMetricTextureBytes       rbxlHeatMetric = "Texture Bytes"
 	heatMetricTexturePixels      rbxlHeatMetric = "Texture Pixels"
+	heatMetricGPUTextureMemory   rbxlHeatMetric = "GPU Texture Memory"
 	heatMetricMeshBytes          rbxlHeatMetric = "Mesh Bytes"
 	heatMetricMeshTriangles      rbxlHeatMetric = "Mesh Triangles"
 	heatMetricUniqueTextureCount rbxlHeatMetric = "Unique Texture Count"
@@ -234,6 +236,7 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		string(heatMetricTotalBytes),
 		string(heatMetricTextureBytes),
 		string(heatMetricTexturePixels),
+		string(heatMetricGPUTextureMemory),
 		string(heatMetricMeshBytes),
 		string(heatMetricMeshTriangles),
 		string(heatMetricUniqueTextureCount),
@@ -1643,6 +1646,12 @@ func formatHeatmapMetricSummary(cell heatmap.Cell, heatMetric rbxlHeatMetric) st
 			return fmt.Sprintf("Heat Delta: Texture Pixels = %s", format.FormatSignedIntCommas(cell.Stats.PixelCount))
 		}
 		return fmt.Sprintf("Heat: Texture Pixels = %s", format.FormatIntCommas(cell.Stats.PixelCount))
+	case heatMetricGPUTextureMemory:
+		gpuBytes := int64(cellGPUTextureBytes(cell.Stats))
+		if isDiff {
+			return fmt.Sprintf("Heat Delta: GPU Texture Memory = %s", format.FormatSignedSizeAuto(gpuBytes))
+		}
+		return fmt.Sprintf("Heat: GPU Texture Memory = %s", format.FormatSizeAuto64(gpuBytes))
 	case heatMetricMeshBytes:
 		if isDiff {
 			return fmt.Sprintf("Heat Delta: Mesh Bytes = %s", format.FormatSignedSizeAuto(cell.Stats.MeshBytes))
@@ -1686,6 +1695,20 @@ func formatHeatmapMetricSummary(cell heatmap.Cell, heatMetric rbxlHeatMetric) st
 	}
 }
 
+// cellGPUTextureBytes returns the estimated on-GPU texture footprint
+// (with mip chain) summed across a cell's contributing assets. Uses the
+// per-cell BC1/BC3 pixel splits the cell already tracks, so the value
+// matches what the engine would actually allocate for the textures
+// referenced in this region.
+func cellGPUTextureBytes(stats heatmap.Totals) float64 {
+	const bc1BytesPerPixel = 0.5
+	const bc3BytesPerPixel = 1.0
+	const gpuMipChainFactor = 4.0 / 3.0
+	bc1 := float64(stats.BC1PixelCount) * bc1BytesPerPixel
+	bc3 := float64(stats.BC3PixelCount) * bc3BytesPerPixel
+	return (bc1 + bc3) * gpuMipChainFactor
+}
+
 func heatMetricValue(cell heatmap.Cell, heatMetric rbxlHeatMetric, maximums heatMetricMaximums) float64 {
 	switch heatMetric {
 	case heatMetricTotalBytes:
@@ -1694,6 +1717,8 @@ func heatMetricValue(cell heatmap.Cell, heatMetric rbxlHeatMetric, maximums heat
 		return float64(cell.Stats.TextureBytes)
 	case heatMetricTexturePixels:
 		return float64(cell.Stats.PixelCount)
+	case heatMetricGPUTextureMemory:
+		return cellGPUTextureBytes(cell.Stats)
 	case heatMetricMeshBytes:
 		return float64(cell.Stats.MeshBytes)
 	case heatMetricMeshTriangles:
@@ -1744,6 +1769,7 @@ func buildHeatMetricMaximums(cells []heatmap.Cell) heatMetricMaximums {
 		maximums.TotalBytes = math.Max(maximums.TotalBytes, math.Abs(float64(cell.Stats.TotalBytes)))
 		maximums.TextureBytes = math.Max(maximums.TextureBytes, math.Abs(float64(cell.Stats.TextureBytes)))
 		maximums.TexturePixels = math.Max(maximums.TexturePixels, math.Abs(float64(cell.Stats.PixelCount)))
+		maximums.GPUTextureMemory = math.Max(maximums.GPUTextureMemory, math.Abs(cellGPUTextureBytes(cell.Stats)))
 		maximums.MeshBytes = math.Max(maximums.MeshBytes, math.Abs(float64(cell.Stats.MeshBytes)))
 		maximums.MeshTriangles = math.Max(maximums.MeshTriangles, math.Abs(float64(cell.Stats.TriangleCount)))
 		maximums.UniqueTextureCount = math.Max(maximums.UniqueTextureCount, math.Abs(float64(cell.Stats.UniqueTextureCount)))
@@ -1767,6 +1793,8 @@ func formatHeatmapDeltaSummary(cell heatmap.Cell, heatMetric rbxlHeatMetric) str
 		return format.FormatSignedSizeAuto(cell.Stats.TextureBytes)
 	case heatMetricTexturePixels:
 		return format.FormatSignedIntCommas(cell.Stats.PixelCount)
+	case heatMetricGPUTextureMemory:
+		return format.FormatSignedSizeAuto(int64(cellGPUTextureBytes(cell.Stats)))
 	case heatMetricMeshBytes:
 		return format.FormatSignedSizeAuto(cell.Stats.MeshBytes)
 	case heatMetricMeshTriangles:

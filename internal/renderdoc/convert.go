@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"joxblox/internal/procutil"
 )
 
 // ConvertToXML runs `renderdoccmd convert` on the given .rdc file, producing a
@@ -41,6 +43,7 @@ func ConvertToXML(rdcPath string) (string, error) {
 		"-o", outputPath,
 		"-c", "zip.xml",
 	)
+	procutil.HideWindow(cmd)
 	output, runErr := cmd.CombinedOutput()
 	if runErr != nil {
 		_ = os.RemoveAll(tempDir)

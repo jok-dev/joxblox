@@ -8,6 +8,7 @@
 - Mesh previews now render with proper Phong lighting (key + camera-relative fill + rim) and contact shadows from a fixed key light, replacing the previous flat unlit silhouette
 - Three viewmodes selectable from a small toolbar above every 3D mesh preview: `Lit` (neutral clay shading), `Color` (per-vertex colors), `Normals` (RGB-mapped surface normals for triangulation/seam debugging)
 - Subtle ground grid for spatial reference in 3D previews
+- Asset-ID mapping in the RenderDoc tab — when a place file is loaded in the Scan tab, the Materials and Textures sub-tabs show a `Studio Asset` column identifying captured textures by perceptual-hash match, plus a clickable "Open in Single Asset" button in the preview pane
 
 ## v1.1.0 - 2026-03-26
 

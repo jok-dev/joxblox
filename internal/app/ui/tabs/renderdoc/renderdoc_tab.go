@@ -14,6 +14,10 @@ import (
 	"strconv"
 	"strings"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
+	"joxblox/internal/assetmatch"
+	"joxblox/internal/debug"
 	"joxblox/internal/format"
 	"joxblox/internal/renderdoc"
 
@@ -47,9 +51,17 @@ type renderdocTabState struct {
 	// sourceImage is the most recently decoded preview, kept around so the
 	// channel toggles can re-mask it without re-decoding from the capture.
 	sourceImage image.Image
+	// corpus + match overlay populated when a Scan tab scan completes
+	// AND a capture is loaded. Both can be nil — the column shows "—" then.
+	corpus                  *assetmatch.TextureCorpus
+	matchByTexID            map[string]int64   // best match per texture resource ID
+	matchAllByTexID         map[string][]int64 // all candidates within threshold
+	openInSingleAssetButton *widget.Button     // shown when current texture has a match
+	corpusBuildInFlight     bool               // a goroutine is currently rebuilding the corpus
+	corpusRebuildPending    bool               // another rebuild was requested while one was in flight
 }
 
-var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM"}
+var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM", "Studio Asset"}
 
 // NewRenderDocTab builds the RenderDoc tab. A launcher row sits above two
 // sub-tabs: Textures (existing UI) and Meshes (new). The launcher's capture
@@ -108,11 +120,13 @@ func NewRenderDocTab(window fyne.Window) fyne.CanvasObject {
 // dialogs shown from background goroutines.
 func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
 	state := &renderdocTabState{
-		sortColumn:     "VRAM",
-		sortDescending: true,
-		selectedRow:    -1,
-		channelMode:    channelModeAll,
-		hideNonAssets:  true,
+		sortColumn:      "VRAM",
+		sortDescending:  true,
+		selectedRow:     -1,
+		channelMode:     channelModeAll,
+		hideNonAssets:   true,
+		matchByTexID:    map[string]int64{},
+		matchAllByTexID: map[string][]int64{},
 	}
 
 	pathLabel := widget.NewLabel("No capture loaded.")
@@ -195,7 +209,21 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 		modeButtons[0], modeButtons[1], modeButtons[2], modeButtons[3], modeButtons[4],
 	)
 
-	previewHeader := container.NewVBox(channelToggleRow, previewInfoLabel)
+	openInSingleAssetButton := widget.NewButton("Open in Single Asset", func() {
+		if state.selectedRow < 0 || state.selectedRow >= len(state.displayTextures) {
+			return
+		}
+		tex := state.displayTextures[state.selectedRow]
+		id, ok := state.matchByTexID[tex.ResourceID]
+		if !ok || ui.OpenSingleAsset == nil {
+			return
+		}
+		ui.OpenSingleAsset(id)
+	})
+	openInSingleAssetButton.Hide()
+	state.openInSingleAssetButton = openInSingleAssetButton
+
+	previewHeader := container.NewVBox(channelToggleRow, previewInfoLabel, openInSingleAssetButton)
 	previewPane := container.NewBorder(previewHeader, nil, nil, nil, previewCanvas)
 
 	var table *widget.Table
@@ -215,7 +243,7 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 				label.SetText("")
 				return
 			}
-			label.SetText(columnValue(state.displayTextures[id.Row], columnHeaders[id.Col]))
+			label.SetText(columnValue(state, state.displayTextures[id.Row], columnHeaders[id.Col]))
 		},
 	)
 	table.CreateHeader = func() fyne.CanvasObject {
@@ -322,6 +350,7 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 		state.sortDescending = true
 		state.filterText = strings.TrimSpace(filterEntry.Text)
 		state.selectedRow = -1
+		recomputeTextureMatches(state)
 		applySortAndFilter(state)
 		pathLabel.SetText(fmt.Sprintf("Loaded: %s", loadedPath))
 		assetsOnlyBytes, assetsOnlyCount := computeAssetsOnlyTotals(report.Textures)
@@ -365,7 +394,72 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 	// scanning the list.
 	split := container.NewHSplit(interactiveTable, previewPane)
 	split.Offset = 0.65
+
+	// Subscribe to scan-completion events so the Studio Asset column gets
+	// populated when the user scans a place file in the Scan tab. The
+	// unsubscribe is dropped intentionally — this sub-tab lives for the
+	// whole app session, so leaking the subscription is fine.
+	_ = loader.SubscribeScanCompleted(func() {
+		requestTextureCorpusRebuild(state, table)
+	})
+	if existing := loader.CurrentScan(); len(existing) > 0 {
+		requestTextureCorpusRebuild(state, table)
+	}
+
 	return container.NewBorder(header, footer, nil, nil, split), loadFromPath
+}
+
+// requestTextureCorpusRebuild kicks off a corpus build for the current
+// scan results. If a build is already in flight, marks "rebuild needed
+// when done" instead of spawning a parallel build — protects against
+// the publish bus firing many times in quick succession (which used to
+// saturate CPU + I/O). Must be called on the UI thread.
+func requestTextureCorpusRebuild(state *renderdocTabState, table *widget.Table) {
+	if state.corpusBuildInFlight {
+		state.corpusRebuildPending = true
+		return
+	}
+	state.corpusBuildInFlight = true
+	scan := loader.CurrentScan()
+	go func() {
+		corpus, err := assetmatch.BuildTextureCorpus(scan, nil)
+		fyne.Do(func() {
+			state.corpusBuildInFlight = false
+			if err != nil {
+				debug.Logf("textures sub-tab: corpus build failed: %s", err.Error())
+			} else {
+				state.corpus = corpus
+				recomputeTextureMatches(state)
+				table.Refresh()
+			}
+			if state.corpusRebuildPending {
+				state.corpusRebuildPending = false
+				requestTextureCorpusRebuild(state, table)
+			}
+		})
+	}()
+}
+
+// recomputeTextureMatches walks the loaded report's textures, queries the
+// corpus, and populates the per-texture match overlay. No-op when either
+// side isn't present yet.
+func recomputeTextureMatches(state *renderdocTabState) {
+	state.matchByTexID = map[string]int64{}
+	state.matchAllByTexID = map[string][]int64{}
+	if state.corpus == nil || state.report == nil {
+		return
+	}
+	for _, tex := range state.report.Textures {
+		if tex.DHash == 0 {
+			continue
+		}
+		matches := state.corpus.Match(tex.DHash)
+		if len(matches) == 0 {
+			continue
+		}
+		state.matchByTexID[tex.ResourceID] = matches[0]
+		state.matchAllByTexID[tex.ResourceID] = matches
+	}
 }
 
 // arrowSelectTable wraps widget.Table so Up/Down arrow keys actually change
@@ -435,7 +529,14 @@ func triggerPreview(state *renderdocTabState, texture renderdoc.TextureInfo, pre
 				previewCanvas.Refresh()
 				return
 			}
-			infoLabel.SetText(previewInfoText(texture, img))
+			infoLabel.SetText(previewInfoText(state, texture, img))
+			if state.openInSingleAssetButton != nil {
+				if _, ok := state.matchByTexID[texture.ResourceID]; ok {
+					state.openInSingleAssetButton.Show()
+				} else {
+					state.openInSingleAssetButton.Hide()
+				}
+			}
 			state.sourceImage = img
 			previewCanvas.Image = applyChannelMode(img, state.channelMode)
 			previewCanvas.Refresh()
@@ -656,7 +757,7 @@ func singleChannelGrayscale(source image.Image, channelIndex int) image.Image {
 	return out
 }
 
-func previewInfoText(texture renderdoc.TextureInfo, img image.Image) string {
+func previewInfoText(state *renderdocTabState, texture renderdoc.TextureInfo, img image.Image) string {
 	bounds := img.Bounds()
 	// Prefer the precomputed hash set at load time so identical textures
 	// always read as identical strings. Fall back to live hashing for
@@ -665,7 +766,7 @@ func previewInfoText(texture renderdoc.TextureInfo, img image.Image) string {
 	if hash == "" {
 		hash = renderdoc.HashImagePixels(img)
 	}
-	return fmt.Sprintf("%s · %s · %d×%d · base mip (full image: %s) · pixel hash %s",
+	base := fmt.Sprintf("%s · %s · %d×%d · base mip (full image: %s) · pixel hash %s",
 		texture.ResourceID,
 		texture.ShortFormat,
 		bounds.Dx(),
@@ -673,6 +774,24 @@ func previewInfoText(texture renderdoc.TextureInfo, img image.Image) string {
 		format.FormatSizeAuto64(texture.Bytes),
 		hash,
 	)
+	if state == nil {
+		return base
+	}
+	if id, ok := state.matchByTexID[texture.ResourceID]; ok {
+		base += fmt.Sprintf("\nStudio Asset: %d", id)
+		if all := state.matchAllByTexID[texture.ResourceID]; len(all) > 1 {
+			extras := make([]string, 0, len(all)-1)
+			for _, c := range all[1:] {
+				extras = append(extras, strconv.FormatInt(c, 10))
+			}
+			base += "\nAlso: " + strings.Join(extras, ", ")
+		}
+	} else if state.corpus != nil {
+		base += "\nStudio Asset: not identified"
+	} else {
+		base += "\nStudio Asset: load a place file in the Scan tab to identify"
+	}
+	return base
 }
 
 func defaultSortDescendingFor(column string) bool {
@@ -692,13 +811,14 @@ func applyColumnWidths(table *widget.Table) {
 		4: 220, // Format
 		5: 220, // Category
 		6: 100, // VRAM
+		7: 140, // Studio Asset
 	}
 	for col, width := range widths {
 		table.SetColumnWidth(col, width)
 	}
 }
 
-func columnValue(texture renderdoc.TextureInfo, column string) string {
+func columnValue(state *renderdocTabState, texture renderdoc.TextureInfo, column string) string {
 	switch column {
 	case "ID":
 		return texture.ResourceID
@@ -720,6 +840,18 @@ func columnValue(texture renderdoc.TextureInfo, column string) string {
 		return string(texture.Category)
 	case "VRAM":
 		return format.FormatSizeAuto64(texture.Bytes)
+	case "Studio Asset":
+		if state == nil {
+			return "—"
+		}
+		id, ok := state.matchByTexID[texture.ResourceID]
+		if !ok {
+			return "—"
+		}
+		if extras := len(state.matchAllByTexID[texture.ResourceID]) - 1; extras > 0 {
+			return fmt.Sprintf("%d (+%d more)", id, extras)
+		}
+		return strconv.FormatInt(id, 10)
 	}
 	return ""
 }

@@ -32,6 +32,14 @@ func FormatLargeTextureThreshold(value float64) string {
 }
 
 func ScanResultTextureByteCost(result ScanResult) int {
+	// Prefer the GPU-resident estimate when known — this is what the
+	// engine actually pays per texture (BC compression + mip chain),
+	// not the on-disk PNG size. Falls back to texture bytes / asset
+	// bytes when GPU footprint isn't computable (mesh assets, scan
+	// rows missing dimensions, etc).
+	if gpuBytes := ScanResultGPUMemoryBytes(result); gpuBytes > 0 {
+		return int(gpuBytes)
+	}
 	if result.TextureBytes > 0 {
 		return result.TextureBytes
 	}

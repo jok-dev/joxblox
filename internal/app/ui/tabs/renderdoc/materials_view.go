@@ -7,6 +7,10 @@ import (
 	"strconv"
 	"strings"
 
+	"joxblox/internal/app/loader"
+	"joxblox/internal/app/ui"
+	"joxblox/internal/assetmatch"
+	"joxblox/internal/debug"
 	"joxblox/internal/format"
 	"joxblox/internal/renderdoc"
 
@@ -45,9 +49,18 @@ type materialsTabState struct {
 	// has happened, so a slow Color decode for an old row can't overwrite
 	// a freshly-clicked row's preview pane.
 	previewGeneration int
+	// corpus + per-texture match overlay populated when a Scan tab scan
+	// completes AND a capture is loaded. Materials surface the Color
+	// slot's matched ID; nil corpus → "—" everywhere.
+	corpus                  *assetmatch.TextureCorpus
+	matchByTexID            map[string]int64
+	matchAllByTexID         map[string][]int64
+	openInSingleAssetButton *widget.Button
+	corpusBuildInFlight     bool
+	corpusRebuildPending    bool
 }
 
-var materialColumnHeaders = []string{"Color", "Normal", "MR", "Color Hash", "Draws", "Meshes", "VRAM"}
+var materialColumnHeaders = []string{"Color", "Normal", "MR", "Color Hash", "Draws", "Meshes", "VRAM", "Studio Asset"}
 
 type materialPreview struct {
 	colorImg, normalImg, mrImg       *canvas.Image
@@ -103,12 +116,14 @@ func clearPreviewImage(img *canvas.Image) {
 
 func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.CanvasObject, func(path string)) {
 	state := &materialsTabState{
-		sortColumn:     "VRAM",
-		sortDescending: true,
-		selectedRow:    -1,
-		thumbnailCache: map[string]image.Image{},
-		decodeInFlight: map[string]bool{},
-		textureByID:    map[string]renderdoc.TextureInfo{},
+		sortColumn:      "VRAM",
+		sortDescending:  true,
+		selectedRow:     -1,
+		thumbnailCache:  map[string]image.Image{},
+		decodeInFlight:  map[string]bool{},
+		textureByID:     map[string]renderdoc.TextureInfo{},
+		matchByTexID:    map[string]int64{},
+		matchAllByTexID: map[string][]int64{},
 	}
 
 	pathLabel := widget.NewLabel("No capture loaded.")
@@ -124,7 +139,20 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 	filterEntry.SetPlaceHolder("Filter by texture ID or hash")
 
 	preview := newMaterialPreview()
-	previewPane := preview.container
+	openInSingleAssetButton := widget.NewButton("Open in Single Asset", func() {
+		if state.selectedRow < 0 || state.selectedRow >= len(state.displayMaterials) {
+			return
+		}
+		mat := state.displayMaterials[state.selectedRow]
+		id, ok := state.matchByTexID[mat.ColorTextureID]
+		if !ok || ui.OpenSingleAsset == nil {
+			return
+		}
+		ui.OpenSingleAsset(id)
+	})
+	openInSingleAssetButton.Hide()
+	state.openInSingleAssetButton = openInSingleAssetButton
+	previewPane := container.NewBorder(nil, openInSingleAssetButton, nil, nil, preview.container)
 
 	var table *widget.Table
 	table = widget.NewTableWithHeaders(
@@ -226,6 +254,7 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 		for _, t := range textureReport.Textures {
 			state.textureByID[t.ResourceID] = t
 		}
+		recomputeMaterialMatches(state)
 		state.filterText = strings.TrimSpace(filterEntry.Text)
 		state.selectedRow = -1
 		applyMaterialSortAndFilter(state)
@@ -258,7 +287,68 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 	footer := countLabel
 	split := container.NewHSplit(table, previewPane)
 	split.Offset = 0.7
+
+	// Subscribe to scan-completion events so the Studio Asset column gets
+	// populated once a place file is scanned. Unsubscribe is dropped — the
+	// sub-tab lives for the whole app session.
+	_ = loader.SubscribeScanCompleted(func() {
+		requestMaterialCorpusRebuild(state, table)
+	})
+	if existing := loader.CurrentScan(); len(existing) > 0 {
+		requestMaterialCorpusRebuild(state, table)
+	}
+
 	return container.NewBorder(header, footer, nil, nil, split), loadFromPath
+}
+
+// requestMaterialCorpusRebuild kicks off a corpus build for the current
+// scan results. If a build is already in flight, sets "rebuild pending"
+// instead of spawning another — keeps the publish bus from saturating
+// CPU + I/O when scan events fire in quick succession. Must be called
+// on the UI thread.
+func requestMaterialCorpusRebuild(state *materialsTabState, table *widget.Table) {
+	if state.corpusBuildInFlight {
+		state.corpusRebuildPending = true
+		return
+	}
+	state.corpusBuildInFlight = true
+	scan := loader.CurrentScan()
+	go func() {
+		corpus, err := assetmatch.BuildTextureCorpus(scan, nil)
+		fyne.Do(func() {
+			state.corpusBuildInFlight = false
+			if err != nil {
+				debug.Logf("materials sub-tab: corpus build failed: %s", err.Error())
+			} else {
+				state.corpus = corpus
+				recomputeMaterialMatches(state)
+				table.Refresh()
+			}
+			if state.corpusRebuildPending {
+				state.corpusRebuildPending = false
+				requestMaterialCorpusRebuild(state, table)
+			}
+		})
+	}()
+}
+
+func recomputeMaterialMatches(state *materialsTabState) {
+	state.matchByTexID = map[string]int64{}
+	state.matchAllByTexID = map[string][]int64{}
+	if state.corpus == nil || state.textureReport == nil {
+		return
+	}
+	for _, tex := range state.textureReport.Textures {
+		if tex.DHash == 0 {
+			continue
+		}
+		matches := state.corpus.Match(tex.DHash)
+		if len(matches) == 0 {
+			continue
+		}
+		state.matchByTexID[tex.ResourceID] = matches[0]
+		state.matchAllByTexID[tex.ResourceID] = matches
+	}
 }
 
 func loadMaterialsCaptureFromPath(window fyne.Window, progressBar *widget.ProgressBarInfinite, loadButton *widget.Button, capturePath string, onFinished func(*renderdoc.Report, *renderdoc.MeshReport, []renderdoc.Material, string, string, *renderdoc.BufferStore, error)) {
@@ -316,7 +406,24 @@ func renderMaterialCell(state *materialsTabState, mat renderdoc.Material, column
 	case "VRAM":
 		label.SetText(format.FormatSizeAuto64(mat.TotalBytes))
 		label.Show()
+	case "Studio Asset":
+		label.SetText(materialStudioAssetCell(state, mat))
+		label.Show()
 	}
+}
+
+func materialStudioAssetCell(state *materialsTabState, mat renderdoc.Material) string {
+	if mat.ColorTextureID == "" {
+		return "—"
+	}
+	id, ok := state.matchByTexID[mat.ColorTextureID]
+	if !ok {
+		return "—"
+	}
+	if extras := len(state.matchAllByTexID[mat.ColorTextureID]) - 1; extras > 0 {
+		return fmt.Sprintf("%d (+%d)", id, extras)
+	}
+	return strconv.FormatInt(id, 10)
 }
 
 func setMaterialThumbnail(state *materialsTabState, texID string, label *widget.Label, img *canvas.Image, table *widget.Table) {
@@ -418,12 +525,33 @@ func updateMaterialPreview(state *materialsTabState, mat renderdoc.Material, pre
 	setPreviewMap(state, mat.ColorTextureID, preview.colorImg, preview.colorLabel, "Color", gen, table)
 	setPreviewMap(state, mat.NormalTextureID, preview.normalImg, preview.normalLabel, "Normal", gen, table)
 	setPreviewMap(state, mat.MRTextureID, preview.mrImg, preview.mrLabel, "MR", gen, table)
+	if state.openInSingleAssetButton != nil {
+		if _, ok := state.matchByTexID[mat.ColorTextureID]; ok && mat.ColorTextureID != "" {
+			state.openInSingleAssetButton.Show()
+		} else {
+			state.openInSingleAssetButton.Hide()
+		}
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Draws: %d   Meshes: %d   VRAM: %s\n",
 		mat.DrawCallCount, len(mat.MeshHashes), format.FormatSizeAuto64(mat.TotalBytes))
 	if len(mat.OtherTextureIDs) > 0 {
 		fmt.Fprintf(&b, "Other PS textures: %s\n", strings.Join(mat.OtherTextureIDs, ", "))
+	}
+	if id, ok := state.matchByTexID[mat.ColorTextureID]; ok && mat.ColorTextureID != "" {
+		fmt.Fprintf(&b, "Studio Asset (Color): %d\n", id)
+		if all := state.matchAllByTexID[mat.ColorTextureID]; len(all) > 1 {
+			extras := make([]string, 0, len(all)-1)
+			for _, c := range all[1:] {
+				extras = append(extras, strconv.FormatInt(c, 10))
+			}
+			fmt.Fprintf(&b, "Also: %s\n", strings.Join(extras, ", "))
+		}
+	} else if state.corpus != nil {
+		b.WriteString("Studio Asset: not identified\n")
+	} else {
+		b.WriteString("Studio Asset: load a place file in the Scan tab to identify\n")
 	}
 	if len(mat.MeshHashes) > 0 {
 		b.WriteString("\nMesh hashes (first 16 chars):\n")
@@ -526,6 +654,7 @@ func applyMaterialColumnWidths(table *widget.Table) {
 	table.SetColumnWidth(4, 60)
 	table.SetColumnWidth(5, 60)
 	table.SetColumnWidth(6, 90)
+	table.SetColumnWidth(7, 110) // Studio Asset
 }
 
 func applyMaterialSortAndFilter(state *materialsTabState) {
