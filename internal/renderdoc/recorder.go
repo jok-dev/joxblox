@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 const (
@@ -112,6 +114,9 @@ func (r *Recorder) Start(sessionDir string, interval time.Duration) error {
 		r.workerSlots <- struct{}{}
 	}
 	r.active = true
+	if r.processFunc == nil {
+		r.processFunc = r.defaultProcessFunc
+	}
 	return nil
 }
 
@@ -237,4 +242,132 @@ func (r *Recorder) recordError(err error) {
 	if len(r.pendingErrs) > recorderMaxErrorQueue {
 		r.pendingErrs = r.pendingErrs[len(r.pendingErrs)-recorderMaxErrorQueue:]
 	}
+}
+
+// defaultProcessFunc is the production capture pipeline: wait for the
+// file to settle, move it into the recording subdir, convert + parse +
+// hash, decode + downsample new textures, then delete. Non-test code
+// gets this via Start automatically.
+func (r *Recorder) defaultProcessFunc(rdcPath string) error {
+	if !waitFileStable(rdcPath, 250*time.Millisecond, 2, 30*time.Second) {
+		return fmt.Errorf("file never stabilized: %s", rdcPath)
+	}
+	r.mu.Lock()
+	dest := filepath.Join(r.recordingDir, filepath.Base(rdcPath))
+	r.mu.Unlock()
+	if err := os.Rename(rdcPath, dest); err != nil {
+		return fmt.Errorf("move into recording dir: %w", err)
+	}
+	defer os.Remove(dest)
+
+	xmlPath, convertErr := ConvertToXML(dest)
+	if convertErr != nil {
+		return fmt.Errorf("convert: %w", convertErr)
+	}
+	defer RemoveConvertedOutput(xmlPath)
+
+	report, parseErr := ParseCaptureXMLFile(xmlPath)
+	if parseErr != nil {
+		return fmt.Errorf("parse: %w", parseErr)
+	}
+	store, storeErr := OpenBufferStore(xmlPath)
+	if storeErr != nil {
+		return fmt.Errorf("buffer store: %w", storeErr)
+	}
+	defer store.Close()
+	ComputeTextureHashes(report, store, nil)
+
+	for i := range report.Textures {
+		tex := report.Textures[i]
+		if tex.DHash == 0 || !isHashableCategory(tex.Category) {
+			continue
+		}
+		// Skip if we've already aggregated this dHash — saves the
+		// decode+downsample cost. merge() also checks, but avoiding
+		// the decode is the bigger win.
+		r.mu.Lock()
+		_, seen := r.aggregate[tex.DHash]
+		r.mu.Unlock()
+		if seen {
+			continue
+		}
+		decoded, decErr := DecodeTexturePreview(tex, store)
+		if decErr != nil || decoded == nil {
+			continue
+		}
+		thumbnail := downsampleRecorderThumbnail(decoded)
+		r.merge(&AggregateTexture{
+			DHash:     tex.DHash,
+			PixelHash: tex.PixelHash,
+			Resource:  tex.ResourceID,
+			Format:    tex.Format,
+			ShortFmt:  tex.ShortFormat,
+			Width:     tex.Width,
+			Height:    tex.Height,
+			Bytes:     tex.Bytes,
+			Category:  tex.Category,
+			Thumbnail: thumbnail,
+			FirstSeen: time.Now(),
+		})
+	}
+	return nil
+}
+
+// waitFileStable polls os.Stat until the file size has been the same
+// for requiredStablePolls consecutive checks. Returns false on timeout.
+// Mirrors the helper of the same purpose in the renderdoc tab launcher
+// — duplicated here to avoid a UI-package import from a renderdoc
+// internal.
+func waitFileStable(path string, pollInterval time.Duration, requiredStablePolls int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	var prevSize int64 = -1
+	stable := 0
+	for time.Now().Before(deadline) {
+		info, err := os.Stat(path)
+		if err == nil {
+			currentSize := info.Size()
+			if currentSize > 0 && currentSize == prevSize {
+				stable++
+				if stable >= requiredStablePolls {
+					return true
+				}
+			} else {
+				stable = 0
+				prevSize = currentSize
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	return false
+}
+
+// recorderThumbnailMaxDim caps the cached preview size at 256 px on the
+// longest edge. Matches the materials sub-tab's downsample policy so a
+// recording aggregate of ~1000 unique textures fits in ~256 MB.
+const recorderThumbnailMaxDim = 256
+
+// downsampleRecorderThumbnail produces a small RGBA copy of img capped
+// at recorderThumbnailMaxDim on its longest edge. Aspect ratio is
+// preserved. Source images smaller than the cap are returned unchanged.
+func downsampleRecorderThumbnail(src image.Image) image.Image {
+	srcBounds := src.Bounds()
+	w, h := srcBounds.Dx(), srcBounds.Dy()
+	if w <= recorderThumbnailMaxDim && h <= recorderThumbnailMaxDim {
+		return src
+	}
+	scale := float64(recorderThumbnailMaxDim) / float64(w)
+	if h > w {
+		scale = float64(recorderThumbnailMaxDim) / float64(h)
+	}
+	dstW := int(float64(w) * scale)
+	dstH := int(float64(h) * scale)
+	if dstW < 1 {
+		dstW = 1
+	}
+	if dstH < 1 {
+		dstH = 1
+	}
+	dst := image.NewNRGBA(image.Rect(0, 0, dstW, dstH))
+	xdraw.BiLinear.Scale(dst, dst.Bounds(), src, srcBounds, xdraw.Src, nil)
+	return dst
 }
