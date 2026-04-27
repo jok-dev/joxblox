@@ -292,7 +292,14 @@ func (r *Recorder) defaultProcessFunc(rdcPath string) error {
 
 	for i := range report.Textures {
 		tex := report.Textures[i]
-		if tex.DHash == 0 || !isHashableCategory(tex.Category) {
+		// DHash != 0 implies the texture was originally hashable (Asset*).
+		// Don't also gate on isHashableCategory(tex.Category) — by this
+		// point ComputeTextureHashes has retagged BC3 normals to
+		// CategoryNormalDXT5nm and B-packed MRs to CategoryBlank/CustomMR,
+		// neither of which isHashableCategory returns true for. Adding
+		// that gate silently dropped every normal map and MR texture from
+		// the aggregate (≈40-50% of VRAM on a PBR scene).
+		if tex.DHash == 0 {
 			continue
 		}
 		// Skip the decode if we've already aggregated a same-or-larger
