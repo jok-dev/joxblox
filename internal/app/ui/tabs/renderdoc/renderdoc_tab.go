@@ -57,6 +57,8 @@ type renderdocTabState struct {
 	matchByTexID            map[string]int64   // best match per texture resource ID
 	matchAllByTexID         map[string][]int64 // all candidates within threshold
 	openInSingleAssetButton *widget.Button     // shown when current texture has a match
+	corpusBuildInFlight     bool               // a goroutine is currently rebuilding the corpus
+	corpusRebuildPending    bool               // another rebuild was requested while one was in flight
 }
 
 var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM", "Studio Asset"}
@@ -398,29 +400,44 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 	// unsubscribe is dropped intentionally — this sub-tab lives for the
 	// whole app session, so leaking the subscription is fine.
 	_ = loader.SubscribeScanCompleted(func() {
-		scan := loader.CurrentScan()
-		go rebuildTextureCorpusAsync(state, scan, table)
+		requestTextureCorpusRebuild(state, table)
 	})
 	if existing := loader.CurrentScan(); len(existing) > 0 {
-		go rebuildTextureCorpusAsync(state, existing, table)
+		requestTextureCorpusRebuild(state, table)
 	}
 
 	return container.NewBorder(header, footer, nil, nil, split), loadFromPath
 }
 
-// rebuildTextureCorpusAsync builds a corpus from scan results in the
-// background and re-runs match overlay computation when done.
-func rebuildTextureCorpusAsync(state *renderdocTabState, scan []loader.ScanResult, table *widget.Table) {
-	corpus, err := assetmatch.BuildTextureCorpus(scan, nil)
-	if err != nil {
-		debug.Logf("textures sub-tab: corpus build failed: %s", err.Error())
+// requestTextureCorpusRebuild kicks off a corpus build for the current
+// scan results. If a build is already in flight, marks "rebuild needed
+// when done" instead of spawning a parallel build — protects against
+// the publish bus firing many times in quick succession (which used to
+// saturate CPU + I/O). Must be called on the UI thread.
+func requestTextureCorpusRebuild(state *renderdocTabState, table *widget.Table) {
+	if state.corpusBuildInFlight {
+		state.corpusRebuildPending = true
 		return
 	}
-	fyne.Do(func() {
-		state.corpus = corpus
-		recomputeTextureMatches(state)
-		table.Refresh()
-	})
+	state.corpusBuildInFlight = true
+	scan := loader.CurrentScan()
+	go func() {
+		corpus, err := assetmatch.BuildTextureCorpus(scan, nil)
+		fyne.Do(func() {
+			state.corpusBuildInFlight = false
+			if err != nil {
+				debug.Logf("textures sub-tab: corpus build failed: %s", err.Error())
+			} else {
+				state.corpus = corpus
+				recomputeTextureMatches(state)
+				table.Refresh()
+			}
+			if state.corpusRebuildPending {
+				state.corpusRebuildPending = false
+				requestTextureCorpusRebuild(state, table)
+			}
+		})
+	}()
 }
 
 // recomputeTextureMatches walks the loaded report's textures, queries the

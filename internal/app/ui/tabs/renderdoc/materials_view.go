@@ -56,6 +56,8 @@ type materialsTabState struct {
 	matchByTexID            map[string]int64
 	matchAllByTexID         map[string][]int64
 	openInSingleAssetButton *widget.Button
+	corpusBuildInFlight     bool
+	corpusRebuildPending    bool
 }
 
 var materialColumnHeaders = []string{"Color", "Normal", "MR", "Color Hash", "Draws", "Meshes", "VRAM", "Studio Asset"}
@@ -290,27 +292,44 @@ func newMaterialsSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Ca
 	// populated once a place file is scanned. Unsubscribe is dropped — the
 	// sub-tab lives for the whole app session.
 	_ = loader.SubscribeScanCompleted(func() {
-		scan := loader.CurrentScan()
-		go rebuildMaterialCorpusAsync(state, scan, table)
+		requestMaterialCorpusRebuild(state, table)
 	})
 	if existing := loader.CurrentScan(); len(existing) > 0 {
-		go rebuildMaterialCorpusAsync(state, existing, table)
+		requestMaterialCorpusRebuild(state, table)
 	}
 
 	return container.NewBorder(header, footer, nil, nil, split), loadFromPath
 }
 
-func rebuildMaterialCorpusAsync(state *materialsTabState, scan []loader.ScanResult, table *widget.Table) {
-	corpus, err := assetmatch.BuildTextureCorpus(scan, nil)
-	if err != nil {
-		debug.Logf("materials sub-tab: corpus build failed: %s", err.Error())
+// requestMaterialCorpusRebuild kicks off a corpus build for the current
+// scan results. If a build is already in flight, sets "rebuild pending"
+// instead of spawning another — keeps the publish bus from saturating
+// CPU + I/O when scan events fire in quick succession. Must be called
+// on the UI thread.
+func requestMaterialCorpusRebuild(state *materialsTabState, table *widget.Table) {
+	if state.corpusBuildInFlight {
+		state.corpusRebuildPending = true
 		return
 	}
-	fyne.Do(func() {
-		state.corpus = corpus
-		recomputeMaterialMatches(state)
-		table.Refresh()
-	})
+	state.corpusBuildInFlight = true
+	scan := loader.CurrentScan()
+	go func() {
+		corpus, err := assetmatch.BuildTextureCorpus(scan, nil)
+		fyne.Do(func() {
+			state.corpusBuildInFlight = false
+			if err != nil {
+				debug.Logf("materials sub-tab: corpus build failed: %s", err.Error())
+			} else {
+				state.corpus = corpus
+				recomputeMaterialMatches(state)
+				table.Refresh()
+			}
+			if state.corpusRebuildPending {
+				state.corpusRebuildPending = false
+				requestMaterialCorpusRebuild(state, table)
+			}
+		})
+	}()
 }
 
 func recomputeMaterialMatches(state *materialsTabState) {

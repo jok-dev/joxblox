@@ -279,7 +279,6 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
 		explorer.refreshSearchSuggestions()
 		explorer.applySortAndFilters()
-		loader.PublishScanCompleted(explorer.allResults)
 		return
 	}
 	if refreshFilters {
@@ -290,6 +289,17 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 		explorer.updateStatsLabels()
 		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
 		explorer.refreshSearchSuggestions()
+	}
+}
+
+// PublishCompleted notifies the loader event bus that a scan has fully
+// completed and the current results are stable. Call this once at the
+// end of a streaming scan; AppendResults intentionally no longer
+// publishes on every batch since that swamped subscribers (notably the
+// RenderDoc asset-ID corpus builder) with redundant rebuilds.
+func (explorer *ScanResultsExplorer) PublishCompleted() {
+	if explorer == nil {
+		return
 	}
 	loader.PublishScanCompleted(explorer.allResults)
 }

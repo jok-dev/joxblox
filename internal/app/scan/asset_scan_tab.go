@@ -31,8 +31,8 @@ const (
 	minScanLoadWorkers      = 4
 	maxScanLoadWorkers      = 16
 	scanLoadUIBatchSize     = 25
-	scanLoadUIFlushDelay    = 150 * time.Millisecond
-	scanLoadUIRefreshDelay  = 400 * time.Millisecond
+	scanLoadUIFlushDelay    = 250 * time.Millisecond
+	scanLoadUIRefreshDelay  = 1000 * time.Millisecond
 	scanSearchDebounceDelay = 180 * time.Millisecond
 )
 
@@ -683,6 +683,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			case <-localStopSignal.Channel:
 				fyne.Do(func() {
 					finishScan(localStopSignal)
+					explorer.PublishCompleted()
 					explorer.SetStatus(fmt.Sprintf("Stopped. %d results loaded.", len(explorer.GetResults())))
 				})
 				return
@@ -690,6 +691,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 			fyne.Do(func() {
 				finishScan(localStopSignal)
+				explorer.PublishCompleted()
 				setWarning(warningData)
 				resultCount := len(explorer.GetResults())
 				if resultCount == 0 && firstLoadErr != nil {
