@@ -322,20 +322,15 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 			if cmd != nil {
 				go func() {
 					_ = cmd.Wait()
+					// Roblox Studio's launcher detaches: renderdoccmd
+					// waits on the launcher, which exits within seconds
+					// even though Studio itself keeps running. So
+					// cmd.Wait() returning is NOT a reliable signal that
+					// Studio is gone — we just update the status label
+					// and leave Capture / Record enabled for the rest of
+					// the app session.
 					fyne.Do(func() {
-						statusLabel.SetText("Ready")
-						l.mu.Lock()
-						l.studioRunning = false
-						l.mu.Unlock()
-						if captureButton != nil {
-							captureButton.Disable()
-						}
-						if recordButton != nil {
-							recordButton.Disable()
-						}
-						if l.recorder != nil && l.recorder.IsActive() {
-							l.stopRecording()
-						}
+						statusLabel.SetText("Launcher exited (Studio may still be running)")
 					})
 				}()
 			}
