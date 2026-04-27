@@ -82,6 +82,14 @@ type launcher struct {
 	recordButton  *widget.Button
 	intervalEntry *widget.Entry
 	statusLabel   *widget.Label
+	// recordingGateUntil suppresses the auto-load-latest-capture path while
+	// a recording is active and for a brief cooldown after Stop. Without
+	// the cooldown, a straggler .rdc that lands in the session dir after
+	// Recorder.Stop() flips active=false (e.g. from one final ticker
+	// firing of the trigger goroutine) would race down the auto-load
+	// branch and overwrite the aggregate the user just stopped to see.
+	// Zero value = no gate; "in the future" = gated.
+	recordingGateUntil time.Time
 
 	header        *widget.Label
 	list          *widget.List
@@ -438,6 +446,7 @@ func (l *launcher) refreshCaptures() {
 	firstScan := !l.firstScanDone
 	l.firstScanDone = true
 	loadCapture := l.loadCapture
+	autoLoadGated := !l.recordingGateUntil.IsZero() && time.Now().Before(l.recordingGateUntil)
 	l.mu.Unlock()
 
 	fyne.Do(func() {
@@ -458,7 +467,7 @@ func (l *launcher) refreshCaptures() {
 			}
 			go l.recorder.ProcessCapture(item.Path)
 		}
-	} else if autoLoad && !firstScan && loadCapture != nil {
+	} else if autoLoad && !firstScan && !autoLoadGated && loadCapture != nil {
 		if newest, ok := newestFreshAddition(items, previousPaths); ok {
 			pathToLoad := newest.Path
 			// fsnotify fires on file create before renderdoc has finished
@@ -725,6 +734,12 @@ func (l *launcher) startRecording(window fyne.Window) {
 		fyneDialog.ShowError(err, window)
 		return
 	}
+	l.mu.Lock()
+	// Far-future sentinel; cleared (or moved to a short cooldown) by
+	// stopRecording. Any .rdc fsnotify events while this is set route
+	// to the recorder, never to the single-capture auto-load path.
+	l.recordingGateUntil = time.Now().Add(24 * time.Hour)
+	l.mu.Unlock()
 	l.recordButton.SetText("Stop Recording")
 
 	stop := l.recorder.TriggerStop()
@@ -771,6 +786,13 @@ func (l *launcher) stopRecording() {
 			if ui.ShowRecordingResults != nil {
 				ui.ShowRecordingResults(textures)
 			}
+			// Brief cooldown after the aggregate is in place — covers
+			// the window where one final ticker fire of the trigger
+			// goroutine produces a .rdc that fsnotify reports after
+			// Stop has already drained.
+			l.mu.Lock()
+			l.recordingGateUntil = time.Now().Add(5 * time.Second)
+			l.mu.Unlock()
 		})
 	}()
 }
