@@ -30,6 +30,13 @@ import (
 
 const rdcFileFilterLabel = "RenderDoc capture"
 
+type textureDataSource int
+
+const (
+	dataSourceSingleCapture textureDataSource = iota
+	dataSourceRecordingAggregate
+)
+
 type renderdocTabState struct {
 	allTextures     []renderdoc.TextureInfo
 	displayTextures []renderdoc.TextureInfo
@@ -59,6 +66,8 @@ type renderdocTabState struct {
 	openInSingleAssetButton *widget.Button     // shown when current texture has a match
 	corpusBuildInFlight     bool               // a goroutine is currently rebuilding the corpus
 	corpusRebuildPending    bool               // another rebuild was requested while one was in flight
+	dataSource              textureDataSource
+	recordingAggregate      []renderdoc.AggregateTexture
 }
 
 var columnHeaders = []string{"ID", "W×H", "Mips", "Array", "Format", "Category", "VRAM", "Studio Asset"}
@@ -342,6 +351,8 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 		if state.xmlPath != "" {
 			renderdoc.RemoveConvertedOutput(state.xmlPath)
 		}
+		state.dataSource = dataSourceSingleCapture
+		state.recordingAggregate = nil
 		state.report = report
 		state.allTextures = append([]renderdoc.TextureInfo(nil), report.Textures...)
 		state.bufferStore = newStore
@@ -406,6 +417,31 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 		requestTextureCorpusRebuild(state, table)
 	}
 
+	// Wire the recording-results hook. The launcher calls this on Stop;
+	// we swap into recording-aggregate mode and re-render the table
+	// against the aggregate slice via the standard data path.
+	ui.ShowRecordingResults = func(textures []renderdoc.AggregateTexture) {
+		fyne.Do(func() {
+			state.dataSource = dataSourceRecordingAggregate
+			state.recordingAggregate = textures
+			state.allTextures = aggregateTexturesToInfos(textures)
+			state.report = nil
+			state.bufferStore = nil
+			state.selectedRow = -1
+			applySortAndFilter(state)
+			recomputeTextureMatches(state)
+			pathLabel.SetText(fmt.Sprintf("Recording aggregate · %d unique textures", len(textures)))
+			summaryLabel.SetText("")
+			categoryLabel.SetText("")
+			countLabel.SetText(fmt.Sprintf("Showing %d of %d textures", len(state.displayTextures), len(state.allTextures)))
+			previewInfoLabel.SetText("Select a texture to preview.")
+			state.sourceImage = nil
+			previewCanvas.Image = nil
+			previewCanvas.Refresh()
+			table.Refresh()
+		})
+	}
+
 	return container.NewBorder(header, footer, nil, nil, split), loadFromPath
 }
 
@@ -446,10 +482,10 @@ func requestTextureCorpusRebuild(state *renderdocTabState, table *widget.Table) 
 func recomputeTextureMatches(state *renderdocTabState) {
 	state.matchByTexID = map[string]int64{}
 	state.matchAllByTexID = map[string][]int64{}
-	if state.corpus == nil || state.report == nil {
+	if state.corpus == nil || len(state.allTextures) == 0 {
 		return
 	}
-	for _, tex := range state.report.Textures {
+	for _, tex := range state.allTextures {
 		if tex.DHash == 0 {
 			continue
 		}
@@ -460,6 +496,39 @@ func recomputeTextureMatches(state *renderdocTabState) {
 		state.matchByTexID[tex.ResourceID] = matches[0]
 		state.matchAllByTexID[tex.ResourceID] = matches
 	}
+}
+
+// aggregateTexturesToInfos maps recording aggregates onto the same
+// TextureInfo shape the Textures sub-tab renders today. Uploads is
+// left empty — the recording aggregate uses cached thumbnails for
+// preview, not the original buffer store.
+func aggregateTexturesToInfos(aggregates []renderdoc.AggregateTexture) []renderdoc.TextureInfo {
+	out := make([]renderdoc.TextureInfo, 0, len(aggregates))
+	for _, a := range aggregates {
+		out = append(out, renderdoc.TextureInfo{
+			ResourceID:  a.Resource,
+			Width:       a.Width,
+			Height:      a.Height,
+			Format:      a.Format,
+			ShortFormat: a.ShortFmt,
+			Bytes:       a.Bytes,
+			Category:    a.Category,
+			PixelHash:   a.PixelHash,
+			DHash:       a.DHash,
+		})
+	}
+	return out
+}
+
+// aggregateThumbnailFor returns the cached recording thumbnail for a
+// given resource ID, if present in the current aggregate.
+func aggregateThumbnailFor(state *renderdocTabState, resourceID string) image.Image {
+	for i := range state.recordingAggregate {
+		if state.recordingAggregate[i].Resource == resourceID {
+			return state.recordingAggregate[i].Thumbnail
+		}
+	}
+	return nil
 }
 
 // arrowSelectTable wraps widget.Table so Up/Down arrow keys actually change
@@ -503,6 +572,33 @@ func (t *arrowSelectTable) TypedKey(event *fyne.KeyEvent) {
 // decode. Updates the canvas + info label when decoding completes. The
 // channel toggles reuse the stored sourceImage so masking is instant.
 func triggerPreview(state *renderdocTabState, texture renderdoc.TextureInfo, previewCanvas *canvas.Image, infoLabel *widget.Entry) {
+	// Recording-aggregate mode has no buffer store — render the cached
+	// thumbnail directly. Must intercept before the bufferStore == nil
+	// short-circuit below.
+	if state.dataSource == dataSourceRecordingAggregate {
+		thumb := aggregateThumbnailFor(state, texture.ResourceID)
+		if thumb == nil {
+			infoLabel.SetText("Recording aggregate · thumbnail unavailable")
+			state.sourceImage = nil
+			previewCanvas.Image = nil
+			previewCanvas.Refresh()
+			return
+		}
+		state.sourceImage = thumb
+		previewCanvas.Image = thumb
+		previewCanvas.Refresh()
+		infoLabel.SetText(fmt.Sprintf("Recording aggregate · %s · %s · %d×%d (thumbnail only)",
+			texture.ResourceID, texture.ShortFormat, texture.Width, texture.Height))
+		if state.openInSingleAssetButton != nil {
+			if _, ok := state.matchByTexID[texture.ResourceID]; ok {
+				state.openInSingleAssetButton.Show()
+			} else {
+				state.openInSingleAssetButton.Hide()
+			}
+		}
+		return
+	}
+
 	infoLabel.SetText(fmt.Sprintf("Decoding %s %s (%d×%d)…", texture.ResourceID, texture.ShortFormat, texture.Width, texture.Height))
 	state.sourceImage = nil
 	previewCanvas.Image = nil
