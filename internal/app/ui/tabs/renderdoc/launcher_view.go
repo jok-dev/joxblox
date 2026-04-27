@@ -67,6 +67,9 @@ type launcher struct {
 	activeSubTabIdx int
 	autoLoadLatest  bool
 	firstScanDone   bool
+	// studioRunning is true between a successful Launch and the launched
+	// Studio process exiting. Drives the Capture button's enable state.
+	studioRunning bool
 
 	header        *widget.Label
 	list          *widget.List
@@ -237,6 +240,13 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	autoLoadCheck.SetChecked(l.autoLoadLatest)
 
 	var launchButton *widget.Button
+	var captureButton *widget.Button
+	captureButton = widget.NewButton("Capture (F12)", func() {
+		if err := renderdoc.TriggerCapture(); err != nil {
+			fyneDialog.ShowError(err, window)
+		}
+	})
+	captureButton.Disable()
 	launchButton = widget.NewButton("Launch with RenderDoc", func() {
 		studioPath := strings.TrimSpace(LoadStudioPath())
 		studioLabel.SetText(formatStudioVersionLabel(studioPath))
@@ -268,13 +278,27 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 					fyneDialog.ShowError(err, window)
 				} else {
 					statusLabel.SetText(fmt.Sprintf("Launched (PID %d)", cmd.Process.Pid))
+					l.mu.Lock()
+					l.studioRunning = true
+					l.mu.Unlock()
+					if captureButton != nil {
+						captureButton.Enable()
+					}
 				}
 			})
 
 			if cmd != nil {
 				go func() {
 					_ = cmd.Wait()
-					fyne.Do(func() { statusLabel.SetText("Ready") })
+					fyne.Do(func() {
+						statusLabel.SetText("Ready")
+						l.mu.Lock()
+						l.studioRunning = false
+						l.mu.Unlock()
+						if captureButton != nil {
+							captureButton.Disable()
+						}
+					})
 				}()
 			}
 
@@ -309,7 +333,7 @@ func newLauncher(window fyne.Window, loadCapture func(path string)) *launcher {
 	// there's nothing on disk to watch and the captures list stays at 0.
 
 	topRow := container.NewBorder(nil, nil, studioLabel,
-		container.NewHBox(openButton, launchButton),
+		container.NewHBox(openButton, launchButton, captureButton),
 		statusLabel,
 	)
 	capturesHeaderRow := container.NewBorder(nil, nil, nil,
