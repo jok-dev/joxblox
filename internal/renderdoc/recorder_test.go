@@ -114,6 +114,41 @@ func TestRecorderMergeAggregatesByPixelHashLargestWins(t *testing.T) {
 	}
 }
 
+func TestRecorderDropsLowerResMipVariantsOnStop(t *testing.T) {
+	sessionDir := t.TempDir()
+	r := NewRecorder()
+	if err := r.Start(sessionDir, time.Hour); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	// Three streamed sizes of the same source (matching dHash, square aspect).
+	r.merge(&AggregateTexture{PixelHash: "lo", DHash: 0xCAFE, Width: 256, Height: 256, Bytes: 64 * 1024})
+	r.merge(&AggregateTexture{PixelHash: "mid", DHash: 0xCAFE, Width: 512, Height: 512, Bytes: 256 * 1024})
+	r.merge(&AggregateTexture{PixelHash: "hi", DHash: 0xCAFE, Width: 1024, Height: 1024, Bytes: 1024 * 1024})
+	// Same dHash but a non-matching aspect ratio — distinct texture, must stay.
+	r.merge(&AggregateTexture{PixelHash: "wide", DHash: 0xCAFE, Width: 1024, Height: 256, Bytes: 256 * 1024})
+	// Distinct content (different dHash) — must stay.
+	r.merge(&AggregateTexture{PixelHash: "other", DHash: 0xBEEF, Width: 128, Height: 128, Bytes: 16 * 1024})
+
+	got := r.Stop()
+	if len(got) != 3 {
+		t.Fatalf("aggregate len after dropping mip variants: got %d, want 3", len(got))
+	}
+	pixelHashes := map[string]bool{}
+	for _, tex := range got {
+		pixelHashes[tex.PixelHash] = true
+	}
+	for _, want := range []string{"hi", "wide", "other"} {
+		if !pixelHashes[want] {
+			t.Errorf("expected to keep PixelHash=%q, got entries: %v", want, pixelHashes)
+		}
+	}
+	for _, unwanted := range []string{"lo", "mid"} {
+		if pixelHashes[unwanted] {
+			t.Errorf("expected to drop PixelHash=%q (lower-res mip variant), got entries: %v", unwanted, pixelHashes)
+		}
+	}
+}
+
 func TestRecorderDropsCapturesWhenQueueSaturates(t *testing.T) {
 	sessionDir := t.TempDir()
 	r := NewRecorder()

@@ -145,12 +145,87 @@ func (r *Recorder) Stop() []AggregateTexture {
 		out = append(out, *tex)
 	}
 	r.mu.Unlock()
+	out = dropLowerResMipVariants(out)
 	sort.Slice(out, func(i, j int) bool { return out[i].FirstSeen.Before(out[j].FirstSeen) })
 
 	if dir != "" {
 		_ = os.Remove(dir) // best-effort; only succeeds if empty
 	}
 	return out
+}
+
+// dropLowerResMipVariants filters the aggregate so that when Studio
+// streamed the same source texture at multiple resolutions, only the
+// highest-res copy survives. An entry is considered a redundant
+// downsample of another iff:
+//   - both have the same non-zero perceptual dHash (visually-identical
+//     content, tolerant to compression/resample noise the way pixel
+//     hash isn't),
+//   - the candidate has strictly smaller width AND height,
+//   - the aspect ratios match within ~5% (rules out the "two unrelated
+//     low-res textures sharing a dHash" case, since unrelated content
+//     rarely matches both perceptually AND in shape).
+//
+// Order is O(N²) over the aggregate — N is the unique-texture count
+// per recording, typically a few hundred at most, so this is cheap.
+func dropLowerResMipVariants(in []AggregateTexture) []AggregateTexture {
+	if len(in) <= 1 {
+		return in
+	}
+	keep := make([]bool, len(in))
+	for i := range keep {
+		keep[i] = true
+	}
+	const aspectTolerance = 0.05
+	for i := range in {
+		if in[i].DHash == 0 || in[i].Width <= 0 || in[i].Height <= 0 {
+			continue
+		}
+		aspectI := float64(in[i].Width) / float64(in[i].Height)
+		for j := range in {
+			if i == j || !keep[j] {
+				continue
+			}
+			if in[j].DHash != in[i].DHash {
+				continue
+			}
+			if in[j].Width <= in[i].Width && in[j].Height <= in[i].Height &&
+				(in[j].Width < in[i].Width || in[j].Height < in[i].Height) {
+				if in[j].Height <= 0 {
+					continue
+				}
+				aspectJ := float64(in[j].Width) / float64(in[j].Height)
+				if relDiff(aspectI, aspectJ) <= aspectTolerance {
+					keep[j] = false
+				}
+			}
+		}
+	}
+	out := make([]AggregateTexture, 0, len(in))
+	for i := range in {
+		if keep[i] {
+			out = append(out, in[i])
+		}
+	}
+	return out
+}
+
+func relDiff(a, b float64) float64 {
+	if a == b {
+		return 0
+	}
+	denom := a
+	if b > denom {
+		denom = b
+	}
+	if denom == 0 {
+		return 0
+	}
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff / denom
 }
 
 // TriggerStop returns a channel the launcher's timer goroutine should
