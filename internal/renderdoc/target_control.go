@@ -97,16 +97,19 @@ func triggerCaptureOnPort(port int) error {
 		return fmt.Errorf("renderdoc target reports protocol version %d, joxblox knows %d",
 			serverVersion, targetControlMyVersion)
 	}
-	// Skip the rest of the server handshake payload (target name + pid)
-	// + chunk alignment. We've consumed 8 (chunk header) + 4 (version) so
-	// far. Read string + uint32, then align.
+	// Read the rest of the server handshake (target name + pid) so we
+	// can log who we're actually talking to — distinguishes the real
+	// Studio target from any other renderdoc-injected process that
+	// happens to be listening on the same port range.
 	target, err := readString(conn)
 	if err != nil {
 		return fmt.Errorf("read server target name: %w", err)
 	}
-	if _, err := readUint32(conn); err != nil {
+	pid, err := readUint32(conn)
+	if err != nil {
 		return fmt.Errorf("read server pid: %w", err)
 	}
+	debug.Logf("target-control: port %d → handshake from %q pid=%d version=%d", port, target, pid, serverVersion)
 	consumed := 8 + 4 + 4 + len(target) + 4
 	if err := skipAlignment(conn, consumed); err != nil {
 		return fmt.Errorf("skip server handshake alignment: %w", err)
