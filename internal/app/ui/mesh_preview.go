@@ -28,6 +28,7 @@ import (
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/procutil"
+	"joxblox/internal/renderdoc"
 )
 
 const MaxMeshPreviewTriangles = 20000
@@ -55,6 +56,11 @@ var GetRepositoryRootPath func() (string, error)
 // and start loading the given asset ID. Set by app.go at startup;
 // callers must nil-check.
 var OpenSingleAsset func(assetID int64)
+
+// ShowRecordingResults swaps the Textures sub-tab into recording-
+// aggregate mode and renders the given textures. Set by the Textures
+// sub-tab at construction; the launcher calls it on Stop.
+var ShowRecordingResults func(textures []renderdoc.AggregateTexture)
 
 // PrimaryWindow returns GetPrimaryWindow when it is set and non-nil, otherwise the first Fyne window.
 func PrimaryWindow() fyne.Window {
