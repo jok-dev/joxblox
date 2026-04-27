@@ -10,8 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	xdraw "golang.org/x/image/draw"
 )
 
 const (
@@ -301,7 +299,6 @@ func (r *Recorder) defaultProcessFunc(rdcPath string) error {
 		if decErr != nil || decoded == nil {
 			continue
 		}
-		thumbnail := downsampleRecorderThumbnail(decoded)
 		r.merge(&AggregateTexture{
 			DHash:     tex.DHash,
 			PixelHash: tex.PixelHash,
@@ -312,7 +309,7 @@ func (r *Recorder) defaultProcessFunc(rdcPath string) error {
 			Height:    tex.Height,
 			Bytes:     tex.Bytes,
 			Category:  tex.Category,
-			Thumbnail: thumbnail,
+			Thumbnail: decoded,
 			FirstSeen: time.Now(),
 		})
 	}
@@ -347,33 +344,3 @@ func waitFileStable(path string, pollInterval time.Duration, requiredStablePolls
 	return false
 }
 
-// recorderThumbnailMaxDim caps the cached preview size at 256 px on the
-// longest edge. Matches the materials sub-tab's downsample policy so a
-// recording aggregate of ~1000 unique textures fits in ~256 MB.
-const recorderThumbnailMaxDim = 256
-
-// downsampleRecorderThumbnail produces a small RGBA copy of img capped
-// at recorderThumbnailMaxDim on its longest edge. Aspect ratio is
-// preserved. Source images smaller than the cap are returned unchanged.
-func downsampleRecorderThumbnail(src image.Image) image.Image {
-	srcBounds := src.Bounds()
-	w, h := srcBounds.Dx(), srcBounds.Dy()
-	if w <= recorderThumbnailMaxDim && h <= recorderThumbnailMaxDim {
-		return src
-	}
-	scale := float64(recorderThumbnailMaxDim) / float64(w)
-	if h > w {
-		scale = float64(recorderThumbnailMaxDim) / float64(h)
-	}
-	dstW := int(float64(w) * scale)
-	dstH := int(float64(h) * scale)
-	if dstW < 1 {
-		dstW = 1
-	}
-	if dstH < 1 {
-		dstH = 1
-	}
-	dst := image.NewNRGBA(image.Rect(0, 0, dstW, dstH))
-	xdraw.BiLinear.Scale(dst, dst.Bounds(), src, srcBounds, xdraw.Src, nil)
-	return dst
-}
