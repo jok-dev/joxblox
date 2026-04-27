@@ -86,27 +86,27 @@ func TestRecorderErrorQueueCapsAtFive(t *testing.T) {
 	}
 }
 
-func TestRecorderMergeAggregatesByDHashLargestWins(t *testing.T) {
+func TestRecorderMergeAggregatesByPixelHashLargestWins(t *testing.T) {
 	sessionDir := t.TempDir()
 	r := NewRecorder()
 	if err := r.Start(sessionDir, time.Hour); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	firstSeen := time.Now().Add(-time.Hour)
-	r.merge(&AggregateTexture{DHash: 0xAAAA, Resource: "small", Bytes: 1024, FirstSeen: firstSeen})
-	r.merge(&AggregateTexture{DHash: 0xBBBB, Resource: "other", Bytes: 4096})
-	r.merge(&AggregateTexture{DHash: 0xAAAA, Resource: "large", Bytes: 4 * 1024 * 1024}) // bigger — should replace
-	r.merge(&AggregateTexture{DHash: 0xAAAA, Resource: "tiny", Bytes: 16})                // smaller — should be ignored
+	r.merge(&AggregateTexture{PixelHash: "aaaa", Resource: "small", Bytes: 1024, FirstSeen: firstSeen})
+	r.merge(&AggregateTexture{PixelHash: "bbbb", Resource: "other", Bytes: 4096})
+	r.merge(&AggregateTexture{PixelHash: "aaaa", Resource: "large", Bytes: 4 * 1024 * 1024}) // bigger — should replace
+	r.merge(&AggregateTexture{PixelHash: "aaaa", Resource: "tiny", Bytes: 16})               // smaller — should be ignored
 	got := r.Stop()
 	if len(got) != 2 {
 		t.Fatalf("aggregate len: got %d, want 2", len(got))
 	}
 	for _, tex := range got {
-		if tex.DHash != 0xAAAA {
+		if tex.PixelHash != "aaaa" {
 			continue
 		}
 		if tex.Resource != "large" {
-			t.Errorf("largest-wins on dHash collision: got Resource=%q (Bytes=%d), want Resource=large", tex.Resource, tex.Bytes)
+			t.Errorf("largest-wins on pixel-hash collision: got Resource=%q (Bytes=%d), want Resource=large", tex.Resource, tex.Bytes)
 		}
 		if !tex.FirstSeen.Equal(firstSeen) {
 			t.Errorf("FirstSeen should carry over from original entry: got %v, want %v", tex.FirstSeen, firstSeen)

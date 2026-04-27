@@ -19,8 +19,11 @@ const (
 )
 
 // AggregateTexture is one deduplicated texture observed during a recording
-// session. Built from a renderdoc TextureInfo plus a downsampled
-// thumbnail. The dHash is the dedup key — first-seen wins.
+// session. Built from a renderdoc TextureInfo plus a full-resolution
+// decoded preview. The dedup key is PixelHash (exact SHA-256 of decoded
+// pixels) — perceptual dHash collided too often on low-resolution
+// textures whose 8×8 difference grid couldn't distinguish distinct
+// content. PixelHash is exact: differing pixels → different keys.
 type AggregateTexture struct {
 	DHash     uint64
 	PixelHash string
@@ -53,7 +56,7 @@ type Recorder struct {
 	sessionDir   string
 	recordingDir string
 	interval     time.Duration
-	aggregate    map[uint64]*AggregateTexture
+	aggregate    map[string]*AggregateTexture
 	captureCount int
 	droppedCount int
 	pendingErrs  []error
@@ -71,7 +74,7 @@ type Recorder struct {
 // NewRecorder returns an idle recorder. Call Start to begin a session.
 func NewRecorder() *Recorder {
 	return &Recorder{
-		aggregate: map[uint64]*AggregateTexture{},
+		aggregate: map[string]*AggregateTexture{},
 	}
 }
 
@@ -101,7 +104,7 @@ func (r *Recorder) Start(sessionDir string, interval time.Duration) error {
 	r.sessionDir = sessionDir
 	r.recordingDir = dir
 	r.interval = interval
-	r.aggregate = map[uint64]*AggregateTexture{}
+	r.aggregate = map[string]*AggregateTexture{}
 	r.captureCount = 0
 	r.droppedCount = 0
 	r.pendingErrs = nil
@@ -212,19 +215,20 @@ func (r *Recorder) ProcessCapture(rdcPath string) {
 	}()
 }
 
-// merge inserts a texture into the aggregate. On dHash collisions the
-// largest texture wins (by VRAM bytes) so the aggregate represents the
-// worst-case footprint observed for each visually-unique texture.
-// FirstSeen carries over from the prior entry on replace so the
-// chronological ordering in the UI doesn't reshuffle.
+// merge inserts a texture into the aggregate keyed on PixelHash. On
+// collisions (which require pixel-identical content) the largest
+// texture wins by VRAM bytes — the practical case is the same source
+// hashing identically across captures, where format/dimension changes
+// could vary the byte cost. FirstSeen carries over from the prior
+// entry on replace so the UI's chronological ordering stays stable.
 // Safe to call from worker goroutines.
 func (r *Recorder) merge(tex *AggregateTexture) {
-	if tex == nil || tex.DHash == 0 {
+	if tex == nil || tex.PixelHash == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	existing, exists := r.aggregate[tex.DHash]
+	existing, exists := r.aggregate[tex.PixelHash]
 	if exists && existing.Bytes >= tex.Bytes {
 		return
 	}
@@ -235,7 +239,7 @@ func (r *Recorder) merge(tex *AggregateTexture) {
 			tex.FirstSeen = time.Now()
 		}
 	}
-	r.aggregate[tex.DHash] = tex
+	r.aggregate[tex.PixelHash] = tex
 }
 
 // recordError pushes onto pendingErrs, capped at recorderMaxErrorQueue.
@@ -292,22 +296,22 @@ func (r *Recorder) defaultProcessFunc(rdcPath string) error {
 
 	for i := range report.Textures {
 		tex := report.Textures[i]
-		// DHash != 0 implies the texture was originally hashable (Asset*).
-		// Don't also gate on isHashableCategory(tex.Category) — by this
-		// point ComputeTextureHashes has retagged BC3 normals to
-		// CategoryNormalDXT5nm and B-packed MRs to CategoryBlank/CustomMR,
-		// neither of which isHashableCategory returns true for. Adding
-		// that gate silently dropped every normal map and MR texture from
-		// the aggregate (≈40-50% of VRAM on a PBR scene).
-		if tex.DHash == 0 {
+		// PixelHash != "" implies the texture was originally hashable
+		// (Asset*) — ComputeTextureHashes only populates it for those
+		// categories, then may retag the entry as Normal/MR after the
+		// fact. We deliberately don't also gate on isHashableCategory
+		// here, since the retag would silently drop every normal map
+		// and MR texture from the aggregate.
+		if tex.PixelHash == "" {
 			continue
 		}
 		// Skip the decode if we've already aggregated a same-or-larger
-		// version of this dHash — merge() applies the same rule, but
-		// avoiding the decode for the smaller candidate is the bigger
-		// win since DecodeTexturePreview dominates per-capture cost.
+		// version of this pixel hash — merge() applies the same rule,
+		// but avoiding the decode for the smaller candidate is the
+		// bigger win since DecodeTexturePreview dominates per-capture
+		// cost.
 		r.mu.Lock()
-		existing, seen := r.aggregate[tex.DHash]
+		existing, seen := r.aggregate[tex.PixelHash]
 		r.mu.Unlock()
 		if seen && existing.Bytes >= tex.Bytes {
 			continue
