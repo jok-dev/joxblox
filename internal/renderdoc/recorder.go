@@ -276,6 +276,12 @@ func (r *Recorder) defaultProcessFunc(rdcPath string) error {
 	}
 	defer store.Close()
 	ComputeTextureHashes(report, store, nil)
+	// Reclassify built-ins by pixel hash so the aggregate's Category
+	// field matches what the single-capture flow shows — without this
+	// the Textures sub-tab's "Assets only" filter wouldn't hide the
+	// engine's BRDF LUT, default block face, etc. when viewing a
+	// recording aggregate.
+	ApplyBuiltinHashes(report, DefaultRobloxBuiltinHashes)
 
 	for i := range report.Textures {
 		tex := report.Textures[i]

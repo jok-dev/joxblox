@@ -431,7 +431,17 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 			applySortAndFilter(state)
 			recomputeTextureMatches(state)
 			pathLabel.SetText(fmt.Sprintf("Recording aggregate · %d unique textures", len(textures)))
-			summaryLabel.SetText("")
+			var totalBytes int64
+			for _, info := range state.allTextures {
+				totalBytes += info.Bytes
+			}
+			assetsOnlyBytes, assetsOnlyCount := computeAssetsOnlyTotals(state.allTextures)
+			summaryLabel.SetText(fmt.Sprintf("Recording aggregate · Total VRAM: %s across %d unique textures · Assets only: %s across %d",
+				format.FormatSizeAuto64(totalBytes),
+				len(state.allTextures),
+				format.FormatSizeAuto64(assetsOnlyBytes),
+				assetsOnlyCount,
+			))
 			categoryLabel.SetText("")
 			countLabel.SetText(fmt.Sprintf("Showing %d of %d textures", len(state.displayTextures), len(state.allTextures)))
 			previewInfoLabel.SetText("Select a texture to preview.")
