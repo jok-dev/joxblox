@@ -212,19 +212,28 @@ func (r *Recorder) ProcessCapture(rdcPath string) {
 	}()
 }
 
-// merge inserts a texture into the aggregate; first-seen wins on dHash
-// collisions. Safe to call from worker goroutines.
+// merge inserts a texture into the aggregate. On dHash collisions the
+// largest texture wins (by VRAM bytes) so the aggregate represents the
+// worst-case footprint observed for each visually-unique texture.
+// FirstSeen carries over from the prior entry on replace so the
+// chronological ordering in the UI doesn't reshuffle.
+// Safe to call from worker goroutines.
 func (r *Recorder) merge(tex *AggregateTexture) {
 	if tex == nil || tex.DHash == 0 {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, exists := r.aggregate[tex.DHash]; exists {
+	existing, exists := r.aggregate[tex.DHash]
+	if exists && existing.Bytes >= tex.Bytes {
 		return
 	}
 	if tex.FirstSeen.IsZero() {
-		tex.FirstSeen = time.Now()
+		if exists {
+			tex.FirstSeen = existing.FirstSeen
+		} else {
+			tex.FirstSeen = time.Now()
+		}
 	}
 	r.aggregate[tex.DHash] = tex
 }
@@ -286,13 +295,14 @@ func (r *Recorder) defaultProcessFunc(rdcPath string) error {
 		if tex.DHash == 0 || !isHashableCategory(tex.Category) {
 			continue
 		}
-		// Skip if we've already aggregated this dHash — saves the
-		// decode+downsample cost. merge() also checks, but avoiding
-		// the decode is the bigger win.
+		// Skip the decode if we've already aggregated a same-or-larger
+		// version of this dHash — merge() applies the same rule, but
+		// avoiding the decode for the smaller candidate is the bigger
+		// win since DecodeTexturePreview dominates per-capture cost.
 		r.mu.Lock()
-		_, seen := r.aggregate[tex.DHash]
+		existing, seen := r.aggregate[tex.DHash]
 		r.mu.Unlock()
-		if seen {
+		if seen && existing.Bytes >= tex.Bytes {
 			continue
 		}
 		decoded, decErr := DecodeTexturePreview(tex, store)
