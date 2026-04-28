@@ -10,6 +10,15 @@
 - Subtle ground grid for spatial reference in 3D previews
 - Asset-ID mapping in the RenderDoc tab — when a place file is loaded in the Scan tab, the Materials and Textures sub-tabs show a `Studio Asset` column identifying captured textures by perceptual-hash match, plus a clickable "Open in Single Asset" button in the preview pane
 - RenderDoc Recording mode — Record/Stop toggle that auto-fires F12 every Ns, processes captures in the background, deduplicates textures by perceptual hash, and shows the unique-texture aggregate in the Textures sub-tab. Source `.rdc`s are deleted after extraction so disk usage stays bounded.
+- Report Generation: `Mismatched PBR Maps` grade — flags SurfaceAppearance materials whose color/normal/metalness/roughness textures aren't all at the same source resolution, with a `View` button listing each material's authored slot sizes
+- Report Generation: `Instances` grade — total descendant count of the rbxl/rbxm tree (any class), graded on p90/cell of positionable instances when spatial data is available
+- Report Generation: spatial grades now show `avg/cell`, `p90/cell`, and `max/cell` columns side-by-side; suppressed for whole-file asset types (vehicles)
+- Report Generation: `View` buttons on `Oversized Textures` and `Duplicates` rows — open dialogs listing the offending textures (asset ID, resolution, size, score) and duplicate groups (copies, wasted bytes, asset IDs, sample path)
+
+### Changed
+
+- Report Generation: removed `Total Size` and `Texture Size` grades (subsumed by GPU Texture Memory and Mesh Size); replaced `Wasteful BC3 Textures` with `Mismatched PBR Maps`; reordered so Mismatched + Oversized sit just above Duplicates
+- Heatmap 2D top-down map view is now unlit so part colors and heatmap tints render true-to-source instead of crushed near-black by the Phong shader's stale lighting state
 
 ## v1.1.0 - 2026-03-26
 

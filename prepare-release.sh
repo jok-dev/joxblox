@@ -75,9 +75,61 @@ case "$CONFIRM" in
   *) echo "Aborted."; exit 1;;
 esac
 
-git commit --allow-empty -m "Prepare ${NEW_VERSION} release"
+METADATA_FILE="internal/app/app_metadata.go"
+if ! grep -Eq '^var appVersion = "[^"]+"$' "$METADATA_FILE"; then
+  echo "Aborting: could not find 'var appVersion = \"...\"' in $METADATA_FILE." >&2
+  exit 1
+fi
+
+CHANGELOG_FILE="CHANGELOG.md"
+if [ ! -f "$CHANGELOG_FILE" ]; then
+  echo "Aborting: $CHANGELOG_FILE not found." >&2
+  exit 1
+fi
+if ! grep -Eq '^## Unreleased$' "$CHANGELOG_FILE"; then
+  echo "Aborting: could not find '## Unreleased' heading in $CHANGELOG_FILE." >&2
+  exit 1
+fi
+
+TODAY="$(date +%Y-%m-%d)"
+
+# Rewrite the Unreleased section: keep '## Unreleased' as a fresh empty
+# placeholder for the next cycle, and insert '## <version> - <date>'
+# directly under it so the existing bullet list moves into the new
+# release. Only acts on the first occurrence.
+TMP_CHANGELOG="${CHANGELOG_FILE}.bump.tmp"
+awk -v version="$NEW_VERSION" -v today="$TODAY" '
+  BEGIN { renamed = 0 }
+  !renamed && /^## Unreleased$/ {
+    print "## Unreleased"
+    print ""
+    print "## " version " - " today
+    renamed = 1
+    next
+  }
+  { print }
+' "$CHANGELOG_FILE" > "$TMP_CHANGELOG"
+mv "$TMP_CHANGELOG" "$CHANGELOG_FILE"
+
+if ! grep -Fq "## ${NEW_VERSION} - ${TODAY}" "$CHANGELOG_FILE"; then
+  echo "Aborting: changelog rewrite did not apply to $CHANGELOG_FILE." >&2
+  exit 1
+fi
+
+# Portable in-place rewrite (BSD sed on macOS rejects bare -i).
+TMP_METADATA="${METADATA_FILE}.bump.tmp"
+sed -E "s|^var appVersion = \"[^\"]+\"$|var appVersion = \"${NEW_VERSION}\"|" "$METADATA_FILE" > "$TMP_METADATA"
+mv "$TMP_METADATA" "$METADATA_FILE"
+
+if ! grep -Fq "var appVersion = \"${NEW_VERSION}\"" "$METADATA_FILE"; then
+  echo "Aborting: version bump did not apply to $METADATA_FILE." >&2
+  exit 1
+fi
+
+git add "$METADATA_FILE" "$CHANGELOG_FILE"
+git commit -m "Prepare ${NEW_VERSION} release"
 git tag "${NEW_VERSION}"
 git push origin "${BRANCH}"
 git push origin "${NEW_VERSION}"
 
-echo "Released ${NEW_VERSION} (commit + tag pushed on ${BRANCH})."
+echo "Released ${NEW_VERSION} (bumped $METADATA_FILE + $CHANGELOG_FILE, commit + tag pushed on ${BRANCH})."
