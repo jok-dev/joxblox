@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.4.2 - 2026-04-28
+
 ### Added
 
 - Single Asset tab: `Upload Image` button — pick a local PNG/JPEG/GIF/BMP/WEBP and the tab treats it like a Roblox image asset (preview, alpha analysis, downscale variants, recompressed-size readout) without round-tripping through Roblox
