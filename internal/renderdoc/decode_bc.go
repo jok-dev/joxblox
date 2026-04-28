@@ -5,12 +5,12 @@ import (
 	"image"
 )
 
-// decodeBC1 decodes a BC1-compressed (DXT1) mip level into an *image.NRGBA.
+// DecodeBC1 decodes a BC1-compressed (DXT1) mip level into an *image.NRGBA.
 // data is the tightly-packed sequence of 8-byte blocks scanning left-to-right
 // then top-to-bottom, 4x4 pixels per block. width and height are in pixels
 // and need not be block-aligned; trailing pixels outside the image bounds are
 // ignored.
-func decodeBC1(data []byte, width, height int) (*image.NRGBA, error) {
+func DecodeBC1(data []byte, width, height int) (*image.NRGBA, error) {
 	blockWidth := (width + 3) / 4
 	blockHeight := (height + 3) / 4
 	expectedBytes := blockWidth * blockHeight * 8
@@ -29,10 +29,10 @@ func decodeBC1(data []byte, width, height int) (*image.NRGBA, error) {
 	return dst, nil
 }
 
-// decodeBC3 decodes a BC3-compressed (DXT5) mip level. BC3 = 8-byte alpha
+// DecodeBC3 decodes a BC3-compressed (DXT5) mip level. BC3 = 8-byte alpha
 // block followed by 8-byte BC1-style color block. The color block always uses
 // 4-color mode (never the transparent/punch-through mode of BC1).
-func decodeBC3(data []byte, width, height int) (*image.NRGBA, error) {
+func DecodeBC3(data []byte, width, height int) (*image.NRGBA, error) {
 	blockWidth := (width + 3) / 4
 	blockHeight := (height + 3) / 4
 	expectedBytes := blockWidth * blockHeight * 16

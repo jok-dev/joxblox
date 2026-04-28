@@ -64,6 +64,7 @@ const (
 	VkFormatBC6HSfloat      VkFormat = 144
 	VkFormatBC7Unorm        VkFormat = 145
 	VkFormatBC7Srgb         VkFormat = 146
+	VkFormatETC2_R8G8B8_UnormBlock VkFormat = 147
 )
 
 // Header captures the fixed 80-byte KTX2 header plus the index section.
@@ -202,6 +203,47 @@ func (container *Container) MipDimensions(levelIndex int) (width, height int) {
 		height = 1
 	}
 	return
+}
+
+// VkFormatName returns a short human-readable label for the recognised
+// formats joxblox currently encounters in Roblox-served KTX2 files
+// ("BC1", "BC3", "BC7", "ETC2"). Returns the numeric vkFormat as a string
+// for unrecognised values.
+func (header Header) VkFormatName() string {
+	switch header.VkFormat {
+	case VkFormatBC1RGBUnorm, VkFormatBC1RGBSrgb, VkFormatBC1RGBAUnorm, VkFormatBC1RGBASrgb:
+		return "BC1"
+	case VkFormatBC2Unorm, VkFormatBC2Srgb:
+		return "BC2"
+	case VkFormatBC3Unorm, VkFormatBC3Srgb:
+		return "BC3"
+	case VkFormatBC4Unorm, VkFormatBC4Snorm:
+		return "BC4"
+	case VkFormatBC5Unorm, VkFormatBC5Snorm:
+		return "BC5"
+	case VkFormatBC6HUfloat, VkFormatBC6HSfloat:
+		return "BC6H"
+	case VkFormatBC7Unorm, VkFormatBC7Srgb:
+		return "BC7"
+	case VkFormatETC2_R8G8B8_UnormBlock:
+		return "ETC2"
+	}
+	return fmt.Sprintf("vkFormat=%d", header.VkFormat)
+}
+
+// HasAlpha reports whether the container's VkFormat carries an alpha
+// channel. BC1-RGB and BC4/5 (single/dual-channel) are alpha-less; BC3,
+// BC7, and BC1-RGBA carry alpha. ETC2 has alpha-bearing siblings but the
+// plain RGB variant doesn't.
+func (header Header) HasAlpha() bool {
+	switch header.VkFormat {
+	case VkFormatBC1RGBAUnorm, VkFormatBC1RGBASrgb,
+		VkFormatBC2Unorm, VkFormatBC2Srgb,
+		VkFormatBC3Unorm, VkFormatBC3Srgb,
+		VkFormatBC7Unorm, VkFormatBC7Srgb:
+		return true
+	}
+	return false
 }
 
 // IsBCFormat reports whether this container's VkFormat is one of the BCn

@@ -7,10 +7,13 @@ package main
 
 import (
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"strconv"
 	"time"
 
+	"joxblox/internal/renderdoc"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/ktx2"
 )
@@ -37,17 +40,22 @@ func main() {
 	}
 	roblox.SetRoblosecurityCookie(cookie)
 
-	// Start with the direct /v1/asset?id= endpoint — it returns the
-	// content bytes directly (no JSON indirection) and should honour
-	// Accept-Encoding: zstd to serve the high-res KTX2 variant. If the
-	// batch endpoint is needed later, we can add that path.
-	directURL := fmt.Sprintf("https://assetdelivery.roblox.com/v1/asset/?id=%d", assetID)
-	fmt.Printf("Asset %d: fetching %s with Accept-Encoding: gzip, deflate, zstd ...\n", assetID, directURL)
-	raw, err := roblox.FetchAssetDeliveryLocation(directURL, 30*time.Second)
+	// Probe the mip-pack tiers from largest to smallest — each tier holds
+	// a non-overlapping range of mip levels, so the lowest tier (64) is
+	// only the 1×1..64×64 range. Server caps Image-typed assets at 1024.
+	fmt.Printf("Asset %d: probing mip-pack tiers for highest available representation ...\n", assetID)
+	raw, entry, err := roblox.FetchHighestKTX2RepresentationByAssetID(assetID, 30*time.Second)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "CDN fetch failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "fetch failed: %v\n", err)
 		os.Exit(1)
 	}
+	if entry.ContentRepresentationSpecifier != nil {
+		spec := entry.ContentRepresentationSpecifier
+		fmt.Printf("  matched representation: format=%s majorVersion=%s fidelity=%s\n", spec.Format, spec.MajorVersion, spec.Fidelity)
+	} else {
+		fmt.Println("  WARNING: server fell back to baseline (no KTX2 representation generated for this asset)")
+	}
+	fmt.Printf("  CDN location: %s\n", truncatedURL(entry.Location, 80))
 	fmt.Printf("  transport payload: %d bytes (first bytes: %x)\n", len(raw), raw[:min(len(raw), 8)])
 
 	unwrapped, err := ktx2.DecompressTransportWrapper(raw)
@@ -105,9 +113,42 @@ func main() {
 	}
 	fmt.Printf("  mip 0 uncompressed: %d bytes (first bytes: %x)\n",
 		len(mip0), mip0[:min(len(mip0), 16)])
-	if header.IsBCFormat() {
-		fmt.Println("  Raw BCn block data — can be decoded by internal/renderdoc BC helpers.")
+
+	width, height := container.MipDimensions(0)
+	var rgba *image.NRGBA
+	switch header.VkFormat {
+	case ktx2.VkFormatBC1RGBUnorm, ktx2.VkFormatBC1RGBSrgb,
+		ktx2.VkFormatBC1RGBAUnorm, ktx2.VkFormatBC1RGBASrgb:
+		rgba, err = renderdoc.DecodeBC1(mip0, width, height)
+	case ktx2.VkFormatBC3Unorm, ktx2.VkFormatBC3Srgb:
+		rgba, err = renderdoc.DecodeBC3(mip0, width, height)
+	default:
+		fmt.Printf("  no local decoder for vkFormat %d — skipping PNG export\n", header.VkFormat)
+		return
 	}
+	if err != nil {
+		fmt.Printf("  BC decode failed: %v\n", err)
+		return
+	}
+	pngPath := fmt.Sprintf("%s/asset_%d_mip0.png", os.TempDir(), assetID)
+	pngFile, openErr := os.Create(pngPath)
+	if openErr != nil {
+		fmt.Printf("  open png: %v\n", openErr)
+		return
+	}
+	defer pngFile.Close()
+	if encodeErr := png.Encode(pngFile, rgba); encodeErr != nil {
+		fmt.Printf("  png encode: %v\n", encodeErr)
+		return
+	}
+	fmt.Printf("  decoded mip 0 → %s (%dx%d RGBA)\n", pngPath, width, height)
+}
+
+func truncatedURL(url string, maxLen int) string {
+	if len(url) <= maxLen {
+		return url
+	}
+	return url[:maxLen] + "..."
 }
 
 func hasKTX2Magic(data []byte) bool {

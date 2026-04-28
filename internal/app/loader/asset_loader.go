@@ -22,7 +22,9 @@ import (
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
 	"joxblox/internal/heatmap"
+	"joxblox/internal/renderdoc"
 	"joxblox/internal/roblox"
+	"joxblox/internal/roblox/ktx2"
 
 	"fyne.io/fyne/v2"
 )
@@ -1097,6 +1099,18 @@ func fetchAssetFileInfoWithCacheKey(fileURL string, cacheKey string, assetID int
 }
 
 func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, assetID int64, assetTypeID int, includeHash bool, trace *AssetRequestTrace) (*AssetFileInfo, error) {
+	// Image assets: KTX2 drives metadata (true upload dim, served wire
+	// bytes, BCn format), the legacy PNG fetch — run in parallel — keeps
+	// the fyne preview Resource and pixel-level analysis (alpha pixel
+	// count, recompressed PNG/JPEG sizes) working. If KTX2 fails (no auth,
+	// no transcoded variant, network error) we fall through to the
+	// existing PNG-only path below for graceful degradation.
+	if assetID > 0 && assetTypeID == roblox.AssetTypeImage {
+		if ktx2Info, ktx2Err := fetchImageAssetFileInfoUsingKTX2(assetID, includeHash, fileURL, cacheKey, trace); ktx2Err == nil {
+			return ktx2Info, nil
+		}
+	}
+
 	fileBytes, contentType, err := downloadRobloxContentBytesWithCacheKeyAndTrace(fileURL, cacheKey, requestTimeout, trace)
 	if err != nil {
 		return nil, err
@@ -1184,6 +1198,138 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 		FileBytes:                fileBytes,
 		FileName:                 fileName,
 	}, nil
+}
+
+// fetchImageAssetFileInfoUsingKTX2 fetches the highest-resolution KTX2
+// representation of an image asset and packages it as an AssetFileInfo.
+// Width/Height come from the KTX2 header (true upload resolution).
+// BytesSize is the wire size as served (transport-compressed BC payload),
+// which is what the player actually downloads.
+//
+// For the preview Resource the helper decodes mip 0 to RGBA and re-encodes
+// as PNG. When the BC format isn't supported by joxblox's local decoders
+// (e.g. BC7), the helper concurrently fetches the legacy PNG and uses
+// that instead — same fallback path as the old behaviour, just on-demand
+// rather than always-on. Returns an error only if KTX2 itself fails so
+// the caller can fall back to the legacy-only path.
+func fetchImageAssetFileInfoUsingKTX2(assetID int64, includeHash bool, fileURL string, cacheKey string, trace *AssetRequestTrace) (*AssetFileInfo, error) {
+	rawBytes, _, fetchErr := roblox.FetchHighestKTX2RepresentationByAssetID(assetID, requestTimeout)
+	if fetchErr != nil {
+		return nil, fetchErr
+	}
+	unwrapped, unwrapErr := ktx2.DecompressTransportWrapper(rawBytes)
+	if unwrapErr != nil {
+		return nil, fmt.Errorf("ktx2 transport unwrap: %w", unwrapErr)
+	}
+	container, parseErr := ktx2.Parse(unwrapped)
+	if parseErr != nil {
+		return nil, fmt.Errorf("ktx2 parse: %w", parseErr)
+	}
+
+	sha256Value := ""
+	if includeHash {
+		sha256Value = ComputeSHA256Hex(rawBytes)
+	}
+
+	formatLabel := fmt.Sprintf("KTX2/%s", container.Header.VkFormatName())
+	fileName := fmt.Sprintf("asset_%d.ktx2", assetID)
+	info := &ImageInfo{
+		Resource:        nil,
+		Width:           int(container.Header.PixelWidth),
+		Height:          int(container.Header.PixelHeight),
+		BytesSize:       len(rawBytes),
+		Format:          formatLabel,
+		ContentType:     "application/ktx2",
+		SHA256:          sha256Value,
+		HasAlphaChannel: container.Header.HasAlpha(),
+	}
+
+	if rgba, decodeErr := decodeKTX2Mip0ToRGBA(container); decodeErr == nil {
+		info.NonOpaqueAlphaPixels = countNonOpaqueAlphaPixels(rgba)
+		previewPNG, encodeErr := encodeFullResolutionPNG(rgba)
+		if encodeErr == nil {
+			info.Resource = fyne.NewStaticResource(fmt.Sprintf("asset_%d.png", assetID), previewPNG)
+			info.RecompressedPNGByteSize = len(previewPNG)
+		}
+	} else {
+		// BC format we can't decode locally (e.g. BC7). Fall back to the
+		// legacy 1024-capped PNG just for the preview Resource — KTX2
+		// metadata above is still authoritative.
+		legacyBytes, _, legacyErr := downloadRobloxContentBytesWithCacheKeyAndTrace(fileURL, cacheKey, requestTimeout, trace)
+		if legacyErr == nil && len(legacyBytes) > 0 {
+			if _, legacyFormat, configErr := image.DecodeConfig(bytes.NewReader(legacyBytes)); configErr == nil {
+				info.Resource = fyne.NewStaticResource(fmt.Sprintf("asset_%d.%s", assetID, legacyFormat), legacyBytes)
+			}
+			if analysis, analysisErr := analyzeImage(legacyBytes); analysisErr == nil {
+				info.RecompressedPNGByteSize = analysis.RecompressedPNGBytes
+				info.RecompressedJPEGByteSize = analysis.RecompressedJPEGBytes
+				info.NonOpaqueAlphaPixels = analysis.NonOpaqueAlphaPixels
+			}
+		}
+	}
+
+	return &AssetFileInfo{
+		Info:               info,
+		IsImage:            true,
+		ReferencedAssetIDs: []int64{},
+		FileBytes:          rawBytes,
+		FileName:           fileName,
+	}, nil
+}
+
+// decodeKTX2Mip0ToRGBA decompresses mip 0 of the supplied KTX2 container
+// (handling BasisLZ/Zstd supercompression internally via DecompressLevel)
+// and decodes the BCn payload into an *image.NRGBA. Returns an error for
+// VkFormat values joxblox doesn't have a local decoder for.
+func decodeKTX2Mip0ToRGBA(container *ktx2.Container) (*image.NRGBA, error) {
+	if len(container.Levels) == 0 {
+		return nil, fmt.Errorf("ktx2: no mip levels")
+	}
+	mipBytes, decompressErr := container.DecompressLevel(0)
+	if decompressErr != nil {
+		return nil, decompressErr
+	}
+	width, height := container.MipDimensions(0)
+	switch container.Header.VkFormat {
+	case ktx2.VkFormatBC1RGBUnorm, ktx2.VkFormatBC1RGBSrgb,
+		ktx2.VkFormatBC1RGBAUnorm, ktx2.VkFormatBC1RGBASrgb:
+		return renderdoc.DecodeBC1(mipBytes, width, height)
+	case ktx2.VkFormatBC3Unorm, ktx2.VkFormatBC3Srgb:
+		return renderdoc.DecodeBC3(mipBytes, width, height)
+	}
+	return nil, fmt.Errorf("ktx2: no local decoder for vkFormat %d (%s)", container.Header.VkFormat, container.Header.VkFormatName())
+}
+
+// encodeFullResolutionPNG encodes rgba as PNG bytes at its native
+// dimensions. No downscaling — the preview matches the asset's actual
+// upload resolution.
+func encodeFullResolutionPNG(rgba *image.NRGBA) ([]byte, error) {
+	var buffer bytes.Buffer
+	if encodeErr := png.Encode(&buffer, rgba); encodeErr != nil {
+		return nil, encodeErr
+	}
+	return buffer.Bytes(), nil
+}
+
+// countNonOpaqueAlphaPixels walks rgba once and counts pixels whose alpha
+// byte is < 255. Mirrors the count produced by analyzeImage on a PNG —
+// the threshold the optimizer uses to flag wasteful BC3 vs BC1 textures.
+func countNonOpaqueAlphaPixels(rgba *image.NRGBA) int64 {
+	pixels := rgba.Pix
+	stride := rgba.Stride
+	bounds := rgba.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	var count int64
+	for y := 0; y < height; y++ {
+		row := pixels[y*stride : y*stride+width*4]
+		for x := 0; x < width; x++ {
+			if row[x*4+3] < 255 {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func buildAssetDownloadFileName(assetID int64, assetTypeID int, contentType string, imageFormat string, isImage bool) string {

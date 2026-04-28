@@ -52,9 +52,9 @@ func findBaseLevelUpload(uploads []TextureUpload) *TextureUpload {
 func decodeTextureBytes(texture TextureInfo, data []byte, width, height int) (image.Image, error) {
 	switch texture.Format {
 	case "DXGI_FORMAT_BC1_UNORM", "DXGI_FORMAT_BC1_UNORM_SRGB", "DXGI_FORMAT_BC1_TYPELESS":
-		return decodeBC1(data, width, height)
+		return DecodeBC1(data, width, height)
 	case "DXGI_FORMAT_BC3_UNORM", "DXGI_FORMAT_BC3_UNORM_SRGB", "DXGI_FORMAT_BC3_TYPELESS":
-		return decodeBC3(data, width, height)
+		return DecodeBC3(data, width, height)
 	case "DXGI_FORMAT_R8G8B8A8_UNORM", "DXGI_FORMAT_R8G8B8A8_UNORM_SRGB", "DXGI_FORMAT_R8G8B8A8_TYPELESS":
 		return decodeRGBA8(data, width, height, false)
 	case "DXGI_FORMAT_B8G8R8A8_UNORM", "DXGI_FORMAT_B8G8R8A8_UNORM_SRGB", "DXGI_FORMAT_B8G8R8A8_TYPELESS":

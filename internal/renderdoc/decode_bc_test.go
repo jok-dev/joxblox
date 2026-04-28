@@ -22,7 +22,7 @@ func buildBC1SolidBlock(r5, g6, b5 uint16) []byte {
 func TestDecodeBC1SolidRed(t *testing.T) {
 	// 31,0,0 in RGB565 = pure red. After 5→8 bit expansion: (31<<3)|(31>>2) = 255.
 	block := buildBC1SolidBlock(31, 0, 0)
-	img, err := decodeBC1(block, 4, 4)
+	img, err := DecodeBC1(block, 4, 4)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestDecodeBC1PunchthroughAlpha(t *testing.T) {
 	// = 0xFFFFFFFF so every pixel picks palette[3], which is transparent.
 	// color0 = 0x0000 (black), color1 = 0x07E0 (green, RGB565).
 	block := []byte{0x00, 0x00, 0xE0, 0x07, 0xFF, 0xFF, 0xFF, 0xFF}
-	img, err := decodeBC1(block, 4, 4)
+	img, err := DecodeBC1(block, 4, 4)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestDecodeBC3SolidAlpha(t *testing.T) {
 	block[10] = byte(whiteColor & 0xFF)
 	block[11] = byte(whiteColor >> 8)
 
-	img, err := decodeBC3(block, 4, 4)
+	img, err := DecodeBC3(block, 4, 4)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestDecodeBC3SolidAlpha(t *testing.T) {
 }
 
 func TestDecodeBC1UndersizedInput(t *testing.T) {
-	_, err := decodeBC1([]byte{0, 0, 0, 0}, 4, 4)
+	_, err := DecodeBC1([]byte{0, 0, 0, 0}, 4, 4)
 	if err == nil {
 		t.Errorf("expected error for undersized BC1 input")
 	}
