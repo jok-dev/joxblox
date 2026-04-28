@@ -1,6 +1,10 @@
 package loader
 
 import (
+	"bytes"
+	"fmt"
+	"image"
+	"path/filepath"
 	"strings"
 
 	"joxblox/internal/extractor"
@@ -9,6 +13,67 @@ import (
 
 	"fyne.io/fyne/v2"
 )
+
+// BuildLocalImagePreview wraps a local image file's bytes in an
+// AssetPreviewResult so the Single Asset tab (and any other asset-view
+// surface) can render and operate on it as if it were a Roblox image
+// asset — driving the same downscale/preview-variant pipeline. fileName
+// becomes the resource label and the download filename. Pass any byte
+// payload that Go's image package can decode (PNG, JPEG, GIF, etc.).
+func BuildLocalImagePreview(fileName string, fileBytes []byte) (*AssetPreviewResult, error) {
+	if len(fileBytes) == 0 {
+		return nil, fmt.Errorf("image file is empty")
+	}
+
+	imageConfig, imageFormat, decodeErr := image.DecodeConfig(bytes.NewReader(fileBytes))
+	if decodeErr != nil {
+		return nil, fmt.Errorf("decode image: %w", decodeErr)
+	}
+
+	resourceName := strings.TrimSpace(filepath.Base(fileName))
+	if resourceName == "" {
+		resourceName = "local_image." + imageFormat
+	}
+
+	analysis, analysisErr := analyzeImage(fileBytes)
+	if analysisErr != nil {
+		analysis = imageAnalysis{}
+	}
+
+	imageInfo := &ImageInfo{
+		Resource:                 fyne.NewStaticResource(resourceName, fileBytes),
+		Width:                    imageConfig.Width,
+		Height:                   imageConfig.Height,
+		BytesSize:                len(fileBytes),
+		RecompressedPNGByteSize:  analysis.RecompressedPNGBytes,
+		RecompressedJPEGByteSize: analysis.RecompressedJPEGBytes,
+		Format:                   strings.ToUpper(imageFormat),
+		ContentType:              "image/" + strings.ToLower(imageFormat),
+		SHA256:                   ComputeSHA256Hex(fileBytes),
+		HasAlphaChannel:          analysis.HasAlphaChannel,
+		NonOpaqueAlphaPixels:     analysis.NonOpaqueAlphaPixels,
+	}
+
+	return &AssetPreviewResult{
+		Image:              imageInfo,
+		Stats:              imageInfo,
+		ReferencedAssetIDs: nil,
+		ChildAssets:        nil,
+		TotalBytesSize:     len(fileBytes),
+		Source:             "Local file",
+		State:              "Local",
+		AssetTypeID:        roblox.AssetTypeImage,
+		AssetTypeName:      "Image",
+		DownloadBytes:      append([]byte(nil), fileBytes...),
+		DownloadFileName:   resourceName,
+		// DownloadIsOriginal=true gates the variant dropdown off (since real
+		// Roblox assets shouldn't pretend a downscaled PNG is "the upload").
+		// For a local image the variants ARE the point — the "Original" entry
+		// is still prepended to the list, so the user keeps a 1:1 download
+		// option alongside the resized previews.
+		DownloadIsOriginal: false,
+	}, nil
+}
 
 func PreviewSHA256(previewResult *AssetPreviewResult) string {
 	if previewResult == nil {

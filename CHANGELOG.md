@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- Single Asset tab: `Upload Image` button — pick a local PNG/JPEG/GIF/BMP/WEBP and the tab treats it like a Roblox image asset (preview, alpha analysis, downscale variants, recompressed-size readout) without round-tripping through Roblox
+
+### Changed
+
+- Report Generation: overall score now uses weighted grades instead of an even average — GPU Texture Memory and Mesh Complexity each weight 25%, Draw Calls 20%, the remaining nine grades split the last 30% evenly
+- Report Generation: spatial-mode metrics now grade their avg/p90/max cell readings independently and average the three sub-scores into the row grade. Avg has its own (tighter) threshold; p90 and max share the existing headline threshold. So a uniformly busy scene grades worse than a single-hotspot scene even when their p90s match
+
 ## v1.4.1 - 2026-04-28
 
 ### Added

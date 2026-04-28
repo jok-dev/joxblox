@@ -77,6 +77,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
@@ -84,11 +87,29 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Extract changelog section for this tag
+        shell: bash
+        env:
+          VERSION_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          awk -v tag="$VERSION_NAME" '
+            /^## / {
+              if ($2 == tag) { capturing = 1; next }
+              if (capturing) { exit }
+            }
+            capturing { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No CHANGELOG.md section found for ${VERSION_NAME}; release notes will fall back to auto-generated commit list." >&2
+          fi
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           name: Joxblox ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
           files: dist/*
           fail_on_unmatched_files: true

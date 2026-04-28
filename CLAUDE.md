@@ -29,6 +29,8 @@ Tip: check ./latest.log for latest logs of last run
 - Format code consistently before finishing changes.
 - Verify build/test passes after substantive edits.
 - Preserve existing behavior unless a change is intentional and documented.
+- When you change user-visible behavior — new features, removed/renamed UI, fixes that change what the user sees — add a one-line entry under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) (`### Added`, `### Changed`, `### Fixed`, or `### Removed` as appropriate). The release script moves Unreleased into a tagged section automatically; pure refactors / internal-only changes don't need an entry.
+- Treat `## Unreleased` as the net diff since the last release, not a running log. If you fix a bug in something that's still under `## Unreleased`, don't add a `### Fixed` line for it — that bug never shipped, just amend the existing entry. If you replace, rename, or undo something already listed under `## Unreleased`, edit or remove that entry rather than adding a new contradicting one. Same applies if you change a feature multiple times before release — collapse it into a single accurate description.
 - Don't do stuff on the ui thread if it's gonna take a while
 - Always use the same logic for showing byte sizes, show mb if >1mb, kb if >1kb and if not then show bytes
 - Make sure that any feature that uses assets also supports rbxthumb:// notation since this returns different asset sizes than just using the asset id itself! don't strip this from ids it's important!

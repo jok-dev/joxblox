@@ -1,7 +1,10 @@
 package singleasset
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,7 +18,9 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	fyneDialog "fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	nativeDialog "github.com/sqweek/dialog"
 )
 
 // NewSingleAssetTab returns the tab content plus a loadByID callback that
@@ -150,7 +155,55 @@ func NewSingleAssetTab(window fyne.Window) (fyne.CanvasObject, func(assetID int6
 		loadAsset()
 	}
 
-	inputRow := container.NewBorder(nil, nil, nil, goButton, assetInput)
+	loadLocalImage := func(fileName string, fileBytes []byte) {
+		previewResult, buildErr := loader.BuildLocalImagePreview(fileName, fileBytes)
+		if buildErr != nil {
+			statusLabel.SetText(buildErr.Error())
+			fyneDialog.ShowError(buildErr, window)
+			return
+		}
+		// Synthetic asset ID — local files aren't backed by a Roblox asset.
+		// Zero short-circuits the hierarchy / "open in scan" lookups that key
+		// off a real asset ID while still letting the preview/resize pipeline
+		// run end-to-end against the loaded bytes.
+		const localAssetID int64 = 0
+		assetInput.SetText("")
+		explorerState = ui.NewAssetExplorerState(localAssetID, previewResult)
+		renderPreview(localAssetID, previewResult)
+		previewBox.Refresh()
+		statusLabel.SetText(fmt.Sprintf("Loaded local image: %s (%d×%d, %s)",
+			filepath.Base(fileName),
+			previewResult.Stats.Width,
+			previewResult.Stats.Height,
+			previewResult.Stats.Format,
+		))
+		debug.Logf("Single asset loaded local image: %s (%d bytes)", fileName, len(fileBytes))
+	}
+
+	uploadButton := widget.NewButtonWithIcon("Upload Image", theme.UploadIcon(), func() {
+		selectedPath, pickerErr := nativeDialog.File().
+			Title("Select an image file").
+			Filter("Image files", "png", "jpg", "jpeg", "gif", "bmp", "webp").
+			Load()
+		if pickerErr != nil {
+			if errors.Is(pickerErr, nativeDialog.Cancelled) {
+				return
+			}
+			fyneDialog.ShowError(pickerErr, window)
+			return
+		}
+		if strings.TrimSpace(selectedPath) == "" {
+			return
+		}
+		fileBytes, readErr := os.ReadFile(selectedPath)
+		if readErr != nil {
+			fyneDialog.ShowError(fmt.Errorf("read file: %w", readErr), window)
+			return
+		}
+		loadLocalImage(selectedPath, fileBytes)
+	})
+
+	inputRow := container.NewBorder(nil, nil, nil, container.NewHBox(uploadButton, goButton), assetInput)
 
 	tabContent := container.NewVBox(
 		inputRow,

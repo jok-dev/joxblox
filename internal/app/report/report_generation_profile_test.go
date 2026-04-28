@@ -99,8 +99,8 @@ func TestContinuousScoreMatchesGradeBoundaries(t *testing.T) {
 func TestOverallPerformanceScorePercentContinuous(t *testing.T) {
 	thresholds := DefaultAssetType().Thresholds
 
-	bareMid := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte/2, CellMetric{}, false, thresholds.MeshSizeMB)
-	bareHigh := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte*9/10, CellMetric{}, false, thresholds.MeshSizeMB)
+	bareMid := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte/2, CellMetric{}, false, thresholds.MeshSizeMB, thresholds.MeshSizeMBAvg)
+	bareHigh := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte*9/10, CellMetric{}, false, thresholds.MeshSizeMB, thresholds.MeshSizeMBAvg)
 	if bareMid.Grade != bareHigh.Grade {
 		t.Fatal("test expects both values in the same grade bucket")
 	}
@@ -140,13 +140,34 @@ func TestComputeMeshComplexityGrade(t *testing.T) {
 }
 
 func TestComputeMeshComplexityGradeCellPercentile(t *testing.T) {
-	got := ComputeMeshComplexityGrade(8_000_000, CellMetric{P90: 4_000}, true)
+	uniform := func(v float64) CellMetric { return CellMetric{Avg: v, P90: v, Max: v} }
+	// When avg + p90 + max are all well under every threshold (1000 is far
+	// below the lowest avgT bucket 2500 and headline 5000), the row grades
+	// A+. The avg threshold is what pulls "uniformly busy" scenes down even
+	// when p90 alone would have been A+.
+	got := ComputeMeshComplexityGrade(8_000_000, uniform(1_000), true)
 	if got.Grade != gradeAPlus {
-		t.Errorf("expected A+ when cell p90 is 4000 (< 5000), got %s", got.Grade)
+		t.Errorf("expected A+ when avg/p90/max are all 1000, got %s", got.Grade)
 	}
-	got = ComputeMeshComplexityGrade(100, CellMetric{P90: 10_000}, true)
-	if got.Grade != gradeA {
-		t.Errorf("expected A when cell p90 is 10000 (>= 5000, < 15000), got %s", got.Grade)
+	// A scene with a single hot cell (avg 1000, p90 4500, max 50000) should
+	// grade worse than uniform-1000 because the max sub-grade tanks even
+	// though avg/p90 are still A-tier.
+	hotspot := ComputeMeshComplexityGrade(8_000_000, CellMetric{Avg: 1_000, P90: 4_500, Max: 50_000}, true)
+	if GradeToNumeric(hotspot.Grade) >= GradeToNumeric(got.Grade) {
+		t.Errorf("hotspot scene should grade worse than uniform-low: hotspot=%s uniform=%s", hotspot.Grade, got.Grade)
+	}
+}
+
+func TestComputeMeshComplexityGradeWholeFile(t *testing.T) {
+	// Whole-file mode (useCellPercentile=false) grades the scalar against
+	// headline thresholds only — avg thresholds are unused.
+	got := ComputeMeshComplexityGrade(4_999, CellMetric{}, false)
+	if got.Grade != gradeAPlus {
+		t.Errorf("expected A+ at 4999 triangles, got %s", got.Grade)
+	}
+	got = ComputeMeshComplexityGrade(15_000, CellMetric{}, false)
+	if got.Grade != gradeB {
+		t.Errorf("expected B at 15000 triangles, got %s", got.Grade)
 	}
 }
 
