@@ -92,7 +92,7 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 		},
 	}
 
-	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, points, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.TotalBytes != 22*format.Megabyte {
 		t.Fatalf("expected total bytes %d, got %d", 22*format.Megabyte, summary.TotalBytes)
@@ -164,7 +164,7 @@ func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
 		},
 	}
 
-	summary, points := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, points, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.TotalBytes != 5*format.Megabyte {
 		t.Errorf("expected total bytes %d, got %d", 5*format.Megabyte, summary.TotalBytes)
@@ -223,7 +223,7 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 		},
 	}
 
-	summary, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.ReferenceCount != 3 {
 		t.Fatalf("expected reference count 3, got %d", summary.ReferenceCount)
@@ -284,7 +284,7 @@ func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T)
 		},
 	}
 
-	summary, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
 
 	if summary.TriangleCount != 246 {
 		t.Fatalf("expected triangle count 246 across two mesh instances, got %d", summary.TriangleCount)
@@ -327,7 +327,7 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 		{InstanceType: "Part", InstancePath: "Workspace.Part2"},
 	}
 
-	summary, _ := buildReportSummaryAndPoints(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold)
+	summary, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold)
 
 	if summary.MeshPartCount != 3 {
 		t.Fatalf("expected MeshPartCount 3 from raw map parts, got %d", summary.MeshPartCount)
@@ -366,7 +366,7 @@ func TestBuildReportGenerationCellsUsesFixedCellSize(t *testing.T) {
 		},
 	}
 
-	cells := buildReportGenerationCells(points, mapParts, nil, nil)
+	cells := buildReportGenerationCells(points, mapParts, nil, nil, nil)
 	if len(cells) != 2 {
 		t.Fatalf("expected 2 occupied cells, got %d", len(cells))
 	}
@@ -405,7 +405,7 @@ func TestBuildReportGenerationCellsUsesMapPartsForPartCounts(t *testing.T) {
 		},
 	}
 
-	cells := buildReportGenerationCells(points, mapParts, nil, nil)
+	cells := buildReportGenerationCells(points, mapParts, nil, nil, nil)
 	if len(cells) != 2 {
 		t.Fatalf("expected 2 cells after adding map-part-only cell, got %d", len(cells))
 	}
@@ -453,7 +453,7 @@ func TestBuildReportGenerationCellsDeduplicatesAssetSizeWithinCell(t *testing.T)
 		},
 	}
 
-	cells := buildReportGenerationCells(points, nil, nil, nil)
+	cells := buildReportGenerationCells(points, nil, nil, nil, nil)
 	if len(cells) != 1 {
 		t.Fatalf("expected 1 cell, got %d", len(cells))
 	}
@@ -522,7 +522,7 @@ func TestBuildReportGenerationCellsEstimatesDrawCallsFromRefs(t *testing.T) {
 		{ID: 200, RawContent: "rbxassetid://200", InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2", PropertyName: "TextureContent", WorldX: &x2, WorldY: &y2, WorldZ: &z2},
 	}
 
-	cells := buildReportGenerationCells(points, nil, refs, nil)
+	cells := buildReportGenerationCells(points, nil, refs, nil, nil)
 	if len(cells) != 1 {
 		t.Fatalf("expected 1 cell, got %d", len(cells))
 	}
@@ -567,8 +567,8 @@ func TestCountReportGenerationOversizedTextures(t *testing.T) {
 		},
 	}
 
-	count := countReportGenerationOversizedTextures(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold)
-	if count != 1 {
-		t.Fatalf("expected 1 oversized texture, got %d", count)
+	details := collectReportGenerationOversizedTextures(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold)
+	if len(details) != 1 {
+		t.Fatalf("expected 1 oversized texture, got %d", len(details))
 	}
 }

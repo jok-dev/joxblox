@@ -129,6 +129,13 @@ float calcShadow(vec4 posLS) {
 
 void main() {
     vec3 norm = normalize(fragNormal);
+    if (viewmode > 2.5) {
+        // Unlit (viewmode = 3): emit baseCol * vertCol directly so the
+        // top-down map render doesn't get crushed by Phong without lights.
+        vec3 vertColUnlit = fragColor.rgb;
+        finalColor = vec4(baseCol * vertColUnlit, 1.0);
+        return;
+    }
     if (viewmode > 1.5) {
         // Normals debug view (viewmode = 2): skip lighting entirely.
         finalColor = vec4(norm * 0.5 + 0.5, 1.0);
@@ -281,6 +288,10 @@ func handleLoadScene(parts []string, reader *bufio.Reader) {
 		respond("ERR invalid batch_count")
 		return
 	}
+	sceneMode := true
+	if len(parts) >= 3 && strings.EqualFold(parts[2], "vertexcolors") {
+		sceneMode = false
+	}
 
 	nextScene := make([]loadedMeshModel, 0, batchCount)
 	for batchIndex := 0; batchIndex < batchCount; batchIndex++ {
@@ -315,7 +326,7 @@ func handleLoadScene(parts []string, reader *bufio.Reader) {
 			respond(fmt.Sprintf("ERR read batch binary: %s", payloadErr.Error()))
 			return
 		}
-		model, createErr := createModelFromRawData(positions, indices32, colors, true)
+		model, createErr := createModelFromRawData(positions, indices32, colors, sceneMode)
 		if createErr != nil {
 			unloadMeshModels(nextScene)
 			respond(fmt.Sprintf("ERR %s", createErr.Error()))
@@ -894,12 +905,22 @@ func handleRenderOrtho(parts []string) {
 	rl.BeginTextureMode(renderTarget)
 	rl.ClearBackground(rl.Color{R: bgR, G: bgG, B: bgB, A: 255})
 	rl.BeginMode3D(camera)
+	// Top-down map is purely informational; Phong without a configured key
+	// light reads as flat black because diff/fill collapse to zero. Switch
+	// the shader into its unlit branch so each model just emits its baseCol
+	// times vertex color.
+	rl.SetShaderValue(mainShader, viewmodeLoc, []float32{3.0}, rl.ShaderUniformFloat)
 	whiteTint := rl.NewColor(255, 255, 255, 255)
 	for _, meshModel := range loadedScene {
 		tint := whiteTint
+		var baseColValue [3]float32
 		if meshModel.sceneMode {
 			tint = modelTint(meshModel.baseColor, 1.0)
+			baseColValue = meshModel.baseColor
+		} else {
+			baseColValue = [3]float32{1.0, 1.0, 1.0}
 		}
+		rl.SetShaderValue(mainShader, baseColLoc, []float32{baseColValue[0], baseColValue[1], baseColValue[2]}, rl.ShaderUniformVec3)
 		rl.DrawModel(meshModel.model, rl.Vector3{}, 1.0, tint)
 	}
 	rl.EndMode3D()

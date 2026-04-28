@@ -14,16 +14,15 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 		Thresholds: GradeThresholds{
 			MeshComplexity:      [6]float64{10_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000, 60_000_000},
 			DuplicationWastePct: [6]float64{100, 200, 300, 400, 500, 600},
-			TotalSizeMB:         [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
-			TextureSizeMB:       [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
 			GPUTextureMemoryMB:  [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
-			WastefulBC3Count:    [6]float64{100, 200, 300, 400, 500, 600},
+			MismatchedPBRMaps:   [6]float64{100, 200, 300, 400, 500, 600},
 			MeshSizeMB:          [6]float64{1_000, 2_000, 3_000, 4_000, 5_000, 6_000},
 			OversizedTextures:   [6]float64{100, 200, 300, 400, 500, 600},
 			DuplicateCount:      [6]float64{100, 200, 300, 400, 500, 600},
 			MeshPartCount:       [6]float64{10_000, 20_000, 30_000, 40_000, 50_000, 60_000},
 			DrawCalls:           [6]float64{10_000, 20_000, 30_000, 40_000, 50_000, 60_000},
 			PartCount:           [6]float64{20_000, 30_000, 40_000, 50_000, 60_000, 70_000},
+			InstanceCount:       [6]float64{100_000, 200_000, 300_000, 400_000, 500_000, 600_000},
 			AssetDiversity:      [6]float64{10_000, 20_000, 30_000, 40_000, 50_000, 60_000},
 		},
 	}
@@ -41,8 +40,8 @@ func TestComputePerformanceProfileForAssetTypeUsesCustomThresholds(t *testing.T)
 	}
 
 	grades := ComputePerformanceProfileForAssetType(customAssetType, CellPercentiles{}, summary)
-	if len(grades) != 13 {
-		t.Fatalf("expected 13 grades, got %d", len(grades))
+	if len(grades) != 12 {
+		t.Fatalf("expected 12 grades, got %d", len(grades))
 	}
 	for _, grade := range grades {
 		if grade.Grade != gradeAPlus {
@@ -74,10 +73,10 @@ func TestComputeReportCellPercentilesDisableSpatialMode(t *testing.T) {
 	if percentiles.CellCount != 1 {
 		t.Fatalf("expected one synthetic cell, got %d", percentiles.CellCount)
 	}
-	if percentiles.P90TotalBytes != float64(summary.TotalBytes) {
-		t.Fatalf("expected total bytes %.0f, got %.0f", float64(summary.TotalBytes), percentiles.P90TotalBytes)
+	if percentiles.TotalBytes.P90 != float64(summary.TotalBytes) {
+		t.Fatalf("expected total bytes %.0f, got %.0f", float64(summary.TotalBytes), percentiles.TotalBytes.P90)
 	}
-	if percentiles.P90Parts != float64(summary.PartCount) {
-		t.Fatalf("expected part count %.0f, got %.0f", float64(summary.PartCount), percentiles.P90Parts)
+	if percentiles.Parts.P90 != float64(summary.PartCount) {
+		t.Fatalf("expected part count %.0f, got %.0f", float64(summary.PartCount), percentiles.Parts.P90)
 	}
 }

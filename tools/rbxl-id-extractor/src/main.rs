@@ -192,6 +192,9 @@ fn run() -> Result<(), String> {
     if args.len() >= 2 && args[1] == "material-warnings" {
         return run_material_warnings(&args);
     }
+    if args.len() >= 2 && args[1] == "instance-count" {
+        return run_instance_count(&args);
+    }
     if args.len() >= 2 && args[1] == "replace" {
         return run_replace(&args);
     }
@@ -1260,6 +1263,51 @@ fn run_heatmap(args: &[String]) -> Result<(), String> {
     let output = serde_json::to_string(&references)
         .map_err(|json_err| format!("json failed: {}", json_err))?;
     println!("{}", output);
+    Ok(())
+}
+
+fn run_instance_count(args: &[String]) -> Result<(), String> {
+    if args.len() < 3 {
+        return Err(
+            "usage: joxblox-rusty-asset-tool instance-count <rbxl-file> [path-prefixes]"
+                .to_string(),
+        );
+    }
+
+    let file_path = &args[2];
+    let path_prefixes: Vec<String> = if args.len() >= 4 {
+        parse_path_prefixes(&args[3])
+    } else {
+        Vec::new()
+    };
+    let use_path_filter = !path_prefixes.is_empty();
+
+    let file = File::open(file_path).map_err(|open_err| format!("open failed: {}", open_err))?;
+    let dom = from_reader(BufReader::new(file)).map_err(|e| format!("parse failed: {}", e))?;
+    let mut count: u64 = 0;
+    let mut positions: Vec<(f32, f32)> = Vec::new();
+    for instance in dom.descendants() {
+        if use_path_filter {
+            let instance_path = build_instance_path(&dom, instance);
+            if !instance_matches_path_prefixes(&instance_path, &path_prefixes) {
+                continue;
+            }
+        }
+        count += 1;
+        if let Some(pos) = resolve_instance_world_position(&dom, instance.referent()) {
+            positions.push((pos.x, pos.z));
+        }
+    }
+    let mut buf = String::with_capacity(64 + positions.len() * 24);
+    buf.push_str(&format!("{{\"count\":{},\"positions\":[", count));
+    for (index, (x, z)) in positions.iter().enumerate() {
+        if index > 0 {
+            buf.push(',');
+        }
+        buf.push_str(&format!("[{},{}]", x, z));
+    }
+    buf.push_str("]}");
+    println!("{}", buf);
     Ok(())
 }
 

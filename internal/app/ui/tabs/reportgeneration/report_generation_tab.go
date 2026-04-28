@@ -54,6 +54,9 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 	currentSummary := report.Summary{}
 	currentCells := []heatmap.Cell{}
 	currentAssetType := report.AssetTypeConfig{}
+	currentMismatchedPBR := []report.MismatchedPBRMaterialDetail{}
+	currentOversizedTextures := []oversizedTextureDetail{}
+	currentDuplicateGroups := []duplicateGroupDetail{}
 	hasSummary := false
 	var loadToken atomic.Uint64
 	var loading atomic.Bool
@@ -108,7 +111,22 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 		hasDuplicates := currentSummary.DuplicateCount > 0
 		overall := report.OverallPerformanceGrade(grades, hasDuplicates)
 		overallScore := report.OverallPerformanceScorePercent(grades, hasDuplicates)
-		profileContainer.Add(buildPerformanceProfileUI(assetType.Label, overall, overallScore, grades, percentiles))
+		var onViewMismatchedPBR func()
+		if len(currentMismatchedPBR) > 0 {
+			details := currentMismatchedPBR
+			onViewMismatchedPBR = func() { showMismatchedPBRDialog(window, details) }
+		}
+		var onViewOversized func()
+		if len(currentOversizedTextures) > 0 {
+			details := currentOversizedTextures
+			onViewOversized = func() { showOversizedTexturesDialog(window, details) }
+		}
+		var onViewDuplicates func()
+		if len(currentDuplicateGroups) > 0 {
+			groups := currentDuplicateGroups
+			onViewDuplicates = func() { showDuplicatesDialog(window, groups) }
+		}
+		profileContainer.Add(buildPerformanceProfileUI(assetType.Label, overall, overallScore, grades, percentiles, onViewMismatchedPBR, onViewOversized, onViewDuplicates))
 		if onViewInScan != nil || onViewInHeatmap != nil {
 			navButtons := container.NewHBox()
 			if onViewInScan != nil {
@@ -141,6 +159,9 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 		hasSummary = false
 		currentSummary = report.Summary{}
 		currentCells = nil
+		currentMismatchedPBR = nil
+		currentOversizedTextures = nil
+		currentDuplicateGroups = nil
 		profileContainer.Hide()
 		setWarning(ui.MaterialVariantWarningData{})
 		setBusy(false)
@@ -163,6 +184,9 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 		hasSummary = false
 		currentSummary = report.Summary{}
 		currentCells = nil
+		currentMismatchedPBR = nil
+		currentOversizedTextures = nil
+		currentDuplicateGroups = nil
 		profileContainer.Hide()
 		setWarning(ui.MaterialVariantWarningData{})
 		statusLabel.SetText(fmt.Sprintf("Loading %s asset...", assetType.Label))
@@ -200,6 +224,13 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 			mapPartsRaw, mapPartsErr := extractor.ExtractMapRenderParts(sourcePath, prefixes, nil)
 			if mapPartsErr != nil {
 				debug.Logf("Report generation map extraction failed for %s: %s", sourcePath, mapPartsErr.Error())
+			}
+			if isCanceled() {
+				return
+			}
+			instanceCount, instanceCountErr := extractor.ExtractInstanceCount(sourcePath, prefixes, nil)
+			if instanceCountErr != nil {
+				debug.Logf("Report generation instance-count extraction failed for %s: %s", sourcePath, instanceCountErr.Error())
 			}
 			if isCanceled() {
 				return
@@ -262,8 +293,9 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 				return
 			}
 
-			summary, points := buildReportSummaryAndPoints(positionedRefs, resolved, mapParts, assetType.OversizedTextureThreshold)
-			cells := buildReportGenerationCells(points, mapParts, positionedRefs, resolved)
+			summary, points, mismatchedPBRDetails, oversizedDetails, duplicateGroups := buildReportSummaryAndPoints(positionedRefs, resolved, mapParts, assetType.OversizedTextureThreshold)
+			summary.InstanceCount = instanceCount.Count
+			cells := buildReportGenerationCells(points, mapParts, positionedRefs, resolved, instanceCount.Positions)
 			debug.Logf(
 				"Report generation summary for %s (%s): meshparts=%d parts=%d points=%d cells=%d resolved=%d unique-assets=%d",
 				sourcePath,
@@ -283,6 +315,9 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 				currentAssetType = selectedAssetType
 				currentSummary = summary
 				currentCells = cells
+				currentMismatchedPBR = mismatchedPBRDetails
+				currentOversizedTextures = oversizedDetails
+				currentDuplicateGroups = duplicateGroups
 				hasSummary = true
 				setWarning(warningData)
 				refreshProfile()
@@ -339,6 +374,9 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 		hasSummary = false
 		currentSummary = report.Summary{}
 		currentCells = nil
+		currentMismatchedPBR = nil
+		currentOversizedTextures = nil
+		currentDuplicateGroups = nil
 		profileContainer.Hide()
 		setWarning(ui.MaterialVariantWarningData{})
 		statusLabel.SetText("Choose an asset type to generate the report")
@@ -453,7 +491,7 @@ func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgre
 	return resolvedByReferenceKey
 }
 
-func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset) []heatmap.Cell {
+func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, instancePositions []extractor.InstancePosition) []heatmap.Cell {
 	if len(points) == 0 && len(mapParts) == 0 {
 		return nil
 	}
@@ -556,6 +594,34 @@ func buildReportGenerationCells(points []heatmaptab.RBXLHeatmapPoint, mapParts [
 
 	applyPerCellSurfaceAppearanceCorrection(cells, cellIndexByKey, refs, resolved, renderInfos, scene, cellSizeWorld, columnCount, rowCount)
 
+	for _, pos := range instancePositions {
+		x := float64(pos.X)
+		z := float64(pos.Z)
+		if x < scene.MinimumX || x >= scene.MinimumX+float64(columnCount)*cellSizeWorld {
+			continue
+		}
+		if z < scene.MinimumZ || z >= scene.MinimumZ+float64(rowCount)*cellSizeWorld {
+			continue
+		}
+		column := format.Clamp(int(math.Floor((x-scene.MinimumX)/cellSizeWorld)), 0, columnCount-1)
+		row := format.Clamp(int(math.Floor((z-scene.MinimumZ)/cellSizeWorld)), 0, rowCount-1)
+		cellKey := heatmaptab.HeatmapCellKey(row, column)
+		index, found := cellIndexByKey[cellKey]
+		if !found {
+			cells = append(cells, heatmap.Cell{
+				Row:      row,
+				Column:   column,
+				MinimumX: scene.MinimumX + float64(column)*cellSizeWorld,
+				MaximumX: scene.MinimumX + float64(column+1)*cellSizeWorld,
+				MinimumZ: scene.MinimumZ + float64(row)*cellSizeWorld,
+				MaximumZ: scene.MinimumZ + float64(row+1)*cellSizeWorld,
+			})
+			index = len(cells) - 1
+			cellIndexByKey[cellKey] = index
+		}
+		cells[index].Stats.InstanceCount++
+	}
+
 	sort.Slice(cells, func(left int, right int) bool {
 		if cells[left].Row == cells[right].Row {
 			return cells[left].Column < cells[right].Column
@@ -621,13 +687,22 @@ func buildReportGenerationStatsFromPreview(assetID int64, previewResult *loader.
 	return loader.BuildAssetStatsFromPreview(assetID, previewResult)
 }
 
-func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []heatmaptab.RBXLHeatmapMapPart, oversizedTextureThreshold float64) (report.Summary, []heatmaptab.RBXLHeatmapPoint) {
+type duplicateGroupDetail struct {
+	FileSHA256        string
+	AssetBytes        int64
+	AssetIDs          []int64
+	SampleInstancePath string
+}
+
+func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []heatmaptab.RBXLHeatmapMapPart, oversizedTextureThreshold float64) (report.Summary, []heatmaptab.RBXLHeatmapPoint, []report.MismatchedPBRMaterialDetail, []oversizedTextureDetail, []duplicateGroupDetail) {
 	summary := report.Summary{}
 	uniqueAssetIDs := map[int64]struct{}{}
 	uniqueReferenceKeys := map[string]struct{}{}
 	hashCounts := map[string]int{}
 	resolvedUniqueKeys := make([]string, 0, len(resolved))
 	seenResolvedKeys := map[string]struct{}{}
+	instancePathByKey := map[string]string{}
+	assetIDByKey := map[string]int64{}
 	for _, ref := range refs {
 		if ref.ID <= 0 {
 			continue
@@ -655,6 +730,10 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 			continue
 		}
 		seenResolvedKeys[key] = struct{}{}
+		assetIDByKey[key] = ref.ID
+		if instancePath := strings.TrimSpace(ref.InstancePath); instancePath != "" {
+			instancePathByKey[key] = instancePath
+		}
 		if asset.FileSHA256 != "" {
 			hashCounts[asset.FileSHA256]++
 			resolvedUniqueKeys = append(resolvedUniqueKeys, key)
@@ -668,10 +747,6 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 			if isBC3 {
 				summary.BC3PixelCount += stats.PixelCount
 				summary.BC3BytesExact += exactBytes
-				if loader.IsWastefulBC3(stats.HasAlphaChannel, stats.NonOpaqueAlphaPixels, stats.PixelCount, ref.PropertyName) {
-					summary.WastefulBC3PixelCount += stats.PixelCount
-					summary.WastefulBC3Count++
-				}
 			} else {
 				summary.BC1PixelCount += stats.PixelCount
 				summary.BC1BytesExact += exactBytes
@@ -682,6 +757,7 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 	}
 
 	seenCounts := map[string]int{}
+	duplicateGroupsByHash := map[string]*duplicateGroupDetail{}
 	for _, key := range resolvedUniqueKeys {
 		asset := resolved[key]
 		if asset.FileSHA256 == "" {
@@ -695,10 +771,39 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 			summary.DuplicateSizeBytes += int64(asset.Stats.TotalBytes)
 		}
 		seenCounts[asset.FileSHA256]++
+
+		if asset.Stats.TotalBytes < 10*1024 {
+			continue
+		}
+		group, ok := duplicateGroupsByHash[asset.FileSHA256]
+		if !ok {
+			group = &duplicateGroupDetail{FileSHA256: asset.FileSHA256, AssetBytes: int64(asset.Stats.TotalBytes)}
+			duplicateGroupsByHash[asset.FileSHA256] = group
+		}
+		group.AssetIDs = append(group.AssetIDs, assetIDByKey[key])
+		if group.SampleInstancePath == "" {
+			group.SampleInstancePath = instancePathByKey[key]
+		}
 	}
+	duplicateGroups := make([]duplicateGroupDetail, 0, len(duplicateGroupsByHash))
+	for _, group := range duplicateGroupsByHash {
+		if len(group.AssetIDs) < 2 {
+			continue
+		}
+		duplicateGroups = append(duplicateGroups, *group)
+	}
+	sort.Slice(duplicateGroups, func(i, j int) bool {
+		wastedI := duplicateGroups[i].AssetBytes * int64(len(duplicateGroups[i].AssetIDs)-1)
+		wastedJ := duplicateGroups[j].AssetBytes * int64(len(duplicateGroups[j].AssetIDs)-1)
+		return wastedI > wastedJ
+	})
 	summary.UniqueAssetCount = len(uniqueAssetIDs)
-	summary.OversizedTextureCount = countReportGenerationOversizedTextures(refs, resolved, mapParts, oversizedTextureThreshold)
-	correction := report.ApplySurfaceAppearanceMemoryCorrections(&summary, collectSurfaceAppearanceMaterialSlots(refs, resolved))
+	oversizedDetails := collectReportGenerationOversizedTextures(refs, resolved, mapParts, oversizedTextureThreshold)
+	summary.OversizedTextureCount = len(oversizedDetails)
+	materials := collectSurfaceAppearanceMaterialSlots(refs, resolved)
+	summary.MismatchedPBRMaterialCount, summary.PBRMaterialCount = report.CountMismatchedPBRMaterials(materials)
+	mismatchedPBRDetails := report.CollectMismatchedPBRMaterials(materials)
+	correction := report.ApplySurfaceAppearanceMemoryCorrections(&summary, materials)
 	logGPUTextureMemoryBreakdown(summary, correction)
 
 	points := make([]heatmaptab.RBXLHeatmapPoint, 0, len(refs))
@@ -726,40 +831,72 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 	}
 	summary.MeshPartCount, summary.PartCount = countReportGenerationParts(mapParts, refs)
 	summary.DrawCallCount = int64(countEstimatedDrawCalls(mapParts, refs))
-	return summary, points
+	return summary, points, mismatchedPBRDetails, oversizedDetails, duplicateGroups
 }
 
-func countReportGenerationOversizedTextures(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []heatmaptab.RBXLHeatmapMapPart, threshold float64) int {
+type oversizedTextureDetail struct {
+	AssetID          int64
+	InstancePath     string
+	Width            int
+	Height           int
+	TextureBytes     int64
+	SceneSurfaceArea float64
+	Score            float64
+}
+
+func collectReportGenerationOversizedTextures(refs []extractor.PositionedResult, resolved map[string]reportGenerationResolvedAsset, mapParts []heatmaptab.RBXLHeatmapMapPart, threshold float64) []oversizedTextureDetail {
 	if threshold <= 0 {
 		threshold = loader.DefaultLargeTextureThreshold
 	}
 	if len(refs) == 0 || len(resolved) == 0 {
-		return 0
+		return nil
 	}
 
 	areaByPath := loader.BuildSceneSurfaceAreaIndex(mapParts)
 	maxAreaByReferenceKey := map[string]float64{}
+	type refContext struct {
+		assetID      int64
+		instancePath string
+		area         float64
+	}
+	bestRefByKey := map[string]refContext{}
 	for _, ref := range refs {
 		if ref.ID <= 0 {
 			continue
 		}
 		referenceKey := extractor.AssetReferenceKey(ref.ID, ref.RawContent)
-		area := loader.EstimateSceneSurfaceAreaForPaths(strings.TrimSpace(ref.InstancePath), nil, areaByPath)
+		instancePath := strings.TrimSpace(ref.InstancePath)
+		area := loader.EstimateSceneSurfaceAreaForPaths(instancePath, nil, areaByPath)
 		maxAreaByReferenceKey[referenceKey] = loader.MaxPositiveFloat64(maxAreaByReferenceKey[referenceKey], area)
+		if existing, ok := bestRefByKey[referenceKey]; !ok || area > existing.area {
+			bestRefByKey[referenceKey] = refContext{assetID: ref.ID, instancePath: instancePath, area: area}
+		}
 	}
 
 	const minOversizedTextureBytes = 100 * 1024
-	oversizedTextureCount := 0
+	details := make([]oversizedTextureDetail, 0)
 	for referenceKey, resolvedAsset := range resolved {
 		textureBytes := resolvedAsset.Stats.TextureBytes
 		if textureBytes < minOversizedTextureBytes {
 			continue
 		}
-		if loader.ComputeLargeTextureScore(textureBytes, maxAreaByReferenceKey[referenceKey]) >= threshold {
-			oversizedTextureCount++
+		score := loader.ComputeLargeTextureScore(textureBytes, maxAreaByReferenceKey[referenceKey])
+		if score < threshold {
+			continue
 		}
+		ctx := bestRefByKey[referenceKey]
+		details = append(details, oversizedTextureDetail{
+			AssetID:          ctx.assetID,
+			InstancePath:     ctx.instancePath,
+			Width:            resolvedAsset.Stats.Width,
+			Height:           resolvedAsset.Stats.Height,
+			TextureBytes:     int64(textureBytes),
+			SceneSurfaceArea: maxAreaByReferenceKey[referenceKey],
+			Score:            score,
+		})
 	}
-	return oversizedTextureCount
+	sort.Slice(details, func(i, j int) bool { return details[i].Score > details[j].Score })
+	return details
 }
 
 func countReportGenerationParts(mapParts []heatmaptab.RBXLHeatmapMapPart, refs []extractor.PositionedResult) (int, int) {
@@ -1069,7 +1206,7 @@ func reportGenerationSurfaceAppearanceKey(properties map[string]string) string {
 	return strings.Join(parts, "|")
 }
 
-func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overallScore int, grades []report.PerformanceGrade, percentiles report.CellPercentiles) fyne.CanvasObject {
+func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overallScore int, grades []report.PerformanceGrade, percentiles report.CellPercentiles, onViewMismatchedPBR func(), onViewOversized func(), onViewDuplicates func()) fyne.CanvasObject {
 	headingText := "Performance Profile"
 	if strings.TrimSpace(assetTypeLabel) != "" {
 		headingText = fmt.Sprintf("Performance Profile (%s)", assetTypeLabel)
@@ -1100,6 +1237,24 @@ func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overa
 		container.NewCenter(overallText),
 		widget.NewSeparator(),
 	)
+
+	if percentiles.CellCount > 0 && !percentiles.WholeFileMode {
+		columnHeader := func(text string) fyne.CanvasObject {
+			label := widget.NewLabel(text)
+			label.TextStyle = fyne.TextStyle{Italic: true}
+			return label
+		}
+		content.Add(container.NewHBox(
+			container.NewGridWrap(fyne.NewSize(30, 30), widget.NewLabel("")),
+			container.NewGridWrap(fyne.NewSize(160, 30), widget.NewLabel("")),
+			container.NewGridWrap(fyne.NewSize(120, 30), widget.NewLabel("")),
+			container.NewGridWrap(fyne.NewSize(95, 30), columnHeader("avg/cell")),
+			container.NewGridWrap(fyne.NewSize(95, 30), columnHeader("p90/cell")),
+			container.NewGridWrap(fyne.NewSize(95, 30), columnHeader("max/cell")),
+			container.NewGridWrap(fyne.NewSize(90, 30), widget.NewLabel("")),
+		))
+	}
+
 	for _, g := range grades {
 		gradeText := canvas.NewText(g.Grade, gradeColor(g.Grade))
 		gradeText.TextSize = 18
@@ -1114,21 +1269,150 @@ func buildPerformanceProfileUI(assetTypeLabel string, overallGrade string, overa
 		valueText := ttwidget.NewLabel(g.Value)
 		valueText.SetToolTip(g.Description)
 
-		totalText := ttwidget.NewLabel("")
+		avgText := ttwidget.NewLabel(g.AvgCellValue)
+		if g.AvgCellValue != "" {
+			avgText.SetToolTip("avg per cell")
+		}
+		totalText := ttwidget.NewLabel(g.TotalValue)
 		if g.TotalValue != "" {
-			totalText.SetText(g.TotalValue)
+			totalText.SetToolTip("p90 per cell — graded on this")
+		}
+		maxText := ttwidget.NewLabel(g.MaxCellValue)
+		if g.MaxCellValue != "" {
+			maxText.SetToolTip("max (worst) cell")
+		}
+
+		var actionCell fyne.CanvasObject = widget.NewLabel("")
+		switch {
+		case g.Label == "Mismatched PBR Maps" && onViewMismatchedPBR != nil:
+			actionCell = widget.NewButtonWithIcon("View", theme.SearchIcon(), onViewMismatchedPBR)
+		case g.Label == "Oversized Textures" && onViewOversized != nil:
+			actionCell = widget.NewButtonWithIcon("View", theme.SearchIcon(), onViewOversized)
+		case g.Label == "Duplicates" && onViewDuplicates != nil:
+			actionCell = widget.NewButtonWithIcon("View", theme.SearchIcon(), onViewDuplicates)
 		}
 
 		row := container.NewHBox(
 			container.NewGridWrap(fyne.NewSize(30, 30), container.NewCenter(gradeText)),
 			container.NewGridWrap(fyne.NewSize(160, 30), labelText),
-			container.NewGridWrap(fyne.NewSize(130, 30), valueText),
-			container.NewGridWrap(fyne.NewSize(140, 30), totalText),
+			container.NewGridWrap(fyne.NewSize(120, 30), valueText),
+			container.NewGridWrap(fyne.NewSize(95, 30), avgText),
+			container.NewGridWrap(fyne.NewSize(95, 30), totalText),
+			container.NewGridWrap(fyne.NewSize(95, 30), maxText),
+			container.NewGridWrap(fyne.NewSize(90, 30), actionCell),
 		)
 		content.Add(row)
 		content.Add(widget.NewSeparator())
 	}
 	return content
+}
+
+func showMismatchedPBRDialog(window fyne.Window, details []report.MismatchedPBRMaterialDetail) {
+	if len(details) == 0 {
+		return
+	}
+	rows := container.NewVBox()
+	for _, detail := range details {
+		path := strings.TrimSpace(detail.InstancePath)
+		if path == "" {
+			path = "(unknown path)"
+		}
+		header := widget.NewLabel(path)
+		header.TextStyle = fyne.TextStyle{Bold: true}
+		rows.Add(header)
+		rows.Add(widget.NewLabel("    " + formatMismatchedPBRSlots(detail)))
+	}
+	scroll := container.NewVScroll(rows)
+	scroll.SetMinSize(fyne.NewSize(640, 360))
+	dialog.ShowCustom(fmt.Sprintf("Mismatched PBR Maps (%d)", len(details)), "Close", scroll, window)
+}
+
+func showOversizedTexturesDialog(window fyne.Window, details []oversizedTextureDetail) {
+	if len(details) == 0 {
+		return
+	}
+	rows := container.NewVBox()
+	for _, d := range details {
+		header := widget.NewLabel(formatOversizedTextureHeader(d))
+		header.TextStyle = fyne.TextStyle{Bold: true}
+		rows.Add(header)
+		path := strings.TrimSpace(d.InstancePath)
+		if path == "" {
+			path = "(no instance path)"
+		}
+		rows.Add(widget.NewLabel("    " + path))
+	}
+	scroll := container.NewVScroll(rows)
+	scroll.SetMinSize(fyne.NewSize(720, 360))
+	dialog.ShowCustom(fmt.Sprintf("Oversized Textures (%d)", len(details)), "Close", scroll, window)
+}
+
+func formatOversizedTextureHeader(d oversizedTextureDetail) string {
+	parts := []string{}
+	if d.AssetID > 0 {
+		parts = append(parts, fmt.Sprintf("rbxassetid://%d", d.AssetID))
+	}
+	if d.Width > 0 && d.Height > 0 {
+		parts = append(parts, fmt.Sprintf("%d×%d", d.Width, d.Height))
+	}
+	if d.TextureBytes > 0 {
+		parts = append(parts, format.FormatSizeAuto64(d.TextureBytes))
+	}
+	parts = append(parts, fmt.Sprintf("score %s", loader.FormatLargeTextureScore(d.Score)))
+	if d.SceneSurfaceArea > 0 {
+		parts = append(parts, fmt.Sprintf("over %s", loader.FormatSceneSurfaceArea(d.SceneSurfaceArea)))
+	}
+	return strings.Join(parts, "   ")
+}
+
+func showDuplicatesDialog(window fyne.Window, groups []duplicateGroupDetail) {
+	if len(groups) == 0 {
+		return
+	}
+	rows := container.NewVBox()
+	for _, g := range groups {
+		copies := len(g.AssetIDs)
+		wasted := g.AssetBytes * int64(copies-1)
+		header := widget.NewLabel(fmt.Sprintf("%d× copies   %s each   %s wasted", copies, format.FormatSizeAuto64(g.AssetBytes), format.FormatSizeAuto64(wasted)))
+		header.TextStyle = fyne.TextStyle{Bold: true}
+		rows.Add(header)
+		idStrings := make([]string, 0, len(g.AssetIDs))
+		seen := map[int64]struct{}{}
+		for _, id := range g.AssetIDs {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			idStrings = append(idStrings, fmt.Sprintf("rbxassetid://%d", id))
+		}
+		if len(idStrings) > 0 {
+			rows.Add(widget.NewLabel("    " + strings.Join(idStrings, "  ")))
+		}
+		if path := strings.TrimSpace(g.SampleInstancePath); path != "" {
+			rows.Add(widget.NewLabel("    sample: " + path))
+		}
+	}
+	scroll := container.NewVScroll(rows)
+	scroll.SetMinSize(fyne.NewSize(720, 360))
+	dialog.ShowCustom(fmt.Sprintf("Duplicate Assets (%d groups)", len(groups)), "Close", scroll, window)
+}
+
+func formatMismatchedPBRSlots(detail report.MismatchedPBRMaterialDetail) string {
+	parts := make([]string, 0, 4)
+	appendSlot := func(name string, w, h int) {
+		if w <= 0 || h <= 0 {
+			return
+		}
+		parts = append(parts, fmt.Sprintf("%s %d×%d", name, w, h))
+	}
+	appendSlot("Color", detail.ColorWidth, detail.ColorHeight)
+	appendSlot("Normal", detail.NormalWidth, detail.NormalHeight)
+	appendSlot("Metalness", detail.MetalnessWidth, detail.MetalnessHeight)
+	appendSlot("Roughness", detail.RoughnessWidth, detail.RoughnessHeight)
+	return strings.Join(parts, "   ")
 }
 
 func gradeColor(grade string) color.Color {

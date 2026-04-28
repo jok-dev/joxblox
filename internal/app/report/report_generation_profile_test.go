@@ -99,8 +99,8 @@ func TestContinuousScoreMatchesGradeBoundaries(t *testing.T) {
 func TestOverallPerformanceScorePercentContinuous(t *testing.T) {
 	thresholds := DefaultAssetType().Thresholds
 
-	bareMid := ComputeDownloadSizeGradeWithThresholds(3*format.Megabyte, 0, false, thresholds.TotalSizeMB)
-	bareHigh := ComputeDownloadSizeGradeWithThresholds(4*format.Megabyte, 0, false, thresholds.TotalSizeMB)
+	bareMid := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte/2, CellMetric{}, false, thresholds.MeshSizeMB)
+	bareHigh := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte*9/10, CellMetric{}, false, thresholds.MeshSizeMB)
 	if bareMid.Grade != bareHigh.Grade {
 		t.Fatal("test expects both values in the same grade bucket")
 	}
@@ -132,7 +132,7 @@ func TestComputeMeshComplexityGrade(t *testing.T) {
 		{60_000, gradeF},
 	}
 	for _, tt := range tests {
-		got := ComputeMeshComplexityGrade(tt.triangles, 0, false)
+		got := ComputeMeshComplexityGrade(tt.triangles, CellMetric{}, false)
 		if got.Grade != tt.expected {
 			t.Errorf("ComputeMeshComplexityGrade(%d) = %s, want %s", tt.triangles, got.Grade, tt.expected)
 		}
@@ -140,11 +140,11 @@ func TestComputeMeshComplexityGrade(t *testing.T) {
 }
 
 func TestComputeMeshComplexityGradeCellPercentile(t *testing.T) {
-	got := ComputeMeshComplexityGrade(8_000_000, 4_000, true)
+	got := ComputeMeshComplexityGrade(8_000_000, CellMetric{P90: 4_000}, true)
 	if got.Grade != gradeAPlus {
 		t.Errorf("expected A+ when cell p90 is 4000 (< 5000), got %s", got.Grade)
 	}
-	got = ComputeMeshComplexityGrade(100, 10_000, true)
+	got = ComputeMeshComplexityGrade(100, CellMetric{P90: 10_000}, true)
 	if got.Grade != gradeA {
 		t.Errorf("expected A when cell p90 is 10000 (>= 5000, < 15000), got %s", got.Grade)
 	}
@@ -170,7 +170,7 @@ func TestComputeDrawCallGrade(t *testing.T) {
 		{4000, gradeF},
 	}
 	for _, tt := range tests {
-		got := ComputeDrawCallGrade(tt.drawCalls, 0, false)
+		got := ComputeDrawCallGrade(tt.drawCalls, CellMetric{}, false)
 		if got.Grade != tt.expected {
 			t.Errorf("ComputeDrawCallGrade(%d) = %s, want %s", tt.drawCalls, got.Grade, tt.expected)
 		}
@@ -212,29 +212,29 @@ func TestComputeDuplicationWasteGradeZeroTotal(t *testing.T) {
 	}
 }
 
-func TestComputeDownloadSizeGrade(t *testing.T) {
+func TestComputeInstanceCountGrade(t *testing.T) {
 	tests := []struct {
-		totalBytes int64
-		expected   string
+		count    int64
+		expected string
 	}{
 		{0, gradeAPlus},
-		{1 * format.Megabyte, gradeAPlus},
-		{2 * format.Megabyte, gradeA},
-		{4 * format.Megabyte, gradeA},
-		{5 * format.Megabyte, gradeB},
-		{7 * format.Megabyte, gradeB},
-		{8 * format.Megabyte, gradeC},
-		{11 * format.Megabyte, gradeC},
-		{12 * format.Megabyte, gradeD},
-		{19 * format.Megabyte, gradeD},
-		{20 * format.Megabyte, gradeE},
-		{29 * format.Megabyte, gradeE},
-		{30 * format.Megabyte, gradeF},
+		{1_999, gradeAPlus},
+		{2_000, gradeA},
+		{4_999, gradeA},
+		{5_000, gradeB},
+		{9_999, gradeB},
+		{10_000, gradeC},
+		{24_999, gradeC},
+		{25_000, gradeD},
+		{49_999, gradeD},
+		{50_000, gradeE},
+		{99_999, gradeE},
+		{100_000, gradeF},
 	}
 	for _, tt := range tests {
-		got := ComputeDownloadSizeGrade(tt.totalBytes, 0, false)
+		got := ComputeInstanceCountGrade(tt.count, CellMetric{}, false)
 		if got.Grade != tt.expected {
-			t.Errorf("ComputeDownloadSizeGrade(%d) = %s, want %s", tt.totalBytes, got.Grade, tt.expected)
+			t.Errorf("ComputeInstanceCountGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
 		}
 	}
 }
@@ -259,7 +259,7 @@ func TestComputeAssetDiversityGrade(t *testing.T) {
 		{2000, gradeF},
 	}
 	for _, tt := range tests {
-		got := ComputeAssetDiversityGrade(tt.count, 0, false)
+		got := ComputeAssetDiversityGrade(tt.count, CellMetric{}, false)
 		if got.Grade != tt.expected {
 			t.Errorf("ComputeAssetDiversityGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
 		}
@@ -341,33 +341,6 @@ func TestOverallPerformanceScorePercent(t *testing.T) {
 	}
 }
 
-func TestComputeTextureSizeGrade(t *testing.T) {
-	tests := []struct {
-		textureBytes int64
-		expected     string
-	}{
-		{0, gradeAPlus},
-		{1 * format.Megabyte, gradeAPlus},
-		{2 * format.Megabyte, gradeA},
-		{3 * format.Megabyte, gradeA},
-		{4 * format.Megabyte, gradeB},
-		{5 * format.Megabyte, gradeB},
-		{6 * format.Megabyte, gradeC},
-		{7 * format.Megabyte, gradeC},
-		{8 * format.Megabyte, gradeD},
-		{11 * format.Megabyte, gradeD},
-		{12 * format.Megabyte, gradeE},
-		{19 * format.Megabyte, gradeE},
-		{20 * format.Megabyte, gradeF},
-	}
-	for _, tt := range tests {
-		got := ComputeTextureSizeGrade(tt.textureBytes, 0, false)
-		if got.Grade != tt.expected {
-			t.Errorf("ComputeTextureSizeGrade(%d) = %s, want %s", tt.textureBytes, got.Grade, tt.expected)
-		}
-	}
-}
-
 func TestComputeMeshSizeGrade(t *testing.T) {
 	tests := []struct {
 		meshBytes int64
@@ -388,7 +361,7 @@ func TestComputeMeshSizeGrade(t *testing.T) {
 		{15 * format.Megabyte, gradeF},
 	}
 	for _, tt := range tests {
-		got := ComputeMeshSizeGrade(tt.meshBytes, 0, false)
+		got := ComputeMeshSizeGrade(tt.meshBytes, CellMetric{}, false)
 		if got.Grade != tt.expected {
 			t.Errorf("ComputeMeshSizeGrade(%d) = %s, want %s", tt.meshBytes, got.Grade, tt.expected)
 		}
@@ -418,6 +391,44 @@ func TestComputeDuplicateCountGrade(t *testing.T) {
 		if got.Grade != tt.expected {
 			t.Errorf("ComputeDuplicateCountGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
 		}
+	}
+}
+
+func TestComputeMismatchedPBRMapsGrade(t *testing.T) {
+	tests := []struct {
+		count    int
+		expected string
+	}{
+		{0, gradeAPlus},
+		{1, gradeA},
+		{2, gradeB},
+		{3, gradeB},
+		{4, gradeC},
+		{5, gradeC},
+		{6, gradeD},
+		{9, gradeD},
+		{10, gradeE},
+		{14, gradeE},
+		{15, gradeF},
+	}
+	for _, tt := range tests {
+		got := ComputeMismatchedPBRMapsGrade(tt.count, tt.count*2)
+		if got.Grade != tt.expected {
+			t.Errorf("ComputeMismatchedPBRMapsGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
+		}
+	}
+}
+
+func TestComputeMismatchedPBRMapsGradeFormat(t *testing.T) {
+	got := ComputeMismatchedPBRMapsGrade(3, 12)
+	if got.Label != "Mismatched PBR Maps" {
+		t.Errorf("Label = %q, want \"Mismatched PBR Maps\"", got.Label)
+	}
+	if got.Value != "3 materials" {
+		t.Errorf("Value = %q, want \"3 materials\"", got.Value)
+	}
+	if got.TotalValue != "" {
+		t.Errorf("TotalValue = %q, want empty", got.TotalValue)
 	}
 }
 
@@ -505,8 +516,8 @@ func TestComputePerformanceProfileIntegration(t *testing.T) {
 	}
 
 	grades := ComputePerformanceProfile(CellPercentiles{}, summary)
-	if len(grades) != 13 {
-		t.Fatalf("expected 13 grades, got %d", len(grades))
+	if len(grades) != 12 {
+		t.Fatalf("expected 12 grades, got %d", len(grades))
 	}
 
 	for _, g := range grades {
@@ -534,16 +545,16 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 		PartCount:             10000,
 	}
 	percentiles := CellPercentiles{
-		P90TotalBytes:    1 * float64(format.Megabyte),
-		P90TextureBytes:  1 * float64(format.Megabyte),
-		P90MeshBytes:     512 * 1024,
-		P90TriangleCount: 4_000,
-		P90UniqueAssets:  20,
-		P90DrawCalls:     10,
-		P90MeshParts:     10,
-		P90Parts:         15,
-		CellCount:        100,
-		CellSizeStuds:    50,
+		TotalBytes:    CellMetric{P90: 1 * float64(format.Megabyte)},
+		TextureBytes:  CellMetric{P90: 1 * float64(format.Megabyte)},
+		MeshBytes:     CellMetric{P90: 512 * 1024},
+		TriangleCount: CellMetric{P90: 4_000},
+		UniqueAssets:  CellMetric{P90: 20},
+		DrawCalls:     CellMetric{P90: 10},
+		MeshParts:     CellMetric{P90: 10},
+		Parts:         CellMetric{P90: 15},
+		CellCount:     100,
+		CellSizeStuds: 50,
 	}
 
 	grades := ComputePerformanceProfile(percentiles, summary)
@@ -554,14 +565,11 @@ func TestComputePerformanceProfileWithCellPercentiles(t *testing.T) {
 		if g.Grade != gradeAPlus {
 			t.Errorf("grade %q = %s, want A+ (cell p90 values are small despite large totals)", g.Label, g.Grade)
 		}
-		if g.Label == "Oversized Textures" || g.Label == "Wasteful BC3 Textures" {
+		if g.Label == "Oversized Textures" || g.Label == "Mismatched PBR Maps" {
 			continue
 		}
 		if g.TotalValue == "" {
 			t.Errorf("grade %q should have p90/cell TotalValue when cell percentiles are used", g.Label)
-		}
-		if g.TotalValue != "" && g.Label != "Duplicates" && g.Label != "Duplication Waste" && g.TotalValue[len(g.TotalValue)-8:] != "p90/cell" {
-			t.Errorf("grade %q should report p90/cell, got %q", g.Label, g.TotalValue)
 		}
 	}
 }
@@ -576,20 +584,20 @@ func TestComputeCellPercentiles(t *testing.T) {
 	if percentiles.CellCount != 2 {
 		t.Fatalf("expected 2 occupied cells, got %d", percentiles.CellCount)
 	}
-	if percentiles.P90TotalBytes != 200 {
-		t.Errorf("expected P90TotalBytes=200, got %.0f", percentiles.P90TotalBytes)
+	if percentiles.TotalBytes.P90 != 200 {
+		t.Errorf("expected P90TotalBytes=200, got %.0f", percentiles.TotalBytes.P90)
 	}
-	if percentiles.P90TriangleCount != 2000 {
-		t.Errorf("expected P90TriangleCount=2000, got %.0f", percentiles.P90TriangleCount)
+	if percentiles.TriangleCount.P90 != 2000 {
+		t.Errorf("expected P90TriangleCount=2000, got %.0f", percentiles.TriangleCount.P90)
 	}
-	if percentiles.P90MeshParts != 4 {
-		t.Errorf("expected P90MeshParts=4, got %.0f", percentiles.P90MeshParts)
+	if percentiles.MeshParts.P90 != 4 {
+		t.Errorf("expected P90MeshParts=4, got %.0f", percentiles.MeshParts.P90)
 	}
-	if percentiles.P90Parts != 3 {
-		t.Errorf("expected P90Parts=3, got %.0f", percentiles.P90Parts)
+	if percentiles.Parts.P90 != 3 {
+		t.Errorf("expected P90Parts=3, got %.0f", percentiles.Parts.P90)
 	}
-	if percentiles.P90DrawCalls != 4 {
-		t.Errorf("expected P90DrawCalls=4, got %.0f", percentiles.P90DrawCalls)
+	if percentiles.DrawCalls.P90 != 4 {
+		t.Errorf("expected P90DrawCalls=4, got %.0f", percentiles.DrawCalls.P90)
 	}
 	if percentiles.CellSizeStuds != 50 {
 		t.Errorf("expected CellSizeStuds=50, got %.0f", percentiles.CellSizeStuds)
@@ -631,17 +639,17 @@ func TestComputeCellPercentilesUsesMetricSpecificOccupiedCells(t *testing.T) {
 	if percentiles.CellCount != 1 {
 		t.Fatalf("expected 1 reference-occupied cell, got %d", percentiles.CellCount)
 	}
-	if percentiles.P90TotalBytes != 100 {
-		t.Fatalf("expected P90TotalBytes 100, got %.0f", percentiles.P90TotalBytes)
+	if percentiles.TotalBytes.P90 != 100 {
+		t.Fatalf("expected P90TotalBytes 100, got %.0f", percentiles.TotalBytes.P90)
 	}
-	if percentiles.P90MeshParts != 4 {
-		t.Fatalf("expected P90MeshParts 4 across 2 meshpart cells, got %.0f", percentiles.P90MeshParts)
+	if percentiles.MeshParts.P90 != 4 {
+		t.Fatalf("expected P90MeshParts 4 across 2 meshpart cells, got %.0f", percentiles.MeshParts.P90)
 	}
-	if percentiles.P90Parts != 6 {
-		t.Fatalf("expected P90Parts 6 across 2 part cells, got %.0f", percentiles.P90Parts)
+	if percentiles.Parts.P90 != 6 {
+		t.Fatalf("expected P90Parts 6 across 2 part cells, got %.0f", percentiles.Parts.P90)
 	}
-	if percentiles.P90DrawCalls != 5 {
-		t.Fatalf("expected P90DrawCalls 5 across 2 draw-call cells, got %.0f", percentiles.P90DrawCalls)
+	if percentiles.DrawCalls.P90 != 5 {
+		t.Fatalf("expected P90DrawCalls 5 across 2 draw-call cells, got %.0f", percentiles.DrawCalls.P90)
 	}
 }
 
@@ -653,10 +661,10 @@ func TestComputeCellPercentilesCaptureTopTenPercent(t *testing.T) {
 	}
 
 	percentiles := ComputeCellPercentiles(cells)
-	if percentiles.P90TotalBytes != 10000 {
-		t.Fatalf("expected P90TotalBytes 10000 to reflect the top 10%% cells, got %.0f", percentiles.P90TotalBytes)
+	if percentiles.TotalBytes.P90 != 10000 {
+		t.Fatalf("expected P90TotalBytes 10000 to reflect the top 10%% cells, got %.0f", percentiles.TotalBytes.P90)
 	}
-	if percentiles.P90TriangleCount != 500000 {
-		t.Fatalf("expected P90TriangleCount 500000 to reflect the top 10%% cells, got %.0f", percentiles.P90TriangleCount)
+	if percentiles.TriangleCount.P90 != 500000 {
+		t.Fatalf("expected P90TriangleCount 500000 to reflect the top 10%% cells, got %.0f", percentiles.TriangleCount.P90)
 	}
 }

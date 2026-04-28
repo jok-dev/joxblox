@@ -14,7 +14,13 @@ type PerformanceGrade struct {
 	Score             float64
 	Label             string
 	Value             string
+	// AvgCellValue / TotalValue (= p90) / MaxCellValue are the per-cell
+	// summaries shown alongside the value column when the report is in
+	// spatial mode. TotalValue keeps its name (existing field) and means
+	// "p90/cell". Empty for grades that don't have a per-cell story.
+	AvgCellValue      string
 	TotalValue        string
+	MaxCellValue      string
 	Description       string
 	MetricDescription string
 }
@@ -30,19 +36,52 @@ const (
 	reportGenerationPercentile = 0.9
 )
 
+// CellMetric carries the three across-cell summaries we report for a
+// per-cell metric: arithmetic mean, p90, and max. Avg uses the same
+// occupancy filter as p90 (only cells where the metric is meaningful).
+type CellMetric struct {
+	Avg float64
+	P90 float64
+	Max float64
+}
+
+func metricFromValues(values []float64) CellMetric {
+	if len(values) == 0 {
+		return CellMetric{}
+	}
+	sum := 0.0
+	maxValue := values[0]
+	for _, v := range values {
+		sum += v
+		if v > maxValue {
+			maxValue = v
+		}
+	}
+	return CellMetric{
+		Avg: sum / float64(len(values)),
+		P90: PercentileFloat64(values, reportGenerationPercentile),
+		Max: maxValue,
+	}
+}
+
+func wholeFileMetric(value float64) CellMetric {
+	return CellMetric{Avg: value, P90: value, Max: value}
+}
+
 type CellPercentiles struct {
-	P90TotalBytes      float64
-	P90TextureBytes    float64
-	P90GPUTextureBytes float64
-	P90MeshBytes       float64
-	P90TriangleCount   float64
-	P90UniqueAssets    float64
-	P90MeshParts       float64
-	P90Parts           float64
-	P90DrawCalls       float64
-	CellCount          int
-	CellSizeStuds      float64
-	WholeFileMode      bool
+	TotalBytes      CellMetric
+	TextureBytes    CellMetric
+	GPUTextureBytes CellMetric
+	MeshBytes       CellMetric
+	TriangleCount   CellMetric
+	UniqueAssets    CellMetric
+	MeshParts       CellMetric
+	Parts           CellMetric
+	DrawCalls       CellMetric
+	InstanceCount   CellMetric
+	CellCount       int
+	CellSizeStuds   float64
+	WholeFileMode   bool
 }
 
 func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
@@ -60,6 +99,7 @@ func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
 	meshPartValues := make([]float64, 0, len(cells))
 	partValues := make([]float64, 0, len(cells))
 	drawCallValues := make([]float64, 0, len(cells))
+	instanceCountValues := make([]float64, 0, len(cells))
 	cellSize := 0.0
 
 	for _, cell := range cells {
@@ -72,8 +112,11 @@ func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
 		if cell.Stats.DrawCallCount > 0 {
 			drawCallValues = append(drawCallValues, float64(cell.Stats.DrawCallCount))
 		}
+		if cell.Stats.InstanceCount > 0 {
+			instanceCountValues = append(instanceCountValues, float64(cell.Stats.InstanceCount))
+		}
 		if cell.Stats.ReferenceCount <= 0 {
-			if cellSize == 0 && (cell.Stats.MeshPartCount > 0 || cell.Stats.PartCount > 0 || cell.Stats.DrawCallCount > 0) {
+			if cellSize == 0 && (cell.Stats.MeshPartCount > 0 || cell.Stats.PartCount > 0 || cell.Stats.DrawCallCount > 0 || cell.Stats.InstanceCount > 0) {
 				cellSize = cell.MaximumX - cell.MinimumX
 			}
 			continue
@@ -90,39 +133,41 @@ func ComputeCellPercentiles(cells []heatmap.Cell) CellPercentiles {
 		}
 	}
 
-	if occupied == 0 && len(meshPartValues) == 0 && len(partValues) == 0 && len(drawCallValues) == 0 {
+	if occupied == 0 && len(meshPartValues) == 0 && len(partValues) == 0 && len(drawCallValues) == 0 && len(instanceCountValues) == 0 {
 		return CellPercentiles{}
 	}
 
 	return CellPercentiles{
-		P90TotalBytes:      PercentileFloat64(totalBytesValues, reportGenerationPercentile),
-		P90TextureBytes:    PercentileFloat64(textureBytesValues, reportGenerationPercentile),
-		P90GPUTextureBytes: PercentileFloat64(gpuTextureBytesValues, reportGenerationPercentile),
-		P90MeshBytes:       PercentileFloat64(meshBytesValues, reportGenerationPercentile),
-		P90TriangleCount:   PercentileFloat64(triangleCountValues, reportGenerationPercentile),
-		P90UniqueAssets:    PercentileFloat64(uniqueAssetValues, reportGenerationPercentile),
-		P90MeshParts:       PercentileFloat64(meshPartValues, reportGenerationPercentile),
-		P90Parts:           PercentileFloat64(partValues, reportGenerationPercentile),
-		P90DrawCalls:       PercentileFloat64(drawCallValues, reportGenerationPercentile),
-		CellCount:          occupied,
-		CellSizeStuds:      cellSize,
+		TotalBytes:      metricFromValues(totalBytesValues),
+		TextureBytes:    metricFromValues(textureBytesValues),
+		GPUTextureBytes: metricFromValues(gpuTextureBytesValues),
+		MeshBytes:       metricFromValues(meshBytesValues),
+		TriangleCount:   metricFromValues(triangleCountValues),
+		UniqueAssets:    metricFromValues(uniqueAssetValues),
+		MeshParts:       metricFromValues(meshPartValues),
+		Parts:           metricFromValues(partValues),
+		DrawCalls:       metricFromValues(drawCallValues),
+		InstanceCount:   metricFromValues(instanceCountValues),
+		CellCount:       occupied,
+		CellSizeStuds:   cellSize,
 	}
 }
 
 func ComputeReportCellPercentiles(assetType AssetTypeConfig, cells []heatmap.Cell, summary Summary) CellPercentiles {
 	if assetType.DisableSpatialMode {
 		return CellPercentiles{
-			P90TotalBytes:      float64(summary.TotalBytes),
-			P90TextureBytes:    float64(summary.TextureBytes),
-			P90GPUTextureBytes: float64(EstimateGPUTextureBytes(summary.BC1PixelCount, summary.BC3PixelCount)),
-			P90MeshBytes:       float64(summary.MeshBytes),
-			P90TriangleCount:   float64(summary.TriangleCount),
-			P90UniqueAssets:    float64(summary.UniqueAssetCount),
-			P90MeshParts:       float64(summary.MeshPartCount),
-			P90Parts:           float64(summary.PartCount),
-			P90DrawCalls:       float64(summary.DrawCallCount),
-			CellCount:          1,
-			WholeFileMode:      true,
+			TotalBytes:      wholeFileMetric(float64(summary.TotalBytes)),
+			TextureBytes:    wholeFileMetric(float64(summary.TextureBytes)),
+			GPUTextureBytes: wholeFileMetric(float64(EstimateGPUTextureBytes(summary.BC1PixelCount, summary.BC3PixelCount))),
+			MeshBytes:       wholeFileMetric(float64(summary.MeshBytes)),
+			TriangleCount:   wholeFileMetric(float64(summary.TriangleCount)),
+			UniqueAssets:    wholeFileMetric(float64(summary.UniqueAssetCount)),
+			MeshParts:       wholeFileMetric(float64(summary.MeshPartCount)),
+			Parts:           wholeFileMetric(float64(summary.PartCount)),
+			DrawCalls:       wholeFileMetric(float64(summary.DrawCallCount)),
+			InstanceCount:   wholeFileMetric(float64(summary.InstanceCount)),
+			CellCount:       1,
+			WholeFileMode:   true,
 		}
 	}
 	return ComputeCellPercentiles(cells)
@@ -159,21 +204,24 @@ func ComputePerformanceProfile(percentiles CellPercentiles, summary Summary) []P
 }
 
 func ComputePerformanceProfileForAssetType(assetType AssetTypeConfig, percentiles CellPercentiles, summary Summary) []PerformanceGrade {
-	useCellPercentiles := percentiles.CellCount > 0
+	// Whole-file asset types (e.g. vehicle categories with DisableSpatialMode)
+	// fold all metrics into a synthetic single cell. The avg/p90/max columns
+	// would just repeat the headline value, so suppress per-cell display
+	// entirely for them.
+	useCellPercentiles := percentiles.CellCount > 0 && !percentiles.WholeFileMode
 	thresholds := assetType.Thresholds
 
 	grades := []PerformanceGrade{
-		ComputeDownloadSizeGradeWithThresholds(summary.TotalBytes, percentiles.P90TotalBytes, useCellPercentiles, thresholds.TotalSizeMB),
-		ComputeTextureSizeGradeWithThresholds(summary.TextureBytes, percentiles.P90TextureBytes, useCellPercentiles, thresholds.TextureSizeMB),
-		ComputeGPUTextureMemoryGradeWithThresholds(summary.BC1PixelCount, summary.BC3PixelCount, summary.BC1BytesExact, summary.BC3BytesExact, percentiles.P90GPUTextureBytes, useCellPercentiles, thresholds.GPUTextureMemoryMB),
-		ComputeWastefulBC3GradeWithThresholds(summary.WastefulBC3Count, summary.WastefulBC3PixelCount, thresholds.WastefulBC3Count),
-		ComputeMeshSizeGradeWithThresholds(summary.MeshBytes, percentiles.P90MeshBytes, useCellPercentiles, thresholds.MeshSizeMB),
+		ComputeGPUTextureMemoryGradeWithThresholds(summary.BC1PixelCount, summary.BC3PixelCount, summary.BC1BytesExact, summary.BC3BytesExact, percentiles.GPUTextureBytes, useCellPercentiles, thresholds.GPUTextureMemoryMB),
+		ComputeMeshSizeGradeWithThresholds(summary.MeshBytes, percentiles.MeshBytes, useCellPercentiles, thresholds.MeshSizeMB),
+		ComputeMeshComplexityGradeWithThresholds(summary.TriangleCount, percentiles.TriangleCount, useCellPercentiles, thresholds.MeshComplexity),
+		ComputeDrawCallGradeWithThresholds(summary.DrawCallCount, percentiles.DrawCalls, useCellPercentiles, thresholds.DrawCalls),
+		ComputeMeshPartCountGradeWithThresholds(summary.MeshPartCount, percentiles.MeshParts, useCellPercentiles, thresholds.MeshPartCount),
+		ComputePartCountGradeWithThresholds(summary.PartCount, percentiles.Parts, useCellPercentiles, thresholds.PartCount),
+		ComputeInstanceCountGradeWithThresholds(summary.InstanceCount, percentiles.InstanceCount, useCellPercentiles, thresholds.InstanceCount),
+		ComputeAssetDiversityGradeWithThresholds(summary.UniqueAssetCount, percentiles.UniqueAssets, useCellPercentiles, thresholds.AssetDiversity),
+		ComputeMismatchedPBRMapsGradeWithThresholds(summary.MismatchedPBRMaterialCount, summary.PBRMaterialCount, thresholds.MismatchedPBRMaps),
 		ComputeOversizedTextureCountGradeWithThresholds(summary.OversizedTextureCount, thresholds.OversizedTextures),
-		ComputeMeshComplexityGradeWithThresholds(summary.TriangleCount, percentiles.P90TriangleCount, useCellPercentiles, thresholds.MeshComplexity),
-		ComputeDrawCallGradeWithThresholds(summary.DrawCallCount, percentiles.P90DrawCalls, useCellPercentiles, thresholds.DrawCalls),
-		ComputeMeshPartCountGradeWithThresholds(summary.MeshPartCount, percentiles.P90MeshParts, useCellPercentiles, thresholds.MeshPartCount),
-		ComputePartCountGradeWithThresholds(summary.PartCount, percentiles.P90Parts, useCellPercentiles, thresholds.PartCount),
-		ComputeAssetDiversityGradeWithThresholds(summary.UniqueAssetCount, percentiles.P90UniqueAssets, useCellPercentiles, thresholds.AssetDiversity),
 	}
 
 	dupCount := ComputeDuplicateCountGradeWithThresholds(summary.DuplicateCount, thresholds.DuplicateCount)
@@ -230,24 +278,43 @@ func overallContinuousAverage(grades []PerformanceGrade) float64 {
 	return total / float64(len(grades))
 }
 
-func ComputeMeshComplexityGrade(triangleCount int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeMeshComplexityGradeWithThresholds(triangleCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.MeshComplexity)
+// formatCellMetricBytes / formatCellMetricInts produce the three per-cell
+// labels (avg, p90, max) shown next to the grade value in spatial mode.
+// Returns empty strings when useCellPercentile is false so the UI omits
+// the cells entirely.
+func formatCellMetricBytes(metric CellMetric, useCellPercentile bool) (string, string, string) {
+	if !useCellPercentile {
+		return "", "", ""
+	}
+	return format.FormatSizeAuto64(int64(metric.Avg)), format.FormatSizeAuto64(int64(metric.P90)), format.FormatSizeAuto64(int64(metric.Max))
 }
 
-func ComputeMeshComplexityGradeWithThresholds(triangleCount int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
-	gradeValue := float64(triangleCount)
-	totalLabel := ""
-	if useCellPercentile {
-		gradeValue = percentilePerCell
-		totalLabel = format.FormatIntCommas(int64(percentilePerCell)) + " p90/cell"
+func formatCellMetricInts(metric CellMetric, useCellPercentile bool) (string, string, string) {
+	if !useCellPercentile {
+		return "", "", ""
 	}
+	return format.FormatIntCommas(int64(metric.Avg)), format.FormatIntCommas(int64(metric.P90)), format.FormatIntCommas(int64(metric.Max))
+}
+
+func ComputeMeshComplexityGrade(triangleCount int64, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputeMeshComplexityGradeWithThresholds(triangleCount, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.MeshComplexity)
+}
+
+func ComputeMeshComplexityGradeWithThresholds(triangleCount int64, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+	gradeValue := float64(triangleCount)
+	if useCellPercentile {
+		gradeValue = cellMetric.P90
+	}
+	avgLabel, p90Label, maxLabel := formatCellMetricInts(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Mesh Complexity",
 		Value:             format.FormatIntCommas(triangleCount) + " tris",
-		TotalValue:        totalLabel,
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
 		Description:       MeshGradeDescription(grade),
 		MetricDescription: "Total triangle count across all MeshParts in the scene",
 	}
@@ -273,49 +340,51 @@ func ComputeDuplicationWasteGradeWithThresholds(duplicateSizeBytes int64, totalB
 	}
 }
 
-func ComputeDownloadSizeGrade(totalBytes int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeDownloadSizeGradeWithThresholds(totalBytes, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.TotalSizeMB)
+func ComputeInstanceCountGrade(instanceCount int64, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputeInstanceCountGradeWithThresholds(instanceCount, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.InstanceCount)
 }
 
-func ComputeDownloadSizeGradeWithThresholds(totalBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
-	gradeValue := float64(totalBytes) / float64(format.Megabyte)
-	totalLabel := ""
+// ComputeInstanceCountGradeWithThresholds grades scene instance count.
+// In spatial mode it grades on the p90/cell of positionable instances
+// (instances without world coordinates can't be bucketed and are dropped
+// from the cell roll-up). The whole-file count drives the headline value
+// so users still see the true descendant total.
+func ComputeInstanceCountGradeWithThresholds(instanceCount int64, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+	gradeValue := float64(instanceCount)
 	if useCellPercentile {
-		gradeValue = percentilePerCell / float64(format.Megabyte)
-		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
+		gradeValue = cellMetric.P90
 	}
+	avgLabel, p90Label, maxLabel := formatCellMetricInts(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
-		Label:             "Total Size",
-		Value:             format.FormatSizeAuto64(totalBytes),
-		TotalValue:        totalLabel,
-		Description:       DownloadSizeGradeDescription(grade),
-		MetricDescription: "Sum of all asset data (meshes + textures) that must be downloaded",
+		Label:             "Instances",
+		Value:             format.FormatIntCommas(instanceCount),
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
+		Description:       InstanceCountGradeDescription(grade),
+		MetricDescription: "Total descendants in the file (every instance of every class) — graded on the p90/cell of positionable instances when spatial data is available",
 	}
 }
 
-func ComputeTextureSizeGrade(textureBytes int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeTextureSizeGradeWithThresholds(textureBytes, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.TextureSizeMB)
-}
-
-func ComputeTextureSizeGradeWithThresholds(textureBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
-	gradeValue := float64(textureBytes) / float64(format.Megabyte)
-	totalLabel := ""
-	if useCellPercentile {
-		gradeValue = percentilePerCell / float64(format.Megabyte)
-		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
-	}
-	grade := GradeFromThresholds(gradeValue, thresholds)
-	return PerformanceGrade{
-		Grade:             grade,
-		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
-		Label:             "Texture Size",
-		Value:             format.FormatSizeAuto64(textureBytes),
-		TotalValue:        totalLabel,
-		Description:       TextureSizeGradeDescription(grade),
-		MetricDescription: "Total size of all image/texture assets in the scene",
+func InstanceCountGradeDescription(grade string) string {
+	switch grade {
+	case gradeAPlus:
+		return "Tiny instance tree, negligible streaming or replication overhead"
+	case gradeA:
+		return "Small instance tree, fast to stream and replicate"
+	case gradeB:
+		return "Moderate instance count, healthy for most experiences"
+	case gradeC:
+		return "Elevated instance count, consider grouping or simplifying"
+	case gradeD:
+		return "High instance count, noticeable streaming and serialization cost"
+	case gradeE:
+		return "Very high instance count, significant overhead"
+	default:
+		return "Extreme instance count, severe streaming and replication cost"
 	}
 }
 
@@ -389,92 +458,78 @@ func EstimateGPUTextureBytesExact(width, height int, isBC3 bool) int64 {
 	return total
 }
 
-// EstimateBC3SavingsBytes returns how much VRAM would be reclaimed if every
-// wasteful-BC3 texture (alpha present but every pixel fully opaque) were
-// re-uploaded without an alpha channel and therefore encoded as BC1.
-func EstimateBC3SavingsBytes(wastefulBC3Pixels int64) int64 {
-	if wastefulBC3Pixels <= 0 {
-		return 0
-	}
-	saved := float64(wastefulBC3Pixels) * (BC3BytesPerPixel - BC1BytesPerPixel) * MipChainFactor
-	return int64(math.Round(saved))
+func ComputeGPUTextureMemoryGrade(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact int64, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputeGPUTextureMemoryGradeWithThresholds(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.GPUTextureMemoryMB)
 }
 
-func ComputeGPUTextureMemoryGrade(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeGPUTextureMemoryGradeWithThresholds(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.GPUTextureMemoryMB)
-}
-
-// ComputeGPUTextureMemoryGradeWithThresholds grades combined BC1+BC3 GPU texture
-// memory. Prefers bc1BytesExact+bc3BytesExact (byte-for-byte match with
-// RenderDoc) and falls back to the pixel approximation when exact bytes
-// are not populated (older call sites or tests). percentilePerCell is the
-// p90 of per-cell GPU bytes when in spatial mode.
-func ComputeGPUTextureMemoryGradeWithThresholds(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+// ComputeGPUTextureMemoryGradeWithThresholds grades combined BC1+BC3 GPU
+// texture memory. Prefers bc1BytesExact+bc3BytesExact (byte-for-byte match
+// with RenderDoc) and falls back to the pixel approximation when exact
+// bytes aren't populated (older call sites or tests). cellMetric carries
+// the per-cell avg/p90/max of GPU bytes when in spatial mode.
+func ComputeGPUTextureMemoryGradeWithThresholds(bc1Pixels, bc3Pixels, bc1BytesExact, bc3BytesExact int64, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	totalBytes := bc1BytesExact + bc3BytesExact
 	if totalBytes <= 0 {
 		totalBytes = EstimateGPUTextureBytes(bc1Pixels, bc3Pixels)
 	}
 	gradeValue := float64(totalBytes) / float64(format.Megabyte)
-	totalLabel := ""
 	if useCellPercentile {
-		gradeValue = percentilePerCell / float64(format.Megabyte)
-		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
+		gradeValue = cellMetric.P90 / float64(format.Megabyte)
 	}
+	avgLabel, p90Label, maxLabel := formatCellMetricBytes(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "GPU Texture Memory",
 		Value:             format.FormatSizeAuto64(totalBytes),
-		TotalValue:        totalLabel,
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
 		Description:       GPUTextureMemoryGradeDescription(grade),
 		MetricDescription: "Estimated GPU VRAM: BC1 (0.5 B/px) for no-alpha sources + BC3 (1.0 B/px) for alpha sources, both with mipmaps",
 	}
 }
 
-func ComputeWastefulBC3Grade(wastefulCount int, wastefulPixels int64) PerformanceGrade {
-	return ComputeWastefulBC3GradeWithThresholds(wastefulCount, wastefulPixels, DefaultAssetType().Thresholds.WastefulBC3Count)
+func ComputeMismatchedPBRMapsGrade(mismatchedCount, totalCount int) PerformanceGrade {
+	return ComputeMismatchedPBRMapsGradeWithThresholds(mismatchedCount, totalCount, DefaultAssetType().Thresholds.MismatchedPBRMaps)
 }
 
-// ComputeWastefulBC3GradeWithThresholds grades how many textures were uploaded
-// with a fully-opaque alpha channel — Roblox encodes them as BC3 and so they
-// occupy 2x the VRAM they'd need as BC1.
-func ComputeWastefulBC3GradeWithThresholds(wastefulCount int, wastefulPixels int64, thresholds [6]float64) PerformanceGrade {
-	gradeValue := float64(wastefulCount)
+// ComputeMismatchedPBRMapsGradeWithThresholds grades how many SurfaceAppearance
+// materials have authored color/normal/metalness/roughness slots that aren't
+// all the same source resolution. Mixing a 2K color with a 512 normal forces
+// the engine to upscale the smaller map, wasting VRAM and signalling
+// inconsistent authoring.
+func ComputeMismatchedPBRMapsGradeWithThresholds(mismatchedCount, totalCount int, thresholds [6]float64) PerformanceGrade {
+	_ = totalCount
+	gradeValue := float64(mismatchedCount)
 	grade := GradeFromThresholds(gradeValue, thresholds)
-	savings := EstimateBC3SavingsBytes(wastefulPixels)
-	valueLabel := fmt.Sprintf("%d textures", wastefulCount)
-	totalLabel := ""
-	if savings > 0 {
-		totalLabel = format.FormatSizeAuto64(savings) + " recoverable"
-	}
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
-		Label:             "Wasteful BC3 Textures",
-		Value:             valueLabel,
-		TotalValue:        totalLabel,
-		Description:       WastefulBC3GradeDescription(grade),
-		MetricDescription: "BC3 textures using <5% non-opaque alpha — the alpha channel is barely used, re-exporting without it would fall back to BC1 (0.5 B/px) and halve the GPU cost",
+		Label:             "Mismatched PBR Maps",
+		Value:             fmt.Sprintf("%d materials", mismatchedCount),
+		Description:       MismatchedPBRMapsGradeDescription(grade),
+		MetricDescription: "SurfaceAppearance materials whose color/normal/metalness/roughness textures aren't all at the same source resolution — the engine upscales the smaller maps, wasting VRAM",
 	}
 }
 
-func WastefulBC3GradeDescription(grade string) string {
+func MismatchedPBRMapsGradeDescription(grade string) string {
 	switch grade {
 	case gradeAPlus:
-		return "No BC3 textures with <5% alpha usage detected"
+		return "All PBR materials use matching map resolutions"
 	case gradeA:
-		return "A handful of BC3 textures barely use their alpha channel"
+		return "A handful of materials mix map resolutions across their PBR slots"
 	case gradeB:
-		return "Some BC3 textures use <5% of their alpha channel — dropping alpha would halve GPU cost"
+		return "Some materials mix resolutions across color/normal/MR — pick one size per material"
 	case gradeC:
-		return "Notable number of barely-alpha BC3 textures — re-export without alpha for BC1"
+		return "Notable number of materials with mismatched PBR map sizes"
 	case gradeD:
-		return "Many BC3 textures have minimal alpha usage; significant VRAM is recoverable"
+		return "Many materials have unbalanced PBR maps; resize smaller maps to match"
 	case gradeE:
-		return "Heavy BC3 waste; most alpha channels cover <5% of pixels"
+		return "Heavy PBR map mismatch; significant authoring cleanup needed"
 	default:
-		return "Most alpha-bearing textures use alpha on <5% of pixels; large GPU savings available"
+		return "Most materials have unmatched PBR map resolutions"
 	}
 }
 
@@ -497,24 +552,25 @@ func GPUTextureMemoryGradeDescription(grade string) string {
 	}
 }
 
-func ComputeMeshSizeGrade(meshBytes int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeMeshSizeGradeWithThresholds(meshBytes, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.MeshSizeMB)
+func ComputeMeshSizeGrade(meshBytes int64, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputeMeshSizeGradeWithThresholds(meshBytes, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.MeshSizeMB)
 }
 
-func ComputeMeshSizeGradeWithThresholds(meshBytes int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+func ComputeMeshSizeGradeWithThresholds(meshBytes int64, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(meshBytes) / float64(format.Megabyte)
-	totalLabel := ""
 	if useCellPercentile {
-		gradeValue = percentilePerCell / float64(format.Megabyte)
-		totalLabel = format.FormatSizeAuto64(int64(percentilePerCell)) + " p90/cell"
+		gradeValue = cellMetric.P90 / float64(format.Megabyte)
 	}
+	avgLabel, p90Label, maxLabel := formatCellMetricBytes(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Mesh Size",
 		Value:             format.FormatSizeAuto64(meshBytes),
-		TotalValue:        totalLabel,
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
 		Description:       MeshSizeGradeDescription(grade),
 		MetricDescription: "Total size of all mesh geometry data in the scene",
 	}
@@ -554,93 +610,97 @@ func ComputeDuplicateCountGradeWithThresholds(duplicateCount int64, thresholds [
 	}
 }
 
-func ComputeMeshPartCountGrade(meshPartCount int, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeMeshPartCountGradeWithThresholds(meshPartCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.MeshPartCount)
+func ComputeMeshPartCountGrade(meshPartCount int, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputeMeshPartCountGradeWithThresholds(meshPartCount, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.MeshPartCount)
 }
 
-func ComputeMeshPartCountGradeWithThresholds(meshPartCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+func ComputeMeshPartCountGradeWithThresholds(meshPartCount int, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(meshPartCount)
-	totalLabel := ""
 	if useCellPercentile {
-		gradeValue = percentilePerCell
-		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
+		gradeValue = cellMetric.P90
 	}
+	avgLabel, p90Label, maxLabel := formatCellMetricInts(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "MeshParts",
 		Value:             fmt.Sprintf("%d", meshPartCount),
-		TotalValue:        totalLabel,
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
 		Description:       MeshPartCountGradeDescription(grade),
 		MetricDescription: "Count of MeshPart instances in the scene",
 	}
 }
 
-func ComputeDrawCallGrade(drawCallCount int64, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeDrawCallGradeWithThresholds(drawCallCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.DrawCalls)
+func ComputeDrawCallGrade(drawCallCount int64, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputeDrawCallGradeWithThresholds(drawCallCount, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.DrawCalls)
 }
 
-func ComputeDrawCallGradeWithThresholds(drawCallCount int64, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+func ComputeDrawCallGradeWithThresholds(drawCallCount int64, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(drawCallCount)
-	totalLabel := ""
 	if useCellPercentile {
-		gradeValue = percentilePerCell
-		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
+		gradeValue = cellMetric.P90
 	}
+	avgLabel, p90Label, maxLabel := formatCellMetricInts(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Draw Calls",
 		Value:             fmt.Sprintf("%d est.", drawCallCount),
-		TotalValue:        totalLabel,
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
 		Description:       DrawCallGradeDescription(grade),
 		MetricDescription: "Estimated GPU draw calls based on unique mesh/texture/material combos",
 	}
 }
 
-func ComputePartCountGrade(partCount int, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputePartCountGradeWithThresholds(partCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.PartCount)
+func ComputePartCountGrade(partCount int, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputePartCountGradeWithThresholds(partCount, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.PartCount)
 }
 
-func ComputePartCountGradeWithThresholds(partCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+func ComputePartCountGradeWithThresholds(partCount int, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(partCount)
-	totalLabel := ""
 	if useCellPercentile {
-		gradeValue = percentilePerCell
-		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
+		gradeValue = cellMetric.P90
 	}
+	avgLabel, p90Label, maxLabel := formatCellMetricInts(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Parts",
 		Value:             fmt.Sprintf("%d", partCount),
-		TotalValue:        totalLabel,
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
 		Description:       PartCountGradeDescription(grade),
 		MetricDescription: "Count of Part instances (legacy bricks) in the scene",
 	}
 }
 
-func ComputeAssetDiversityGrade(uniqueAssetCount int, percentilePerCell float64, useCellPercentile bool) PerformanceGrade {
-	return ComputeAssetDiversityGradeWithThresholds(uniqueAssetCount, percentilePerCell, useCellPercentile, DefaultAssetType().Thresholds.AssetDiversity)
+func ComputeAssetDiversityGrade(uniqueAssetCount int, cellMetric CellMetric, useCellPercentile bool) PerformanceGrade {
+	return ComputeAssetDiversityGradeWithThresholds(uniqueAssetCount, cellMetric, useCellPercentile, DefaultAssetType().Thresholds.AssetDiversity)
 }
 
-func ComputeAssetDiversityGradeWithThresholds(uniqueAssetCount int, percentilePerCell float64, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
+func ComputeAssetDiversityGradeWithThresholds(uniqueAssetCount int, cellMetric CellMetric, useCellPercentile bool, thresholds [6]float64) PerformanceGrade {
 	gradeValue := float64(uniqueAssetCount)
-	totalLabel := ""
 	if useCellPercentile {
-		gradeValue = percentilePerCell
-		totalLabel = fmt.Sprintf("%.0f p90/cell", percentilePerCell)
+		gradeValue = cellMetric.P90
 	}
+	avgLabel, p90Label, maxLabel := formatCellMetricInts(cellMetric, useCellPercentile)
 	grade := GradeFromThresholds(gradeValue, thresholds)
 	return PerformanceGrade{
 		Grade:             grade,
 		Score:             ContinuousScoreFromThresholds(gradeValue, thresholds),
 		Label:             "Asset Diversity",
 		Value:             fmt.Sprintf("%d unique", uniqueAssetCount),
-		TotalValue:        totalLabel,
+		AvgCellValue:      avgLabel,
+		TotalValue:        p90Label,
+		MaxCellValue:      maxLabel,
 		Description:       AssetDiversityGradeDescription(grade),
 		MetricDescription: "Number of unique assets that must be fetched from CDN",
 	}
@@ -764,44 +824,6 @@ func DuplicationGradeDescription(grade string) string {
 		return "Severe duplication, major optimization opportunity"
 	default:
 		return "Extreme duplication, most assets are redundant"
-	}
-}
-
-func DownloadSizeGradeDescription(grade string) string {
-	switch grade {
-	case gradeAPlus:
-		return "Tiny download footprint, near-instant load"
-	case gradeA:
-		return "Small download footprint, fast initial load"
-	case gradeB:
-		return "Moderate download size, acceptable load times"
-	case gradeC:
-		return "Large download size, slower initial experience"
-	case gradeD:
-		return "Very large download, long wait for players"
-	case gradeE:
-		return "Extremely large download, players may abandon loading"
-	default:
-		return "Massive download, likely to drive players away"
-	}
-}
-
-func TextureSizeGradeDescription(grade string) string {
-	switch grade {
-	case gradeAPlus:
-		return "Minimal texture payload, negligible bandwidth impact"
-	case gradeA:
-		return "Lightweight textures, minimal bandwidth impact"
-	case gradeB:
-		return "Moderate texture payload, acceptable for most experiences"
-	case gradeC:
-		return "Heavy texture payload, consider compressing or downscaling"
-	case gradeD:
-		return "Very heavy textures, significant download and memory cost"
-	case gradeE:
-		return "Extreme texture weight, major optimization needed"
-	default:
-		return "Massive texture payload, severely impacts all platforms"
 	}
 }
 

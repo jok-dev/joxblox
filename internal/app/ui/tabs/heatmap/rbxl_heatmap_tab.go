@@ -1310,9 +1310,6 @@ func BuildHeatmapCells(scene *RBXLHeatmapScene, gridDivisions int) ([]heatmap.Ce
 		if point.Stats.PixelCount > 0 {
 			if loader.ClassifyAsBC3(point.Stats.HasAlphaChannel, point.Stats.NonOpaqueAlphaPixels, point.PropertyName) {
 				totals.BC3PixelCount += point.Stats.PixelCount * delta
-				if loader.IsWastefulBC3(point.Stats.HasAlphaChannel, point.Stats.NonOpaqueAlphaPixels, point.Stats.PixelCount, point.PropertyName) {
-					totals.WastefulBC3PixelCount += point.Stats.PixelCount * delta
-				}
 			} else {
 				totals.BC1PixelCount += point.Stats.PixelCount * delta
 			}

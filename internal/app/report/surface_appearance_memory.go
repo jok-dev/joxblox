@@ -1,5 +1,7 @@
 package report
 
+import "sort"
+
 // Normalized SurfaceAppearance property names. Use these instead of
 // hand-typing the strings in switch statements.
 const (
@@ -57,6 +59,94 @@ func bumpDimsToLarger(target *SurfaceAppearanceMaterialSlot, candidate SurfaceAp
 		target.Height = candidate.Height
 		target.PixelCount = candidate.PixelCount
 	}
+}
+
+// MismatchedPBRMaterialDetail is one material whose authored slots aren't
+// all at the same (Width, Height). Zero-valued width/height means the
+// matching slot wasn't authored on this SurfaceAppearance.
+type MismatchedPBRMaterialDetail struct {
+	InstancePath    string
+	ColorWidth      int
+	ColorHeight     int
+	NormalWidth     int
+	NormalHeight    int
+	MetalnessWidth  int
+	MetalnessHeight int
+	RoughnessWidth  int
+	RoughnessHeight int
+}
+
+// CountMismatchedPBRMaterials returns how many materials in the map have at
+// least one authored slot whose source resolution differs from the others
+// (color/normal/metalness/roughness), and how many materials carry any
+// authored slot at all (the population). A material with zero or one
+// authored slot can't mismatch and is excluded from the mismatched count
+// but still contributes to the population.
+func CountMismatchedPBRMaterials(materials map[string]SurfaceAppearanceMaterialSlots) (mismatched int, total int) {
+	for _, slots := range materials {
+		if len(authoredSlotDimensions(slots)) == 0 {
+			continue
+		}
+		total++
+		if isMismatchedPBRMaterial(slots) {
+			mismatched++
+		}
+	}
+	return mismatched, total
+}
+
+// CollectMismatchedPBRMaterials returns one detail entry per material whose
+// authored slots aren't all the same size, sorted by instance path so the
+// caller can render a stable list.
+func CollectMismatchedPBRMaterials(materials map[string]SurfaceAppearanceMaterialSlots) []MismatchedPBRMaterialDetail {
+	out := make([]MismatchedPBRMaterialDetail, 0)
+	for path, slots := range materials {
+		if !isMismatchedPBRMaterial(slots) {
+			continue
+		}
+		out = append(out, MismatchedPBRMaterialDetail{
+			InstancePath:    path,
+			ColorWidth:      slots.Color.Width,
+			ColorHeight:     slots.Color.Height,
+			NormalWidth:     slots.Normal.Width,
+			NormalHeight:    slots.Normal.Height,
+			MetalnessWidth:  slots.Metalness.Width,
+			MetalnessHeight: slots.Metalness.Height,
+			RoughnessWidth:  slots.Roughness.Width,
+			RoughnessHeight: slots.Roughness.Height,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].InstancePath < out[j].InstancePath })
+	return out
+}
+
+func isMismatchedPBRMaterial(slots SurfaceAppearanceMaterialSlots) bool {
+	authored := authoredSlotDimensions(slots)
+	if len(authored) < 2 {
+		return false
+	}
+	for _, dim := range authored[1:] {
+		if dim != authored[0] {
+			return true
+		}
+	}
+	return false
+}
+
+type slotDim struct {
+	width  int
+	height int
+}
+
+func authoredSlotDimensions(slots SurfaceAppearanceMaterialSlots) []slotDim {
+	out := make([]slotDim, 0, 4)
+	for _, slot := range []SurfaceAppearanceMaterialSlot{slots.Color, slots.Normal, slots.Metalness, slots.Roughness} {
+		if slot.AssetKey == "" || slot.Width <= 0 || slot.Height <= 0 {
+			continue
+		}
+		out = append(out, slotDim{width: slot.Width, height: slot.Height})
+	}
+	return out
 }
 
 // ApplyDeltaClamped adds delta to *target, clamping the result at zero.

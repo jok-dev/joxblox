@@ -980,6 +980,16 @@ func (p *meshRendererProcess) loadColored(positions []float32, indices []uint32,
 }
 
 func (p *meshRendererProcess) loadScene(batches []MeshPreviewBatchData) error {
+	return p.loadSceneWithMode(batches, true)
+}
+
+// loadSceneWithMode pushes each batch to the renderer. When sceneMode is
+// true (the default for the recolor-able heatmap path) the renderer
+// collapses each batch's vertex colors to a single baseColor and zeroes
+// the per-vertex colors. When false it keeps per-vertex colors so a
+// single batch can render parts in many different tints (used by the
+// top-down map render).
+func (p *meshRendererProcess) loadSceneWithMode(batches []MeshPreviewBatchData, sceneMode bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.alive {
@@ -989,7 +999,11 @@ func (p *meshRendererProcess) loadScene(batches []MeshPreviewBatchData) error {
 		return fmt.Errorf("scene is empty")
 	}
 
-	header := fmt.Sprintf("LOADSCENE %d\n", len(batches))
+	modeArg := "scenemode"
+	if !sceneMode {
+		modeArg = "vertexcolors"
+	}
+	header := fmt.Sprintf("LOADSCENE %d %s\n", len(batches), modeArg)
 	if _, err := io.WriteString(p.stdin, header); err != nil {
 		return fmt.Errorf("write scene header: %w", err)
 	}
@@ -1199,7 +1213,7 @@ func RenderTopDownMapImage(batches []MeshPreviewBatchData, centerX float64, cent
 	}
 	defer proc.stop()
 
-	if loadErr := proc.loadScene(batches); loadErr != nil {
+	if loadErr := proc.loadSceneWithMode(batches, false); loadErr != nil {
 		return nil, fmt.Errorf("load scene: %w", loadErr)
 	}
 

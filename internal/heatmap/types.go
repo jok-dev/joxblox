@@ -52,10 +52,12 @@ type Totals struct {
 	// BC3PixelCount is the sum of pixels from textures that Roblox would encode
 	// as BC3 (alpha channel present in the source image) — 1.0 bytes/pixel on GPU.
 	BC3PixelCount int64
-	// WastefulBC3PixelCount is the subset of BC3PixelCount from textures whose
-	// alpha channel is entirely opaque — they pay BC3 cost but could be BC1.
-	WastefulBC3PixelCount int64
-	MeshPartCount         int64
-	PartCount             int64
-	DrawCallCount         int64
+	MeshPartCount int64
+	PartCount     int64
+	DrawCallCount int64
+	// InstanceCount is the count of positionable instances bucketed into this
+	// cell. Populated by the report tab from the rust `instance-count`
+	// position list. Instances without world positions are excluded — they
+	// can't be spatially attributed.
+	InstanceCount int64
 }

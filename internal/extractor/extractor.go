@@ -312,6 +312,87 @@ func ExtractMissingMaterialVariants(filePath string, pathPrefixes []string, stop
 	return results, nil
 }
 
+// InstancePosition is the world-space (X, Z) of one instance from the
+// rbxl/rbxm DOM that has a resolvable position (CFrame). Y is omitted
+// because the report's cell grid is XZ.
+type InstancePosition struct {
+	X float32 `json:"x"`
+	Z float32 `json:"z"`
+}
+
+// InstanceCountResult is the payload returned by the rust `instance-count`
+// subcommand: total descendant count plus per-instance world XZ for the
+// subset that has a resolvable position.
+type InstanceCountResult struct {
+	Count     int64
+	Positions []InstancePosition
+}
+
+// ExtractInstanceCount returns the total number of instances in the file
+// (every node walked by `dom.descendants()`), filtered to pathPrefixes when
+// non-empty, plus the world-XZ of each positionable instance. Total backs
+// the whole-file grade; positions back the spatial p90/cell grade.
+func ExtractInstanceCount(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) (InstanceCountResult, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return InstanceCountResult{}, nil
+	}
+	prefixArg := strings.Join(pathPrefixes, ",")
+	debug.Logf("Rusty Asset Tool instance-count: %s (prefixes=%s)", filePath, prefixArg)
+
+	commandContext, cancelCommand := context.WithCancel(context.Background())
+	defer cancelCommand()
+	if stopChannel != nil {
+		go func() {
+			select {
+			case <-stopChannel:
+				cancelCommand()
+			case <-commandContext.Done():
+			}
+		}()
+	}
+
+	commandName, commandArgs, _, resolveErr := resolveSubcommand("instance-count", filePath, prefixArg)
+	if resolveErr != nil {
+		return InstanceCountResult{}, resolveErr
+	}
+
+	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
+	command.Env = appendCargoEnv(os.Environ())
+	var stdoutBuffer bytes.Buffer
+	var stderrBuffer bytes.Buffer
+	command.Stdout = &stdoutBuffer
+	command.Stderr = &stderrBuffer
+	runErr := command.Run()
+	if commandContext.Err() != nil {
+		return InstanceCountResult{}, ErrCancelled
+	}
+	if runErr != nil {
+		stderrText := strings.TrimSpace(stderrBuffer.String())
+		if stderrText != "" {
+			return InstanceCountResult{}, fmt.Errorf("Rusty Asset Tool failed: %s", stderrText)
+		}
+		return InstanceCountResult{}, fmt.Errorf("Rusty Asset Tool failed: %s", runErr.Error())
+	}
+
+	var payload struct {
+		Count     int64       `json:"count"`
+		Positions [][]float32 `json:"positions"`
+	}
+	if err := json.Unmarshal(stdoutBuffer.Bytes(), &payload); err != nil {
+		return InstanceCountResult{}, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
+	}
+	positions := make([]InstancePosition, 0, len(payload.Positions))
+	for _, pair := range payload.Positions {
+		if len(pair) < 2 {
+			continue
+		}
+		positions = append(positions, InstancePosition{X: pair[0], Z: pair[1]})
+	}
+	debug.Logf("Rusty Asset Tool instance-count returned %d instances (%d positioned)", payload.Count, len(positions))
+	return InstanceCountResult{Count: payload.Count, Positions: positions}, nil
+}
+
 func ExtractMapRenderParts(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) ([]MapRenderPartResult, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return nil, nil

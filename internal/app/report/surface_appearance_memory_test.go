@@ -312,6 +312,74 @@ func TestApplySurfaceAppearanceMemoryCorrections_SharedNormalUpscalesToLargestPa
 	}
 }
 
+func TestCountMismatchedPBRMaterials(t *testing.T) {
+	tests := []struct {
+		name             string
+		materials        map[string]SurfaceAppearanceMaterialSlots
+		wantMismatched   int
+		wantTotal        int
+	}{
+		{
+			name:           "all matching sizes",
+			materials:      map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 1024), Normal: slot("n", 1024), Roughness: slot("r", 1024)}},
+			wantMismatched: 0,
+			wantTotal:      1,
+		},
+		{
+			name:           "color and normal differ",
+			materials:      map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 2048), Normal: slot("n", 512)}},
+			wantMismatched: 1,
+			wantTotal:      1,
+		},
+		{
+			name:           "single slot can't mismatch",
+			materials:      map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 1024)}},
+			wantMismatched: 0,
+			wantTotal:      1,
+		},
+		{
+			name:           "empty slots ignored, two-slot mismatch counts",
+			materials:      map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 1024), Roughness: slot("r", 512)}},
+			wantMismatched: 1,
+			wantTotal:      1,
+		},
+		{
+			name: "mixed population",
+			materials: map[string]SurfaceAppearanceMaterialSlots{
+				"A": {Color: slot("c1", 1024), Normal: slot("n1", 1024)},
+				"B": {Color: slot("c2", 2048), Normal: slot("n2", 512)},
+				"C": {Color: slot("c3", 512)},
+				"D": {},
+			},
+			wantMismatched: 1,
+			wantTotal:      3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMismatched, gotTotal := CountMismatchedPBRMaterials(tt.materials)
+			if gotMismatched != tt.wantMismatched || gotTotal != tt.wantTotal {
+				t.Errorf("CountMismatchedPBRMaterials() = (%d, %d), want (%d, %d)", gotMismatched, gotTotal, tt.wantMismatched, tt.wantTotal)
+			}
+		})
+	}
+}
+
+// rectSlot mirrors `slot` but allows distinct width/height to verify the
+// comparison treats (W,H) as a pair, not just total pixel count.
+func TestCountMismatchedPBRMaterials_NonSquareDimensions(t *testing.T) {
+	rect := func(key string, w, h int) SurfaceAppearanceMaterialSlot {
+		return SurfaceAppearanceMaterialSlot{AssetKey: key, Width: w, Height: h, PixelCount: int64(w) * int64(h)}
+	}
+	materials := map[string]SurfaceAppearanceMaterialSlots{
+		"A": {Color: rect("c", 1024, 512), Normal: rect("n", 512, 1024)},
+	}
+	mismatched, total := CountMismatchedPBRMaterials(materials)
+	if mismatched != 1 || total != 1 {
+		t.Errorf("got (%d, %d), want (1, 1) — same pixel count but different (W,H) should mismatch", mismatched, total)
+	}
+}
+
 func TestComputeSurfaceAppearanceMemoryCorrection_NetDeltas(t *testing.T) {
 	materials := map[string]SurfaceAppearanceMaterialSlots{
 		"A": {Color: slot("color-A", 1024), Roughness: slot("rough-shared", 512)},

@@ -7,16 +7,15 @@ import (
 type GradeThresholds struct {
 	MeshComplexity      [6]float64
 	DuplicationWastePct [6]float64
-	TotalSizeMB         [6]float64
-	TextureSizeMB       [6]float64
 	GPUTextureMemoryMB  [6]float64
-	WastefulBC3Count    [6]float64
+	MismatchedPBRMaps   [6]float64
 	MeshSizeMB          [6]float64
 	OversizedTextures   [6]float64
 	DuplicateCount      [6]float64
 	MeshPartCount       [6]float64
 	DrawCalls           [6]float64
 	PartCount           [6]float64
+	InstanceCount       [6]float64
 	AssetDiversity      [6]float64
 }
 
@@ -28,19 +27,19 @@ type AssetTypeConfig struct {
 }
 
 const VehicleOversizedTextureThreshold = 100_000
+
 var VehicleThresholds = GradeThresholds{
 	MeshComplexity:      [6]float64{75_000, 100_000, 120_000, 140_000, 160_000, 180_000},
 	DuplicationWastePct: [6]float64{2, 5, 15, 25, 40, 60},
-	TotalSizeMB:         [6]float64{10, 12, 15, 18, 22, 28},
-	TextureSizeMB:       [6]float64{5, 8, 10, 12, 15, 20},
 	GPUTextureMemoryMB:  [6]float64{10, 16, 20, 24, 30, 40},
-	WastefulBC3Count:    [6]float64{1, 3, 6, 10, 15, 25},
+	MismatchedPBRMaps:   [6]float64{1, 2, 4, 6, 10, 15},
 	MeshSizeMB:          [6]float64{5, 8, 10, 12, 15, 18},
 	OversizedTextures:   [6]float64{1, 3, 6, 10, 15, 25},
 	DuplicateCount:      [6]float64{1, 5, 15, 40, 80, 150},
 	MeshPartCount:       [6]float64{150, 175, 200, 225, 250, 275},
 	DrawCalls:           [6]float64{100, 150, 200, 250, 2000, 4000},
 	PartCount:           [6]float64{25, 50, 75, 100, 125, 150},
+	InstanceCount:       [6]float64{500, 1_000, 2_000, 4_000, 8_000, 15_000},
 	AssetDiversity:      [6]float64{125, 175, 250, 300, 350, 400},
 }
 
@@ -51,16 +50,15 @@ var AssetTypeConfigs = []AssetTypeConfig{
 		Thresholds: GradeThresholds{
 			MeshComplexity:      [6]float64{5_000, 15_000, 20_000, 35_000, 45_000, 60_000},
 			DuplicationWastePct: [6]float64{2, 5, 15, 25, 40, 60},
-			TotalSizeMB:         [6]float64{2, 5, 8, 12, 20, 30},
-			TextureSizeMB:       [6]float64{2, 4, 6, 8, 12, 20},
 			GPUTextureMemoryMB:  [6]float64{4, 8, 12, 16, 24, 40},
-			WastefulBC3Count:    [6]float64{1, 3, 6, 10, 15, 25},
+			MismatchedPBRMaps:   [6]float64{1, 2, 4, 6, 10, 15},
 			MeshSizeMB:          [6]float64{1, 2, 3, 5, 10, 15},
 			OversizedTextures:   [6]float64{1, 3, 6, 10, 15, 25},
 			DuplicateCount:      [6]float64{1, 5, 15, 40, 80, 150},
 			MeshPartCount:       [6]float64{100, 250, 500, 1000, 2000, 4000},
 			DrawCalls:           [6]float64{100, 250, 500, 1000, 2000, 4000},
 			PartCount:           [6]float64{200, 500, 1000, 2500, 5000, 10000},
+			InstanceCount:       [6]float64{2_000, 5_000, 10_000, 25_000, 50_000, 100_000},
 			AssetDiversity:      [6]float64{50, 100, 250, 500, 1000, 2000},
 		},
 	},
@@ -68,30 +66,27 @@ var AssetTypeConfigs = []AssetTypeConfig{
 		Label:                     "Vehicle: Basic",
 		DisableSpatialMode:        true,
 		OversizedTextureThreshold: VehicleOversizedTextureThreshold,
-		Thresholds: VehicleThresholds,
+		Thresholds:                VehicleThresholds,
 	},
 	{
 		Label:                     "Vehicle: Super-car",
 		DisableSpatialMode:        true,
 		OversizedTextureThreshold: VehicleOversizedTextureThreshold,
 		Thresholds: GradeThresholds{
-			MeshComplexity: [6]float64{120_000, 140_000, 150_000, 160_000, 170_000, 180_000},
+			MeshComplexity:      [6]float64{120_000, 140_000, 150_000, 160_000, 170_000, 180_000},
 			DuplicationWastePct: VehicleThresholds.DuplicationWastePct,
-			TotalSizeMB: VehicleThresholds.TotalSizeMB,
-			TextureSizeMB: VehicleThresholds.TextureSizeMB,
-			GPUTextureMemoryMB: VehicleThresholds.GPUTextureMemoryMB,
-			WastefulBC3Count: VehicleThresholds.WastefulBC3Count,
-			MeshSizeMB: VehicleThresholds.MeshSizeMB,
-			OversizedTextures: VehicleThresholds.OversizedTextures,
-			DuplicateCount: VehicleThresholds.DuplicateCount,
-			MeshPartCount: VehicleThresholds.MeshPartCount,
-			DrawCalls: VehicleThresholds.DrawCalls,
-			PartCount: VehicleThresholds.PartCount,
-			AssetDiversity: VehicleThresholds.AssetDiversity,
+			GPUTextureMemoryMB:  VehicleThresholds.GPUTextureMemoryMB,
+			MismatchedPBRMaps:   VehicleThresholds.MismatchedPBRMaps,
+			MeshSizeMB:          VehicleThresholds.MeshSizeMB,
+			OversizedTextures:   VehicleThresholds.OversizedTextures,
+			DuplicateCount:      VehicleThresholds.DuplicateCount,
+			MeshPartCount:       VehicleThresholds.MeshPartCount,
+			DrawCalls:           VehicleThresholds.DrawCalls,
+			PartCount:           VehicleThresholds.PartCount,
+			InstanceCount:       VehicleThresholds.InstanceCount,
+			AssetDiversity:      VehicleThresholds.AssetDiversity,
 		},
 	},
-
-
 }
 
 func DefaultAssetType() AssetTypeConfig {
