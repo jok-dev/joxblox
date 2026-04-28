@@ -6,27 +6,42 @@ cd "$ROOT_DIR"
 
 usage() {
   cat <<'EOF'
-Usage: ./prepare-release.sh [patch|minor|major|vX.Y.Z]
+Usage: ./prepare-release.sh [--skip-build] [patch|minor|major|vX.Y.Z]
 
-Bumps the version relative to the latest git tag, creates an empty
-"Prepare <version> release" commit, tags it, and pushes both the
-commit and the tag to origin.
+Bumps the version relative to the latest git tag, runs the same release
+build CI runs (rebuilds the rust extractor + mesh renderer + Go binary
+with the bundled blobs) as a pre-flight to catch broken release builds
+before tagging, then creates the "Prepare <version> release" commit,
+tags it, and pushes both to origin.
 
-  patch    (default) v1.2.3 -> v1.2.4
-  minor              v1.2.3 -> v1.3.0
-  major              v1.2.3 -> v2.0.0
-  vX.Y.Z             use this exact version
+  patch          (default) v1.2.3 -> v1.2.4
+  minor                    v1.2.3 -> v1.3.0
+  major                    v1.2.3 -> v2.0.0
+  vX.Y.Z                   use this exact version
+  --skip-build             skip the pre-flight release build (faster but
+                           you risk pushing a tag CI can't build)
 EOF
 }
 
-BUMP="${1:-patch}"
+SKIP_BUILD=0
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --skip-build)
+      SKIP_BUILD=1
+      ;;
+    *)
+      POSITIONAL+=("$arg")
+      ;;
+  esac
+done
+set -- "${POSITIONAL[@]}"
 
-case "$BUMP" in
-  -h|--help)
-    usage
-    exit 0
-    ;;
-esac
+BUMP="${1:-patch}"
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "Aborting: working tree is not clean. Commit, stash, or discard changes first." >&2
@@ -124,6 +139,18 @@ mv "$TMP_METADATA" "$METADATA_FILE"
 if ! grep -Fq "var appVersion = \"${NEW_VERSION}\"" "$METADATA_FILE"; then
   echo "Aborting: version bump did not apply to $METADATA_FILE." >&2
   exit 1
+fi
+
+if [ "$SKIP_BUILD" -eq 1 ]; then
+  echo "Skipping pre-flight release build (--skip-build)."
+else
+  echo "Running pre-flight release build (mirrors CI's build.sh release)..."
+  echo "  Set --skip-build to skip — this rebuilds rust + mesh-renderer + go and takes a minute."
+  if ! VERSION_NAME="${NEW_VERSION}" bash "$ROOT_DIR/build.sh" release; then
+    echo "Aborting: pre-flight release build failed. Reverting in-tree edits..." >&2
+    git checkout -- "$METADATA_FILE" "$CHANGELOG_FILE"
+    exit 1
+  fi
 fi
 
 git add "$METADATA_FILE" "$CHANGELOG_FILE"
