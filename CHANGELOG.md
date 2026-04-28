@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.4.1 - 2026-04-28
+
 ### Added
 
 - `Materials` sub-tab in the RenderDoc tab — groups PS-bound textures into deduplicated PBR materials (Color + Normal + MR), with per-material draw counts, mesh usage, and VRAM totals
