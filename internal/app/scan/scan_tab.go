@@ -4,12 +4,15 @@ import (
 	"strings"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/report"
 	"joxblox/internal/extractor"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
+
+const scanAssetTypeNoneLabel = "None"
 
 const (
 	scanSourceFolders = "Folders"
@@ -26,8 +29,17 @@ type scanTabVariant struct {
 }
 
 type ScanLoadOptions struct {
-	PathFilterText         string
-	LargeTextureThreshold  float64
+	PathFilterText        string
+	LargeTextureThreshold float64
+	// AssetTypeLabel, when non-empty and matching a configured asset
+	// type, drives the top-bar `Asset type` selector — picking it up
+	// applies the type's banned-texture limit to result rows.
+	AssetTypeLabel string
+	// PrebuiltResults short-circuits the rescan: when non-empty the
+	// rows are loaded directly into the explorer (same path as a JSON
+	// import), so the caller's already-fetched preview data is reused
+	// instead of refetching every asset.
+	PrebuiltResults []loader.ScanResult
 }
 
 func NewScanTab(
@@ -112,6 +124,29 @@ func NewScanTab(
 	sourceSwitch.Horizontal = true
 	modeSwitch := widget.NewRadioGroup([]string{scanModeSingle, scanModeDiff}, nil)
 	modeSwitch.Horizontal = true
+
+	assetTypeOptions := []string{scanAssetTypeNoneLabel}
+	limitByLabel := map[string]float64{scanAssetTypeNoneLabel: 0}
+	for _, cfg := range report.AssetTypeConfigs {
+		if strings.TrimSpace(cfg.Label) == "" {
+			continue
+		}
+		assetTypeOptions = append(assetTypeOptions, cfg.Label)
+		limitByLabel[cfg.Label] = cfg.BannedTextureSizeMB
+	}
+	assetTypeSelect := widget.NewSelect(assetTypeOptions, nil)
+	assetTypeSelect.SetSelected(scanAssetTypeNoneLabel)
+	applyAssetTypeToVariants := func(label string) {
+		limit := limitByLabel[label]
+		for _, variant := range variants {
+			if variant.actions != nil && variant.actions.SetBannedTextureSizeMB != nil {
+				variant.actions.SetBannedTextureSizeMB(limit)
+			}
+		}
+	}
+	assetTypeSelect.OnChanged = func(label string) {
+		applyAssetTypeToVariants(label)
+	}
 	currentActions := rbxlSingleActions
 	providers := make([]ScanTabFileActionsProvider, 0, len(variants))
 	for _, variant := range variants {
@@ -187,6 +222,8 @@ func NewScanTab(
 			sourceSwitch,
 			widget.NewLabel("Mode:"),
 			modeSwitch,
+			widget.NewLabel("Asset type:"),
+			assetTypeSelect,
 		),
 		nil,
 		nil,
@@ -204,6 +241,20 @@ func NewScanTab(
 		}
 		if rbxlSingleActions != nil && rbxlSingleActions.SetLargeTextureThreshold != nil && options.LargeTextureThreshold > 0 {
 			rbxlSingleActions.SetLargeTextureThreshold(options.LargeTextureThreshold)
+		}
+		if trimmedLabel := strings.TrimSpace(options.AssetTypeLabel); trimmedLabel != "" {
+			if _, valid := limitByLabel[trimmedLabel]; valid {
+				assetTypeSelect.SetSelected(trimmedLabel)
+			}
+		}
+		if len(options.PrebuiltResults) > 0 {
+			if rbxlSingleActions != nil && rbxlSingleActions.SetSourcePath != nil {
+				rbxlSingleActions.SetSourcePath(path)
+			}
+			if rbxlSingleActions != nil && rbxlSingleActions.SetResults != nil {
+				rbxlSingleActions.SetResults(options.PrebuiltResults)
+			}
+			return
 		}
 		if rbxlSingleActions != nil && rbxlSingleActions.LoadSource != nil {
 			rbxlSingleActions.LoadSource(path)

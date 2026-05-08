@@ -82,13 +82,13 @@ func Run() {
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1350, 900))
 
-	var viewInScanCallback func(string, bool, float64)
+	var viewInScanCallback func(string, bool, float64, []loader.ScanResult, string)
 	var viewInHeatmapCallback func(string)
 	reportGenerationContent, loadReportFile := reportgeneration.NewReportGenerationTab(
 		window,
-		func(path string, workspaceOnly bool, oversizedTextureThreshold float64) {
+		func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string) {
 			if viewInScanCallback != nil {
-				viewInScanCallback(path, workspaceOnly, oversizedTextureThreshold)
+				viewInScanCallback(path, workspaceOnly, oversizedTextureThreshold, prebuiltResults, assetTypeLabel)
 			}
 		},
 		func(path string) {
@@ -117,7 +117,7 @@ func Run() {
 			loadSingleAssetByID(assetID)
 		}
 	}
-	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64) {
+	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string) {
 		tabs.Select(scanTab)
 		if loadScanRBXLFile != nil {
 			pathFilter := ""
@@ -127,6 +127,8 @@ func Run() {
 			loadScanRBXLFile(path, scan.ScanLoadOptions{
 				PathFilterText:        pathFilter,
 				LargeTextureThreshold: oversizedTextureThreshold,
+				AssetTypeLabel:        assetTypeLabel,
+				PrebuiltResults:       prebuiltResults,
 			})
 		}
 	}

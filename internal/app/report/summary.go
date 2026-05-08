@@ -12,12 +12,18 @@ type Summary struct {
 	// these byte fields drive the displayed headline number and log.
 	BC1BytesExact int64
 	BC3BytesExact int64
-	// MismatchedPBRMaterialCount is the number of SurfaceAppearance materials
-	// whose authored slots (color/normal/metalness/roughness) aren't all at the
-	// same source resolution. PBRMaterialCount is the population those are
-	// drawn from — materials with at least one authored map slot.
+	// MismatchedPBRMaterialCount is the number of unique (color, normal,
+	// metalness, roughness) asset combos whose authored slots aren't all at
+	// the same source resolution. PBRMaterialCount is the population those
+	// are drawn from — unique authored combos. SurfaceAppearance instances
+	// that share an asset bundle collapse: fixing one asset fixes every
+	// usage, so unique combos are the truer measure than raw instance counts.
+	// MismatchedPBRWastedBytes is the GPU-memory saving from downscaling
+	// every mismatched combo's bigger-than-color slots to match its color
+	// map, computed via the engine allocation model with proper asset dedup.
 	MismatchedPBRMaterialCount int
 	PBRMaterialCount           int
+	MismatchedPBRWastedBytes   int64
 	MeshBytes                  int64
 	TriangleCount              int64
 	OversizedTextureCount      int

@@ -99,8 +99,8 @@ func TestContinuousScoreMatchesGradeBoundaries(t *testing.T) {
 func TestOverallPerformanceScorePercentContinuous(t *testing.T) {
 	thresholds := DefaultAssetType().Thresholds
 
-	bareMid := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte/2, CellMetric{}, false, thresholds.MeshSizeMB, thresholds.MeshSizeMBAvg)
-	bareHigh := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte*9/10, CellMetric{}, false, thresholds.MeshSizeMB, thresholds.MeshSizeMBAvg)
+	bareMid := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte/2, CellMetric{}, false, thresholds.MeshSizeMBMax, thresholds.MeshSizeMBTypical)
+	bareHigh := ComputeMeshSizeGradeWithThresholds(format.Megabyte+format.Megabyte*9/10, CellMetric{}, false, thresholds.MeshSizeMBMax, thresholds.MeshSizeMBTypical)
 	if bareMid.Grade != bareHigh.Grade {
 		t.Fatal("test expects both values in the same grade bucket")
 	}
@@ -141,20 +141,26 @@ func TestComputeMeshComplexityGrade(t *testing.T) {
 
 func TestComputeMeshComplexityGradeCellPercentile(t *testing.T) {
 	uniform := func(v float64) CellMetric { return CellMetric{Avg: v, P90: v, Max: v} }
-	// When avg + p90 + max are all well under every threshold (1000 is far
+	// When avg + p90 are both well under every threshold (1000 is far
 	// below the lowest avgT bucket 2500 and headline 5000), the row grades
 	// A+. The avg threshold is what pulls "uniformly busy" scenes down even
 	// when p90 alone would have been A+.
 	got := ComputeMeshComplexityGrade(8_000_000, uniform(1_000), true)
 	if got.Grade != gradeAPlus {
-		t.Errorf("expected A+ when avg/p90/max are all 1000, got %s", got.Grade)
+		t.Errorf("expected A+ when avg/p90 are both 1000, got %s", got.Grade)
 	}
-	// A scene with a single hot cell (avg 1000, p90 4500, max 50000) should
-	// grade worse than uniform-1000 because the max sub-grade tanks even
-	// though avg/p90 are still A-tier.
-	hotspot := ComputeMeshComplexityGrade(8_000_000, CellMetric{Avg: 1_000, P90: 4_500, Max: 50_000}, true)
+	// A scene with a heavy 10% tail (typical 1000, p90 50000) should grade
+	// worse than uniform-1000 because the p90 sub-score tanks. Max is
+	// informational and does not affect the grade.
+	hotspot := ComputeMeshComplexityGrade(8_000_000, CellMetric{Avg: 1_000, P90: 50_000, Max: 50_000}, true)
 	if GradeToNumeric(hotspot.Grade) >= GradeToNumeric(got.Grade) {
 		t.Errorf("hotspot scene should grade worse than uniform-low: hotspot=%s uniform=%s", hotspot.Grade, got.Grade)
+	}
+	// Max alone must not move the grade: same avg/p90 but a huge max should
+	// match the uniform result.
+	maxOnly := ComputeMeshComplexityGrade(8_000_000, CellMetric{Avg: 1_000, P90: 1_000, Max: 1_000_000}, true)
+	if maxOnly.Grade != got.Grade {
+		t.Errorf("max should not affect grade; got %s, want %s", maxOnly.Grade, got.Grade)
 	}
 }
 
@@ -321,7 +327,7 @@ func TestOverallPerformanceGrade(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := OverallPerformanceGrade(tt.grades, false)
+			got := OverallPerformanceGrade(tt.grades, false, false)
 			if got != tt.expected {
 				t.Errorf("OverallPerformanceGrade() = %s, want %s", got, tt.expected)
 			}
@@ -331,32 +337,42 @@ func TestOverallPerformanceGrade(t *testing.T) {
 
 func TestOverallPerformanceGradeCappedWithDuplicates(t *testing.T) {
 	grades := []PerformanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}}
-	got := OverallPerformanceGrade(grades, true)
+	got := OverallPerformanceGrade(grades, true, false)
 	if got != gradeB {
 		t.Errorf("OverallPerformanceGrade(all A+, hasDuplicates=true) = %s, want %s", got, gradeB)
 	}
 
 	lowGrades := []PerformanceGrade{{Grade: gradeD}, {Grade: gradeF}}
-	got = OverallPerformanceGrade(lowGrades, true)
+	got = OverallPerformanceGrade(lowGrades, true, false)
 	if got != gradeE {
 		t.Errorf("OverallPerformanceGrade(D+F, hasDuplicates=true) = %s, want %s (should not raise low grades)", got, gradeE)
 	}
 }
 
+func TestOverallPerformanceGradeBannedTexturesForceF(t *testing.T) {
+	grades := []PerformanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}}
+	if got := OverallPerformanceGrade(grades, false, true); got != gradeF {
+		t.Errorf("OverallPerformanceGrade(all A+, banned=true) = %s, want %s", got, gradeF)
+	}
+	if got := OverallPerformanceScorePercent(grades, false, true); got != 0 {
+		t.Errorf("OverallPerformanceScorePercent(all A+, banned=true) = %d, want 0", got)
+	}
+}
+
 func TestOverallPerformanceScorePercent(t *testing.T) {
 	perfectGrades := []PerformanceGrade{{Grade: gradeAPlus}, {Grade: gradeAPlus}, {Grade: gradeAPlus}}
-	got := OverallPerformanceScorePercent(perfectGrades, false)
+	got := OverallPerformanceScorePercent(perfectGrades, false, false)
 	if got != 100 {
 		t.Errorf("OverallPerformanceScorePercent(all A+, false) = %d, want 100", got)
 	}
 
 	mixedGrades := []PerformanceGrade{{Grade: gradeA}, {Grade: gradeC}, {Grade: gradeD}, {Grade: gradeD}, {Grade: gradeF}}
-	got = OverallPerformanceScorePercent(mixedGrades, false)
+	got = OverallPerformanceScorePercent(mixedGrades, false, false)
 	if got != 40 {
 		t.Errorf("OverallPerformanceScorePercent(mixed, false) = %d, want 40", got)
 	}
 
-	got = OverallPerformanceScorePercent(perfectGrades, true)
+	got = OverallPerformanceScorePercent(perfectGrades, true, false)
 	if got != 67 {
 		t.Errorf("OverallPerformanceScorePercent(all A+, true) = %d, want 67", got)
 	}
@@ -433,7 +449,7 @@ func TestComputeMismatchedPBRMapsGrade(t *testing.T) {
 		{15, gradeF},
 	}
 	for _, tt := range tests {
-		got := ComputeMismatchedPBRMapsGrade(tt.count, tt.count*2)
+		got := ComputeMismatchedPBRMapsGrade(tt.count, tt.count*2, 0)
 		if got.Grade != tt.expected {
 			t.Errorf("ComputeMismatchedPBRMapsGrade(%d) = %s, want %s", tt.count, got.Grade, tt.expected)
 		}
@@ -441,15 +457,22 @@ func TestComputeMismatchedPBRMapsGrade(t *testing.T) {
 }
 
 func TestComputeMismatchedPBRMapsGradeFormat(t *testing.T) {
-	got := ComputeMismatchedPBRMapsGrade(3, 12)
+	got := ComputeMismatchedPBRMapsGrade(3, 12, 0)
 	if got.Label != "Mismatched PBR Maps" {
 		t.Errorf("Label = %q, want \"Mismatched PBR Maps\"", got.Label)
 	}
-	if got.Value != "3 materials" {
-		t.Errorf("Value = %q, want \"3 materials\"", got.Value)
+	if got.Value != "3" {
+		t.Errorf("Value = %q, want \"3\"", got.Value)
 	}
 	if got.TotalValue != "" {
 		t.Errorf("TotalValue = %q, want empty", got.TotalValue)
+	}
+}
+
+func TestComputeMismatchedPBRMapsGradeFormat_WithWastedBytes(t *testing.T) {
+	got := ComputeMismatchedPBRMapsGrade(3, 12, 8*1024*1024)
+	if got.Value != "3 (8.00 MB)" {
+		t.Errorf("Value = %q, want \"3 (8.00 MB)\"", got.Value)
 	}
 }
 
@@ -547,7 +570,7 @@ func TestComputePerformanceProfileIntegration(t *testing.T) {
 		}
 	}
 
-	overall := OverallPerformanceGrade(grades, false)
+	overall := OverallPerformanceGrade(grades, false, false)
 	if overall != gradeAPlus {
 		t.Errorf("overall = %s, want %s", overall, gradeAPlus)
 	}

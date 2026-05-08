@@ -78,7 +78,10 @@ func EstimateGPUTextureBytesFor(pixelCount int64, hasAlphaChannel bool, nonOpaqu
 }
 
 // ScanResultGPUMemoryBytes returns the estimated on-GPU footprint (including
-// the full mip chain) for the texture this scan result refers to.
+// the full mip chain) for the texture this scan result refers to. This is
+// the texture's literal upload footprint at its authored size — engine-level
+// PBR adjustments (normal upscaling, MR-pack overhead) live in the Materials
+// view, not here.
 func ScanResultGPUMemoryBytes(row ScanResult) int64 {
 	return EstimateGPUTextureBytesFor(row.PixelCount, row.HasAlphaChannel, row.NonOpaqueAlphaPixels, row.PropertyName)
 }

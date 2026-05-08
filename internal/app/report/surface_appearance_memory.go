@@ -63,9 +63,18 @@ func bumpDimsToLarger(target *SurfaceAppearanceMaterialSlot, candidate SurfaceAp
 
 // MismatchedPBRMaterialDetail is one material whose authored slots aren't
 // all at the same (Width, Height). Zero-valued width/height means the
-// matching slot wasn't authored on this SurfaceAppearance.
+// matching slot wasn't authored on this SurfaceAppearance. Entries are
+// deduped by asset-key combo: InstancePath holds one example path,
+// InstanceCount is how many SurfaceAppearance instances share that combo,
+// and WastedBytes is the per-combo GPU saving from downscaling its
+// bigger-than-color slots to match its color map (single-asset model;
+// won't double-count assets shared across this combo only, but doesn't
+// dedupe assets shared across other combos — for that, see the headline
+// total in Summary.MismatchedPBRWastedBytes).
 type MismatchedPBRMaterialDetail struct {
 	InstancePath    string
+	InstanceCount   int
+	WastedBytes     int64
 	ColorWidth      int
 	ColorHeight     int
 	NormalWidth     int
@@ -76,48 +85,226 @@ type MismatchedPBRMaterialDetail struct {
 	RoughnessHeight int
 }
 
-// CountMismatchedPBRMaterials returns how many materials in the map have at
-// least one authored slot whose source resolution differs from the others
-// (color/normal/metalness/roughness), and how many materials carry any
-// authored slot at all (the population). A material with zero or one
-// authored slot can't mismatch and is excluded from the mismatched count
-// but still contributes to the population.
+// CountMismatchedPBRMaterials returns how many unique (color, normal,
+// metalness, roughness) asset combos in the map have a size mismatch
+// across their authored slots, and how many unique authored combos
+// carry any authored slot at all (the population). Multiple
+// SurfaceAppearance instances sharing the same asset bundle collapse
+// to a single count entry — fixing one asset fixes every usage, so
+// the truer measure of authoring problems is unique combos, not raw
+// instance counts.
 func CountMismatchedPBRMaterials(materials map[string]SurfaceAppearanceMaterialSlots) (mismatched int, total int) {
+	mismatchedKeys := map[[4]string]struct{}{}
+	totalKeys := map[[4]string]struct{}{}
 	for _, slots := range materials {
 		if len(authoredSlotDimensions(slots)) == 0 {
 			continue
 		}
-		total++
+		key := [4]string{slots.Color.AssetKey, slots.Normal.AssetKey, slots.Metalness.AssetKey, slots.Roughness.AssetKey}
+		totalKeys[key] = struct{}{}
 		if isMismatchedPBRMaterial(slots) {
-			mismatched++
+			mismatchedKeys[key] = struct{}{}
 		}
 	}
-	return mismatched, total
+	return len(mismatchedKeys), len(totalKeys)
 }
 
-// CollectMismatchedPBRMaterials returns one detail entry per material whose
-// authored slots aren't all the same size, sorted by instance path so the
-// caller can render a stable list.
+// CollectMismatchedPBRMaterials returns one detail entry per unique
+// (color, normal, metalness, roughness) asset-key combo found among
+// mismatched materials. Multiple SurfaceAppearance instances that share
+// the same asset bundle collapse to a single entry whose InstancePath
+// holds the lex-min example path, InstanceCount holds the group size,
+// and WastedBytes holds the per-combo GPU saving. Sorted by WastedBytes
+// desc, then InstanceCount desc, then InstancePath asc — highest-impact
+// fixes float to the top.
 func CollectMismatchedPBRMaterials(materials map[string]SurfaceAppearanceMaterialSlots) []MismatchedPBRMaterialDetail {
-	out := make([]MismatchedPBRMaterialDetail, 0)
+	type bucket struct {
+		detail       MismatchedPBRMaterialDetail
+		slots        SurfaceAppearanceMaterialSlots
+		minPath      string
+		instanceList []string
+	}
+	buckets := map[[4]string]*bucket{}
 	for path, slots := range materials {
 		if !isMismatchedPBRMaterial(slots) {
 			continue
 		}
-		out = append(out, MismatchedPBRMaterialDetail{
-			InstancePath:    path,
-			ColorWidth:      slots.Color.Width,
-			ColorHeight:     slots.Color.Height,
-			NormalWidth:     slots.Normal.Width,
-			NormalHeight:    slots.Normal.Height,
-			MetalnessWidth:  slots.Metalness.Width,
-			MetalnessHeight: slots.Metalness.Height,
-			RoughnessWidth:  slots.Roughness.Width,
-			RoughnessHeight: slots.Roughness.Height,
-		})
+		key := [4]string{slots.Color.AssetKey, slots.Normal.AssetKey, slots.Metalness.AssetKey, slots.Roughness.AssetKey}
+		b, ok := buckets[key]
+		if !ok {
+			b = &bucket{
+				detail: MismatchedPBRMaterialDetail{
+					ColorWidth:      slots.Color.Width,
+					ColorHeight:     slots.Color.Height,
+					NormalWidth:     slots.Normal.Width,
+					NormalHeight:    slots.Normal.Height,
+					MetalnessWidth:  slots.Metalness.Width,
+					MetalnessHeight: slots.Metalness.Height,
+					RoughnessWidth:  slots.Roughness.Width,
+					RoughnessHeight: slots.Roughness.Height,
+				},
+				slots:   slots,
+				minPath: path,
+			}
+			buckets[key] = b
+		}
+		b.instanceList = append(b.instanceList, path)
+		if path < b.minPath {
+			b.minPath = path
+		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].InstancePath < out[j].InstancePath })
+	out := make([]MismatchedPBRMaterialDetail, 0, len(buckets))
+	for _, b := range buckets {
+		b.detail.InstancePath = b.minPath
+		b.detail.InstanceCount = len(b.instanceList)
+		b.detail.WastedBytes = perComboWastedBytes(b.slots)
+		out = append(out, b.detail)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WastedBytes != out[j].WastedBytes {
+			return out[i].WastedBytes > out[j].WastedBytes
+		}
+		if out[i].InstanceCount != out[j].InstanceCount {
+			return out[i].InstanceCount > out[j].InstanceCount
+		}
+		return out[i].InstancePath < out[j].InstancePath
+	})
 	return out
+}
+
+// perComboWastedBytes is the GPU saving from downscaling a single combo's
+// bigger-than-color slots to match its color map. Single-bundle engine
+// model — no asset-sharing dedup since within one combo there's only one
+// bundle; cross-combo sharing is handled by the headline summary number.
+func perComboWastedBytes(slots SurfaceAppearanceMaterialSlots) int64 {
+	if slots.Color.AssetKey == "" || slots.Color.PixelCount <= 0 {
+		return 0
+	}
+	single := map[string]SurfaceAppearanceMaterialSlots{"": slots}
+	clamped := map[string]SurfaceAppearanceMaterialSlots{"": clampSlotsToColor(slots)}
+	current := TotalEngineSurfaceAppearanceVariableBytes(single)
+	downscaled := TotalEngineSurfaceAppearanceVariableBytes(clamped)
+	if downscaled >= current {
+		return 0
+	}
+	return current - downscaled
+}
+
+// TotalEngineSurfaceAppearanceVariableBytes returns the BC1+BC3 GPU bytes
+// the engine allocates across an entire SurfaceAppearance materials map for
+// the parts whose size is driven by per-slot authoring choices — one BC3
+// normal per unique normal asset (upscaled to its largest paired color
+// when smaller) plus one BC1 MR pack per unique normal-or-color group
+// (sized to max(base, any M, any R)). Color asset bytes are excluded
+// since they don't depend on the other slots' sizes. Subtracting two
+// calls of this function (current vs a clamped variant) gives a
+// dedup-correct saving figure: a 512² normal shared across 50 materials
+// counts once, not 50 times. Mirrors the engine model used by
+// ComputeSurfaceAppearanceMemoryCorrection.
+func TotalEngineSurfaceAppearanceVariableBytes(materials map[string]SurfaceAppearanceMaterialSlots) int64 {
+	type group struct {
+		keySlot SurfaceAppearanceMaterialSlot
+	}
+	type normalEntry struct {
+		source         SurfaceAppearanceMaterialSlot
+		maxPairedColor SurfaceAppearanceMaterialSlot
+	}
+	groups := map[string]*group{}
+	normals := map[string]*normalEntry{}
+	for _, slots := range materials {
+		// MR pack key: normal asset, falling back to color if no normal.
+		keySlot := slots.Normal
+		if keySlot.AssetKey == "" || keySlot.PixelCount <= 0 {
+			keySlot = slots.Color
+		}
+		if keySlot.AssetKey != "" && keySlot.PixelCount > 0 {
+			g, ok := groups[keySlot.AssetKey]
+			if !ok {
+				g = &group{keySlot: keySlot}
+				groups[keySlot.AssetKey] = g
+			} else {
+				// Same asset can only physically exist at one size — when
+				// callers pass a "clamped" variant, take the max so a
+				// shared asset stays sized to its largest user.
+				bumpDimsToLarger(&g.keySlot, keySlot)
+			}
+			bumpDimsToLarger(&g.keySlot, slots.Metalness)
+			bumpDimsToLarger(&g.keySlot, slots.Roughness)
+		}
+		// Normal: track largest paired color for upload-time upscale, and
+		// take the largest source size seen (assets across materials must
+		// share a single resolution).
+		if slots.Normal.AssetKey != "" && slots.Normal.PixelCount > 0 {
+			n, ok := normals[slots.Normal.AssetKey]
+			if !ok {
+				n = &normalEntry{source: slots.Normal}
+				normals[slots.Normal.AssetKey] = n
+			}
+			if slots.Normal.PixelCount > n.source.PixelCount {
+				n.source = slots.Normal
+			}
+			bumpDimsToLarger(&n.maxPairedColor, slots.Color)
+		}
+	}
+	var total int64
+	for _, g := range groups {
+		total += EstimateGPUTextureBytesExact(g.keySlot.Width, g.keySlot.Height, false)
+	}
+	for _, n := range normals {
+		w, h := n.source.Width, n.source.Height
+		if n.maxPairedColor.PixelCount > n.source.PixelCount {
+			w, h = n.maxPairedColor.Width, n.maxPairedColor.Height
+		}
+		total += EstimateGPUTextureBytesExact(w, h, true)
+	}
+	return total
+}
+
+// clampSlotsToColor returns slots with each non-color slot's dimensions
+// clamped down to the color slot's dimensions when larger. Slots already
+// at or below color size (e.g. 4x4 markers) are untouched. Used to model
+// "what if everything was authored at color resolution".
+func clampSlotsToColor(slots SurfaceAppearanceMaterialSlots) SurfaceAppearanceMaterialSlots {
+	if slots.Color.AssetKey == "" || slots.Color.PixelCount <= 0 {
+		return slots
+	}
+	clamp := func(s SurfaceAppearanceMaterialSlot) SurfaceAppearanceMaterialSlot {
+		if s.AssetKey == "" || s.PixelCount <= slots.Color.PixelCount {
+			return s
+		}
+		s.Width = slots.Color.Width
+		s.Height = slots.Color.Height
+		s.PixelCount = int64(slots.Color.Width) * int64(slots.Color.Height)
+		return s
+	}
+	out := slots
+	out.Normal = clamp(slots.Normal)
+	out.Metalness = clamp(slots.Metalness)
+	out.Roughness = clamp(slots.Roughness)
+	return out
+}
+
+// ComputeMismatchedPBRWastedBytes estimates the GPU-byte savings from
+// downscaling every mismatched material's bigger-than-color slots to match
+// its color map. Calculation is dedup-correct via the engine model: a
+// 512² asset shared across 50 mismatched materials counts once, not 50
+// times. Materials with no color slot contribute nothing (no reference to
+// downscale to).
+func ComputeMismatchedPBRWastedBytes(materials map[string]SurfaceAppearanceMaterialSlots) int64 {
+	clamped := make(map[string]SurfaceAppearanceMaterialSlots, len(materials))
+	for path, slots := range materials {
+		if !isMismatchedPBRMaterial(slots) || slots.Color.AssetKey == "" || slots.Color.PixelCount <= 0 {
+			clamped[path] = slots
+			continue
+		}
+		clamped[path] = clampSlotsToColor(slots)
+	}
+	current := TotalEngineSurfaceAppearanceVariableBytes(materials)
+	downscaled := TotalEngineSurfaceAppearanceVariableBytes(clamped)
+	if downscaled >= current {
+		return 0
+	}
+	return current - downscaled
 }
 
 func isMismatchedPBRMaterial(slots SurfaceAppearanceMaterialSlots) bool {

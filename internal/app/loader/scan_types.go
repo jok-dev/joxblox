@@ -128,19 +128,19 @@ type AssetViewData struct {
 	DownloadIsOriginal    bool
 
 	// Populated by PopulateAssetViewDisplayFields. Empty string hides the row.
-	DimensionsLabel     string
-	DimensionsDisplay   string
-	SelfSizeDisplay     string
-	TotalSizeDisplay    string
-	FormatDisplay       string
-	ContentTypeDisplay  string
-	AssetTypeDisplay    string
-	UseCountDisplay     string
-	ReferencedCount     int
-	ReferencedDisplay   string
-	InGameSizeDisplay   string
-	FailureReasonText   string
-	FileDisplay         string
-	FileSHA256Display   string
-	SourceDisplay       string
+	DimensionsLabel    string
+	DimensionsDisplay  string
+	SelfSizeDisplay    string
+	TotalSizeDisplay   string
+	FormatDisplay      string
+	ContentTypeDisplay string
+	AssetTypeDisplay   string
+	UseCountDisplay    string
+	ReferencedCount    int
+	ReferencedDisplay  string
+	InGameSizeDisplay  string
+	FailureReasonText  string
+	FileDisplay        string
+	FileSHA256Display  string
+	SourceDisplay      string
 }

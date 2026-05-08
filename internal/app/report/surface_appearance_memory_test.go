@@ -1,6 +1,9 @@
 package report
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func slot(assetKey string, widthHeight int) SurfaceAppearanceMaterialSlot {
 	return SurfaceAppearanceMaterialSlot{
@@ -365,6 +368,28 @@ func TestCountMismatchedPBRMaterials(t *testing.T) {
 	}
 }
 
+func TestCountMismatchedPBRMaterials_DedupesByAssetCombo(t *testing.T) {
+	// 50 SurfaceAppearance instances all referencing the same (color, normal)
+	// asset bundle should count as 1 unique mismatched combo + 1 unique
+	// authored combo, not 50 of each. A different bundle on a separate
+	// instance adds 1 more to each.
+	materials := map[string]SurfaceAppearanceMaterialSlots{}
+	for i := 0; i < 50; i++ {
+		materials[fmt.Sprintf("Workspace.Wall%02d", i)] = SurfaceAppearanceMaterialSlots{
+			Color:  slot("color-A", 256),
+			Normal: slot("normal-A", 512),
+		}
+	}
+	materials["Workspace.Roof"] = SurfaceAppearanceMaterialSlots{
+		Color:  slot("color-B", 256),
+		Normal: slot("normal-B", 1024),
+	}
+	mismatched, total := CountMismatchedPBRMaterials(materials)
+	if mismatched != 2 || total != 2 {
+		t.Errorf("CountMismatchedPBRMaterials() = (%d, %d), want (2, 2) — deduped by asset combo", mismatched, total)
+	}
+}
+
 // rectSlot mirrors `slot` but allows distinct width/height to verify the
 // comparison treats (W,H) as a pair, not just total pixel count.
 func TestCountMismatchedPBRMaterials_NonSquareDimensions(t *testing.T) {
@@ -377,6 +402,229 @@ func TestCountMismatchedPBRMaterials_NonSquareDimensions(t *testing.T) {
 	mismatched, total := CountMismatchedPBRMaterials(materials)
 	if mismatched != 1 || total != 1 {
 		t.Errorf("got (%d, %d), want (1, 1) — same pixel count but different (W,H) should mismatch", mismatched, total)
+	}
+}
+
+func TestComputeMismatchedPBRWastedBytes(t *testing.T) {
+	// Engine model: each material allocates a BC3 normal (upscaled to its
+	// paired color when smaller) plus a BC1 MR pack sized to max(normal,
+	// metalness, roughness). Savings = engineBytes(orig) − engineBytes(clamped).
+	tests := []struct {
+		name      string
+		materials map[string]SurfaceAppearanceMaterialSlots
+		wantBytes int64
+	}{
+		{
+			name:      "all matching: no waste",
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 1024), Normal: slot("n", 1024)}},
+			wantBytes: 0,
+		},
+		{
+			name: "color is biggest: no waste",
+			// orig: normal upscaled 1024→2048 BC3 + MR@1024 BC1
+			// clamped: nothing changes (nothing larger than color)
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 2048), Normal: slot("n", 1024)}},
+			wantBytes: 0,
+		},
+		{
+			name: "normal larger than color: BC3 normal + BC1 MR pack saved",
+			// orig: normal@1024 BC3 + MR@1024 BC1
+			// clamped: normal@512 BC3 + MR@512 BC1
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 512), Normal: slot("n", 1024)}},
+			wantBytes: (bc3Bytes(1024) - bc3Bytes(512)) + (bc1Bytes(1024) - bc1Bytes(512)),
+		},
+		{
+			name: "metalness larger than color (no normal): BC1 MR pack saved",
+			// orig: no normal → MR keyed off color@512, sized to max(512, M=1024) = 1024 BC1
+			// clamped: MR@max(512, 512) = 512 BC1
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 512), Metalness: slot("m", 1024)}},
+			wantBytes: bc1Bytes(1024) - bc1Bytes(512),
+		},
+		{
+			name: "256 color, 512 normal, 4x4 roughness — 4x4 doesn't undo savings",
+			// orig: normal@512 BC3 + MR@max(512, 4) = 512 BC1
+			// clamped: normal@256 BC3 + MR@max(256, 4) = 256 BC1
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 256), Normal: slot("n", 512), Roughness: slot("r", 4)}},
+			wantBytes: (bc3Bytes(512) - bc3Bytes(256)) + (bc1Bytes(512) - bc1Bytes(256)),
+		},
+		{
+			name: "256 color + 4x4 metalness: mismatched, but engine model gives 0 waste",
+			// 4x4 M sits inside the MR pack at color size either way:
+			// orig MR @ max(256, 4) = 256, clamped MR @ max(256, 4) = 256.
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 256), Metalness: slot("m", 4)}},
+			wantBytes: 0,
+		},
+		{
+			name:      "no color authored: skipped",
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Normal: slot("n", 512), Metalness: slot("m", 1024)}},
+			wantBytes: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ComputeMismatchedPBRWastedBytes(tt.materials)
+			if got != tt.wantBytes {
+				t.Errorf("ComputeMismatchedPBRWastedBytes() = %d, want %d", got, tt.wantBytes)
+			}
+		})
+	}
+}
+
+func TestTotalEngineSurfaceAppearanceVariableBytes(t *testing.T) {
+	// Sanity-check the engine model: BC3 normal per unique normal asset
+	// (upscaled to largest paired color if smaller) + BC1 MR pack per
+	// unique normal-or-color group.
+	tests := []struct {
+		name      string
+		materials map[string]SurfaceAppearanceMaterialSlots
+		want      int64
+	}{
+		{
+			name:      "single material, color + normal same size",
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 512), Normal: slot("n", 512)}},
+			want:      bc3Bytes(512) + bc1Bytes(512),
+		},
+		{
+			name:      "normal smaller than color: normal upscales to color, MR sized to normal source",
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 1024), Normal: slot("n", 512)}},
+			want:      bc3Bytes(1024) + bc1Bytes(512),
+		},
+		{
+			name:      "MR pack sized to largest authored slot",
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 512), Normal: slot("n", 512), Roughness: slot("r", 2048)}},
+			want:      bc3Bytes(512) + bc1Bytes(2048),
+		},
+		{
+			name:      "no normal: MR keyed off color",
+			materials: map[string]SurfaceAppearanceMaterialSlots{"A": {Color: slot("c", 256), Metalness: slot("m", 1024)}},
+			want:      bc1Bytes(1024),
+		},
+		{
+			name: "shared normal across two materials counts once",
+			materials: map[string]SurfaceAppearanceMaterialSlots{
+				"A": {Color: slot("c1", 256), Normal: slot("n-shared", 512)},
+				"B": {Color: slot("c2", 256), Normal: slot("n-shared", 512)},
+			},
+			// One BC3 normal at max(512, max paired color=256)=512, one BC1 MR pack at 512.
+			want: bc3Bytes(512) + bc1Bytes(512),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TotalEngineSurfaceAppearanceVariableBytes(tt.materials)
+			if got != tt.want {
+				t.Errorf("TotalEngineSurfaceAppearanceVariableBytes() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectMismatchedPBRMaterials_DedupesByAssetCombo(t *testing.T) {
+	// 50 mismatched SurfaceAppearance instances all reference the same
+	// 512² normal bundle. One extra instance has a 512² normal too (so
+	// equal per-combo waste) — it should sort BELOW the 50-instance combo
+	// since count is the secondary sort key after waste.
+	materials := map[string]SurfaceAppearanceMaterialSlots{}
+	for i := 0; i < 50; i++ {
+		materials[fmt.Sprintf("Workspace.Wall%02d.SurfaceAppearance", i)] = SurfaceAppearanceMaterialSlots{
+			Color:  slot("color-A", 256),
+			Normal: slot("normal-A", 512),
+		}
+	}
+	materials["Workspace.Roof.SurfaceAppearance"] = SurfaceAppearanceMaterialSlots{
+		Color:  slot("color-B", 256),
+		Normal: slot("normal-B", 512),
+	}
+	got := CollectMismatchedPBRMaterials(materials)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (deduped by asset combo)", len(got))
+	}
+	if got[0].InstanceCount != 50 {
+		t.Errorf("got[0].InstanceCount = %d, want 50 (same waste, higher count first)", got[0].InstanceCount)
+	}
+	if got[1].InstanceCount != 1 {
+		t.Errorf("got[1].InstanceCount = %d, want 1", got[1].InstanceCount)
+	}
+	// Lex-min representative path:
+	wantPath := "Workspace.Wall00.SurfaceAppearance"
+	if got[0].InstancePath != wantPath {
+		t.Errorf("got[0].InstancePath = %q, want %q", got[0].InstancePath, wantPath)
+	}
+}
+
+func TestCollectMismatchedPBRMaterials_DistinctSizesSameAssets_ShouldNotHappenButGroupSafe(t *testing.T) {
+	// Two materials referencing the same color asset key, both mismatched.
+	// They should collapse since the asset bundle is identical.
+	materials := map[string]SurfaceAppearanceMaterialSlots{
+		"A": {Color: slot("c", 256), Normal: slot("n", 512)},
+		"B": {Color: slot("c", 256), Normal: slot("n", 512)},
+	}
+	got := CollectMismatchedPBRMaterials(materials)
+	if len(got) != 1 || got[0].InstanceCount != 2 {
+		t.Errorf("got %d entries (count=%d), want 1 entry with count=2", len(got), got[0].InstanceCount)
+	}
+}
+
+func TestCollectMismatchedPBRMaterials_PerComboWasteAndSort(t *testing.T) {
+	// Three combos with progressively bigger waste. Highest waste should
+	// sort first regardless of instance count or path.
+	materials := map[string]SurfaceAppearanceMaterialSlots{
+		"Workspace.Small.SurfaceAppearance":  {Color: slot("c-s", 256), Normal: slot("n-s", 512)},
+		"Workspace.Medium.SurfaceAppearance": {Color: slot("c-m", 256), Normal: slot("n-m", 1024)},
+		"Workspace.Large.SurfaceAppearance":  {Color: slot("c-l", 256), Normal: slot("n-l", 2048)},
+	}
+	got := CollectMismatchedPBRMaterials(materials)
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	// Engine bytes: BC3 normal + BC1 MR pack, both at the larger of normal-source
+	// vs paired-color. For each combo, clamping drops to color=256.
+	wantSmall := (bc3Bytes(512) - bc3Bytes(256)) + (bc1Bytes(512) - bc1Bytes(256))
+	wantMedium := (bc3Bytes(1024) - bc3Bytes(256)) + (bc1Bytes(1024) - bc1Bytes(256))
+	wantLarge := (bc3Bytes(2048) - bc3Bytes(256)) + (bc1Bytes(2048) - bc1Bytes(256))
+	if got[0].WastedBytes != wantLarge {
+		t.Errorf("got[0].WastedBytes = %d, want %d (largest combo first)", got[0].WastedBytes, wantLarge)
+	}
+	if got[1].WastedBytes != wantMedium {
+		t.Errorf("got[1].WastedBytes = %d, want %d", got[1].WastedBytes, wantMedium)
+	}
+	if got[2].WastedBytes != wantSmall {
+		t.Errorf("got[2].WastedBytes = %d, want %d", got[2].WastedBytes, wantSmall)
+	}
+}
+
+func TestComputeMismatchedPBRWastedBytes_DedupesSharedAssets(t *testing.T) {
+	// One 512² normal asset shared across 50 mismatched materials (color=256
+	// each). The "downscale to color" saving should count once, not 50x.
+	materials := map[string]SurfaceAppearanceMaterialSlots{}
+	for i := 0; i < 50; i++ {
+		materials[fmt.Sprintf("Workspace.Mat%02d", i)] = SurfaceAppearanceMaterialSlots{
+			Color:  slot(fmt.Sprintf("color-%02d", i), 256),
+			Normal: slot("normal-shared", 512),
+		}
+	}
+	got := ComputeMismatchedPBRWastedBytes(materials)
+	// Engine bytes:
+	//   current   = 1 × BC3@512 (shared normal) + 1 × BC1@512 (shared MR pack)
+	//   clamped   = 1 × BC3@256 + 1 × BC1@256 (every material clamps the shared normal to 256)
+	want := (bc3Bytes(512) - bc3Bytes(256)) + (bc1Bytes(512) - bc1Bytes(256))
+	if got != want {
+		t.Errorf("ComputeMismatchedPBRWastedBytes() = %d, want %d (dedup'd, not multiplied by 50)", got, want)
+	}
+}
+
+func TestComputeMismatchedPBRWastedBytes_SharedAssetCantDownscaleIfAnyMaterialNeedsItBig(t *testing.T) {
+	// Normal "n-shared" at 512² is paired with both a 256² color (mismatched,
+	// could downscale) and a 512² color (matched, must stay at 512). The
+	// engine can only allocate the asset at one size, so in practice we
+	// can't downscale → expect 0 savings.
+	materials := map[string]SurfaceAppearanceMaterialSlots{
+		"A-mismatched": {Color: slot("c1", 256), Normal: slot("n-shared", 512)},
+		"B-matched":    {Color: slot("c2", 512), Normal: slot("n-shared", 512)},
+	}
+	got := ComputeMismatchedPBRWastedBytes(materials)
+	if got != 0 {
+		t.Errorf("ComputeMismatchedPBRWastedBytes() = %d, want 0 (shared asset blocks downscale)", got)
 	}
 }
 

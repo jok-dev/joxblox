@@ -49,6 +49,67 @@ func ComputeImageDHash(imageBytes []byte) (uint64, error) {
 	return hash, nil
 }
 
+// NormalMapDHashes carries a dHash built from R alone and one built from G
+// alone — see ComputeImageDHashesForNormalMap for why two separate hashes
+// beat a single combined hash on normal maps. Each is 56 bits; the
+// caller compares with NormalMapHammingDistance to get a 0-112 distance
+// where lower means more similar.
+type NormalMapDHashes struct {
+	R uint64
+	G uint64
+}
+
+// NormalMapHammingDistance returns the combined R+G Hamming distance
+// between two NormalMapDHashes results. Range is [0, 112] — twice a
+// single-channel hash distance — so callers should scale the percentage
+// display accordingly (pct = 100 - dist*100/112).
+func NormalMapHammingDistance(a, b NormalMapDHashes) int {
+	return dHashHammingDistance(a.R, b.R) + dHashHammingDistance(a.G, b.G)
+}
+
+// ComputeImageDHashesForNormalMap returns separate dHashes over the R and
+// G channels (X and Y components of the encoded surface normal). Hashing
+// R and G independently and summing their Hamming distances catches XY
+// surface variation that the standard luminance dHash can't see —
+// luminance Y mostly tracks B (the Z component), which is near-uniform
+// across normal maps, leaving only weak silhouette information to
+// discriminate two perceptually different surface details.
+//
+// Hashing them as a combined "(R+G)/2 grayscale" had a degenerate case:
+// pixels where R and G swap relative magnitudes produce identical mixes
+// even though the underlying surface direction is different. Two
+// independent hashes avoid that — a position where R goes up and G goes
+// down still flips bits in both R and G hashes.
+func ComputeImageDHashesForNormalMap(imageBytes []byte) (NormalMapDHashes, error) {
+	src, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		return NormalMapDHashes{}, err
+	}
+
+	resized := image.NewRGBA(image.Rect(0, 0, dHashWidth, dHashHeight))
+	xdraw.BiLinear.Scale(resized, resized.Bounds(), src, src.Bounds(), xdraw.Over, nil)
+
+	channelAt := func(x, y, channel int) uint8 {
+		return resized.Pix[resized.PixOffset(x, y)+channel]
+	}
+
+	hashChannel := func(channel int) uint64 {
+		var hash uint64
+		bitIndex := 0
+		for y := 0; y < dHashHeight; y++ {
+			for x := 0; x < dHashWidth-1; x++ {
+				if channelAt(x, y, channel) > channelAt(x+1, y, channel) {
+					hash |= 1 << bitIndex
+				}
+				bitIndex++
+			}
+		}
+		return hash
+	}
+
+	return NormalMapDHashes{R: hashChannel(0), G: hashChannel(1)}, nil
+}
+
 func dHashHammingDistance(h1, h2 uint64) int {
 	return bits.OnesCount64(h1 ^ h2)
 }

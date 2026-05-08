@@ -14,6 +14,13 @@ func Clamp[T cmp.Ordered](value, minimum, maximum T) T {
 	return max(minimum, min(value, maximum))
 }
 
+func MegabytesToBytes(mb float64) int64 {
+	if mb <= 0 {
+		return 0
+	}
+	return int64(mb * float64(Megabyte))
+}
+
 func FormatSizeAuto(bytesSize int) string {
 	return FormatSizeAuto64(int64(bytesSize))
 }

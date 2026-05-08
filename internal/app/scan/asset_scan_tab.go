@@ -58,7 +58,7 @@ type assetScanTabOptions struct {
 
 type secondaryTappableTable struct {
 	*widget.Table
-	onSecondaryTap func()
+	onSecondaryTap func(*fyne.PointEvent)
 }
 
 func buildScanLoadingStatus(completedCount int, totalCount int, elapsed time.Duration, memoryRequestCount int, diskRequestCount int, networkRequestCount int) string {
@@ -81,17 +81,21 @@ func buildScanLoadingStatus(completedCount int, totalCount int, elapsed time.Dur
 	return fmt.Sprintf("%s ETA %s", statusText, ui.FormatDurationCompact(estimatedRemaining))
 }
 
-func (table *secondaryTappableTable) TappedSecondary(_ *fyne.PointEvent) {
+func (table *secondaryTappableTable) TappedSecondary(event *fyne.PointEvent) {
 	if table == nil || table.onSecondaryTap == nil {
 		return
 	}
-	table.onSecondaryTap()
+	table.onSecondaryTap(event)
 }
 
 func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.CanvasObject, *ScanTabFileActions) {
 	selectedSourcePath := ""
 	selectedSecondarySourcePath := ""
-	pathWhitelistEnabled := false
+	// Path filter defaults on so a fresh scan only walks the in-game
+	// service trees (Workspace, MaterialService, …) — most rbxl files
+	// have a tail of editor-only / tooling instances that aren't worth
+	// scanning by default.
+	pathWhitelistEnabled := true
 	pathWhitelistText := ""
 	recentLoadedFiles := common.LoadRecentFilesFromPreferences(options.RecentFilesPreferenceKey)
 	maxResultsDefault := options.MaxResultsDefault
@@ -121,7 +125,6 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 	pathWhitelistEntry := widget.NewMultiLineEntry()
 	pathWhitelistEntry.SetText("Workspace.*\nMaterialService.*")
 	pathWhitelistEntry.Wrapping = fyne.TextWrapOff
-	pathWhitelistEntry.Disable()
 	pathWhitelistCheck := widget.NewCheck("Path Filter", func(checked bool) {
 		pathWhitelistEnabled = checked
 		if checked {
@@ -130,6 +133,7 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		}
 		pathWhitelistEntry.Disable()
 	})
+	pathWhitelistCheck.SetChecked(pathWhitelistEnabled)
 	pathWhitelistEntry.OnChanged = func(text string) {
 		pathWhitelistText = text
 	}
@@ -192,6 +196,22 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			}
 		})
 	}
+
+	tagReportButton := widget.NewButton("HTML Tag Report", nil)
+	tagReportButton.Disable()
+	pdfReportButton := widget.NewButton("PDF Tag Report", nil)
+	pdfReportButton.Disable()
+	refreshTagReportButtonState := func() {
+		store := explorer.TagStore()
+		if store != nil && store.TaggedCount() > 0 {
+			tagReportButton.Enable()
+			pdfReportButton.Enable()
+			return
+		}
+		tagReportButton.Disable()
+		pdfReportButton.Disable()
+	}
+	explorer.SetOnTagsChanged(refreshTagReportButtonState)
 
 	similarityFileLabel := widget.NewLabel("")
 	similarityFileLabel.Hide()
@@ -449,6 +469,99 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			})
 		}()
 	}
+	generateTagHTMLReport := func() {
+		store := explorer.TagStore()
+		if store == nil || store.TaggedCount() == 0 {
+			explorer.SetStatus("Tag at least one row first (right-click > Tag).")
+			return
+		}
+		selectedExportPath, pickerErr := nativeDialog.File().
+			Filter("HTML files", "html").
+			Title("Save tag report").
+			Save()
+		if pickerErr != nil {
+			if errors.Is(pickerErr, nativeDialog.Cancelled) {
+				return
+			}
+			explorer.SetStatus(fmt.Sprintf("Tag report picker failed: %s", pickerErr.Error()))
+			return
+		}
+		if strings.TrimSpace(selectedExportPath) == "" {
+			explorer.SetStatus("Tag report canceled.")
+			return
+		}
+		if !strings.HasSuffix(strings.ToLower(selectedExportPath), ".html") {
+			selectedExportPath += ".html"
+		}
+		resultsSnapshot := explorer.GetResults()
+		reportSourcePath := selectedSourcePath
+		if hasSecondarySource && strings.TrimSpace(selectedSecondarySourcePath) != "" {
+			reportSourcePath = combinedSourcePath()
+		}
+		htmlBody := BuildTagHTMLReport(resultsSnapshot, store, TagHTMLReportOptions{
+			Title:       "Joxblox Scan Tag Report",
+			SourcePath:  reportSourcePath,
+			EmbedImages: true,
+		})
+		if writeErr := os.WriteFile(selectedExportPath, []byte(htmlBody), 0o644); writeErr != nil {
+			explorer.SetStatus(fmt.Sprintf("Tag report write failed: %s", writeErr.Error()))
+			fyneDialog.ShowError(writeErr, window)
+			return
+		}
+		explorer.SetStatus(fmt.Sprintf("Saved tag report (%d tagged assets) to %s.", store.TaggedCount(), selectedExportPath))
+		debug.Logf("Scan tag HTML report exported: %s (tagged=%d)", selectedExportPath, store.TaggedCount())
+	}
+	tagReportButton.OnTapped = generateTagHTMLReport
+
+	generateTagPDFReport := func() {
+		store := explorer.TagStore()
+		if store == nil || store.TaggedCount() == 0 {
+			explorer.SetStatus("Tag at least one row first (right-click > Tag).")
+			return
+		}
+		selectedExportPath, pickerErr := nativeDialog.File().
+			Filter("PDF files", "pdf").
+			Title("Save tag report").
+			Save()
+		if pickerErr != nil {
+			if errors.Is(pickerErr, nativeDialog.Cancelled) {
+				return
+			}
+			explorer.SetStatus(fmt.Sprintf("Tag report picker failed: %s", pickerErr.Error()))
+			return
+		}
+		if strings.TrimSpace(selectedExportPath) == "" {
+			explorer.SetStatus("Tag report canceled.")
+			return
+		}
+		if !strings.HasSuffix(strings.ToLower(selectedExportPath), ".pdf") {
+			selectedExportPath += ".pdf"
+		}
+		resultsSnapshot := explorer.GetResults()
+		reportSourcePath := selectedSourcePath
+		if hasSecondarySource && strings.TrimSpace(selectedSecondarySourcePath) != "" {
+			reportSourcePath = combinedSourcePath()
+		}
+		pdfBytes, buildErr := BuildTagPDFReport(resultsSnapshot, store, TagPDFReportOptions{
+			Title:       "Joxblox Scan Tag Report",
+			SourcePath:  reportSourcePath,
+			EmbedImages: true,
+		})
+		if buildErr != nil {
+			explorer.SetStatus(fmt.Sprintf("Tag PDF build failed: %s", buildErr.Error()))
+			fyneDialog.ShowError(buildErr, window)
+			return
+		}
+		if writeErr := os.WriteFile(selectedExportPath, pdfBytes, 0o644); writeErr != nil {
+			explorer.SetStatus(fmt.Sprintf("Tag report write failed: %s", writeErr.Error()))
+			fyneDialog.ShowError(writeErr, window)
+			return
+		}
+		explorer.SetStatus(fmt.Sprintf("Saved tag PDF (%d tagged assets) to %s.", store.TaggedCount(), selectedExportPath))
+		debug.Logf("Scan tag PDF report exported: %s (tagged=%d, bytes=%d)", selectedExportPath, store.TaggedCount(), len(pdfBytes))
+	}
+	pdfReportButton.OnTapped = generateTagPDFReport
+
 	loadResultsFromPicker := func() {
 		selectedImportPath, pickerErr := nativeDialog.File().
 			Filter("JSON files", "json").
@@ -731,6 +844,8 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		container.NewGridWrap(fyne.NewSize(80, 36), limitEntry),
 		scanButton,
 		layout.NewSpacer(),
+		tagReportButton,
+		pdfReportButton,
 		findSimilarButton,
 		similarityFileLabel,
 		similarityClearButton,
@@ -791,6 +906,17 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 			applyImportedResults(nextRows, fmt.Sprintf("Loaded %d results.", len(nextRows)))
 		},
 		AddRecentFile: addRecentLoadedFile,
+		SetSourcePath: func(path string) {
+			trimmedPath := strings.TrimSpace(path)
+			if trimmedPath == "" {
+				return
+			}
+			selectedSourcePath = trimmedPath
+			sourceLabel.SetText(selectedSourcePath)
+			setWarning(ui.MaterialVariantWarningData{})
+			updateReadyStatus()
+			addRecentLoadedFile(trimmedPath)
+		},
 		SetPathFilter: func(enabled bool, text string) {
 			pathWhitelistEnabled = enabled
 			pathWhitelistCheck.SetChecked(enabled)
@@ -805,6 +931,10 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		SetLargeTextureThreshold: func(threshold float64) {
 			explorer.SetLargeTextureThreshold(threshold)
 		},
+		SetBannedTextureSizeMB: func(limitMB float64) {
+			explorer.SetBannedTextureSizeMB(limitMB)
+		},
+		GenerateTagHTMLReport: generateTagHTMLReport,
 	}
 	return content, fileActions
 }

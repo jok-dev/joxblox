@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/app/report"
 	"joxblox/internal/app/ui"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
@@ -51,6 +52,7 @@ type ScanResultsExplorer struct {
 	displayDistances                 []int
 	showOnlyDuplicates               bool
 	showOnlyLargeTextures            bool
+	showOnlyUntagged                 bool
 	searchQuery                      string
 	similarityActive                 bool
 	similarityMatchSet               map[int]int
@@ -95,7 +97,13 @@ type ScanResultsExplorer struct {
 	searchSuggestionsRow             fyne.CanvasObject
 	showOnlyDuplicatesCheck          *widget.Check
 	showOnlyLargeTexturesCheck       *widget.Check
+	showOnlyUntaggedCheck            *widget.Check
 	largeTextureThresholdEntry       *widget.Entry
+	bannedTextureSizeMB              float64
+	bannedTextureLimitBytes          int64
+	tagStore                         *ScanTagStore
+	onTagsChanged                    func()
+	materialsView                    *materialsView
 }
 
 func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptions) *ScanResultsExplorer {
@@ -121,6 +129,7 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 		similarityMatchSet:         map[int]int{},
 		largeTextureThreshold:      loader.DefaultLargeTextureThreshold,
 		controlsEnabled:            true,
+		tagStore:                   NewScanTagStore(),
 	}
 	explorer.assetDetailsView = ui.NewAssetView(previewPlaceholder, options.IncludeFileRow)
 	explorer.searchEntry = widget.NewEntry()
@@ -138,12 +147,18 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 	explorer.statsGPUMemoryLabel = widget.NewLabel("Shown GPU Memory: 0 B")
 	explorer.statsTrianglesLabel = widget.NewLabel("Shown Triangles: 0")
 	explorer.statsTotalTrianglesLabel = widget.NewLabel("Shown Total Triangles: 0")
-	explorer.showOnlyDuplicatesCheck = widget.NewCheck("Show only duplicates", func(checked bool) {
+	explorer.showOnlyDuplicatesCheck = widget.NewCheck("Show duplicates", func(checked bool) {
 		explorer.showOnlyDuplicates = checked
 		explorer.applySortAndFilters()
 		explorer.clearPreview()
 	})
 	explorer.showOnlyDuplicatesCheck.SetChecked(false)
+	explorer.showOnlyUntaggedCheck = widget.NewCheck("Show untagged", func(checked bool) {
+		explorer.showOnlyUntagged = checked
+		explorer.applySortAndFilters()
+		explorer.clearPreview()
+	})
+	explorer.showOnlyUntaggedCheck.SetChecked(false)
 	explorer.showOnlyLargeTexturesCheck = widget.NewCheck("Show large textures", func(checked bool) {
 		if explorer.suppressLargeTextureFilterChange {
 			return
@@ -225,6 +240,7 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 	explorer.sortField = explorer.defaultSortField()
 	explorer.sortDescending = true
 	explorer.buildTable()
+	explorer.materialsView = newMaterialsView()
 	explorer.buildContent(options)
 	explorer.updateFilterOptions(map[string]int{})
 	explorer.updateStatsLabels()
@@ -265,6 +281,9 @@ func (explorer *ScanResultsExplorer) SetResults(rows []loader.ScanResult) {
 	explorer.clearPreview()
 	explorer.ClearSimilarity()
 	explorer.applySortAndFilters()
+	if explorer.materialsView != nil {
+		explorer.materialsView.Refresh(explorer.allResults)
+	}
 	loader.PublishScanCompleted(explorer.allResults)
 }
 
@@ -277,6 +296,9 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
 		explorer.refreshSearchSuggestions()
 		explorer.applySortAndFilters()
+		if explorer.materialsView != nil {
+			explorer.materialsView.Refresh(explorer.allResults)
+		}
 		return
 	}
 	if refreshFilters {
@@ -287,6 +309,9 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 		explorer.updateStatsLabels()
 		explorer.versionIndex = loader.ExtractVersionsFromResults(explorer.allResults)
 		explorer.refreshSearchSuggestions()
+		if explorer.materialsView != nil {
+			explorer.materialsView.Refresh(explorer.allResults)
+		}
 	}
 }
 
@@ -295,11 +320,28 @@ func (explorer *ScanResultsExplorer) AppendResults(rows []loader.ScanResult, ref
 // end of a streaming scan; AppendResults intentionally no longer
 // publishes on every batch since that swamped subscribers (notably the
 // RenderDoc asset-ID corpus builder) with redundant rebuilds.
+//
+// Also runs auto-tagging for SHA256-detected duplicates so users start
+// with sensible default groups; manual groups (via the picker dialog)
+// always take precedence and are never overwritten.
 func (explorer *ScanResultsExplorer) PublishCompleted() {
 	if explorer == nil {
 		return
 	}
+	autoCreated := 0
+	if explorer.tagStore != nil {
+		autoCreated = explorer.tagStore.AutoTagDetectedDuplicates(explorer.allResults)
+	}
 	loader.PublishScanCompleted(explorer.allResults)
+	if autoCreated > 0 {
+		// Re-filter so the new tags are reflected in any active "Show
+		// untagged" / "Show duplicates" toggles, and refresh the table
+		// so the Tags column picks up the auto-tagged rows.
+		explorer.applySortAndFilters()
+		if explorer.onTagsChanged != nil {
+			explorer.onTagsChanged()
+		}
+	}
 }
 
 func (explorer *ScanResultsExplorer) ClearSimilarity() {
@@ -336,6 +378,9 @@ func (explorer *ScanResultsExplorer) SetControlsEnabled(enabled bool) {
 		if explorer.showOnlyDuplicatesCheck != nil {
 			explorer.showOnlyDuplicatesCheck.Enable()
 		}
+		if explorer.showOnlyUntaggedCheck != nil {
+			explorer.showOnlyUntaggedCheck.Enable()
+		}
 		explorer.updateLargeTextureFilterControls()
 		return
 	}
@@ -343,6 +388,9 @@ func (explorer *ScanResultsExplorer) SetControlsEnabled(enabled bool) {
 	explorer.typeFilterSelect.Disable()
 	explorer.instanceTypeFilterSelect.Disable()
 	explorer.propertyNameFilterSelect.Disable()
+	if explorer.showOnlyUntaggedCheck != nil {
+		explorer.showOnlyUntaggedCheck.Disable()
+	}
 	if explorer.showOnlyDuplicatesCheck != nil {
 		explorer.showOnlyDuplicatesCheck.Disable()
 	}
@@ -372,6 +420,10 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 	if options.ShowDuplicateUI {
 		filterRow.Add(explorer.showOnlyDuplicatesCheck)
 	}
+	// Show untagged sits next to Show duplicates / Show large textures so
+	// triagers can quickly drill into "rows that still need a decision"
+	// after they've already burned through the obvious tags.
+	filterRow.Add(explorer.showOnlyUntaggedCheck)
 	if options.ShowLargeTextureUI {
 		filterRow.Add(explorer.showOnlyLargeTexturesCheck)
 		filterRow.Add(widget.NewLabel("Min B/stud^2:"))
@@ -419,7 +471,17 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 	)
 	previewScroll := container.NewVScroll(previewContent)
 	previewPanel := container.NewBorder(nil, nil, nil, nil, previewScroll)
-	split := container.NewHSplit(explorer.table, previewPanel)
+	// Assets vs Materials: the asset-level table shows literal per-asset
+	// uploads (one row per unique scanned asset, raw GPU bytes at authored
+	// size). The Materials sub-tab groups SurfaceAppearance assets into
+	// engine-deduplicated PBR combos so the user can read the engine's
+	// actual GPU footprint (color + upscaled normal + MR pack) — which is
+	// the figure that matches the report tab's headline.
+	tableTabs := container.NewAppTabs(
+		container.NewTabItem("Assets", explorer.table),
+		container.NewTabItem("Materials", explorer.materialsView.Content()),
+	)
+	split := container.NewHSplit(tableTabs, previewPanel)
 	split.Offset = 0.62
 	explorer.content = container.NewBorder(
 		controls,
@@ -467,6 +529,36 @@ func (explorer *ScanResultsExplorer) updateLargeTextureFilterControls() {
 			explorer.largeTextureThresholdEntry.Disable()
 		}
 	}
+}
+
+func (explorer *ScanResultsExplorer) SetBannedTextureSizeMB(limitMB float64) {
+	if explorer == nil {
+		return
+	}
+	if limitMB < 0 {
+		limitMB = 0
+	}
+	if explorer.bannedTextureSizeMB == limitMB {
+		return
+	}
+	explorer.bannedTextureSizeMB = limitMB
+	explorer.bannedTextureLimitBytes = format.MegabytesToBytes(limitMB)
+	if explorer.table != nil && explorer.table.Table != nil {
+		explorer.table.Refresh()
+	}
+}
+
+// isBannedRow judges each row by its own slot classification (normal
+// maps are always BC3, doubling the cost), mirroring the report tab.
+func (explorer *ScanResultsExplorer) isBannedRow(result loader.ScanResult) bool {
+	if explorer == nil || explorer.bannedTextureLimitBytes <= 0 {
+		return false
+	}
+	if result.PixelCount <= 0 || result.Width <= 0 || result.Height <= 0 {
+		return false
+	}
+	isBC3 := loader.ClassifyAsBC3(result.HasAlphaChannel, result.NonOpaqueAlphaPixels, result.PropertyName)
+	return report.EstimateGPUTextureBytesExact(result.Width, result.Height, isBC3) > explorer.bannedTextureLimitBytes
 }
 
 func (explorer *ScanResultsExplorer) SetLargeTextureThreshold(threshold float64) {
@@ -520,6 +612,14 @@ func (explorer *ScanResultsExplorer) buildTable() {
 				emojiText.Refresh()
 			}
 			label.SetText(explorer.columnValue(row, explorer.columnHeaders[id.Col], id.Row))
+			nextImportance := widget.MediumImportance
+			if explorer.isBannedRow(row) {
+				nextImportance = widget.DangerImportance
+			}
+			if label.Importance != nextImportance {
+				label.Importance = nextImportance
+				label.Refresh()
+			}
 		},
 	)
 	baseTable.CreateHeader = func() fyne.CanvasObject {
@@ -567,26 +667,185 @@ func (explorer *ScanResultsExplorer) buildTable() {
 	}
 	explorer.table = &secondaryTappableTable{
 		Table: baseTable,
-		onSecondaryTap: func() {
-			if explorer.selectedAssetID <= 0 || explorer.window == nil {
-				return
-			}
-			clipboardValue := loader.ScanAssetReferenceDisplayInput(explorer.selectedAssetID, explorer.selectedResultAssetInput)
-			explorer.window.Clipboard().SetContent(clipboardValue)
-			if strings.TrimSpace(explorer.selectedResultAssetInput) != "" {
-				explorer.statusLabel.SetText("Copied asset reference to clipboard.")
-			} else {
-				explorer.statusLabel.SetText(fmt.Sprintf("Copied asset ID %d to clipboard.", explorer.selectedAssetID))
-			}
+		onSecondaryTap: func(event *fyne.PointEvent) {
+			explorer.showRowContextMenu(event)
 		},
 	}
+}
+
+func (explorer *ScanResultsExplorer) showRowContextMenu(event *fyne.PointEvent) {
+	if explorer == nil || explorer.window == nil {
+		return
+	}
+	if explorer.selectedAssetID <= 0 {
+		explorer.statusLabel.SetText("Select a row first to copy or tag it.")
+		return
+	}
+	canvas := explorer.window.Canvas()
+	if canvas == nil {
+		return
+	}
+	menuPosition := fyne.NewPos(0, 0)
+	if event != nil {
+		menuPosition = event.AbsolutePosition
+	}
+	menu := fyne.NewMenu("",
+		explorer.buildCopyMenuItem(),
+		explorer.buildTagMenuItem(),
+	)
+	widget.ShowPopUpMenuAtPosition(menu, canvas, menuPosition)
+}
+
+func (explorer *ScanResultsExplorer) buildCopyMenuItem() *fyne.MenuItem {
+	assetIDValue := explorer.selectedAssetID
+	assetInput := explorer.selectedResultAssetInput
+	selectedRow, _ := explorer.findResultByAssetID(assetIDValue)
+	copyAssetID := fyne.NewMenuItem("Asset ID", func() {
+		explorer.copyToClipboard(strconv.FormatInt(assetIDValue, 10), fmt.Sprintf("Copied asset ID %d to clipboard.", assetIDValue))
+	})
+	copyReference := fyne.NewMenuItem("Asset Reference", func() {
+		reference := loader.ScanAssetReferenceDisplayInput(assetIDValue, assetInput)
+		explorer.copyToClipboard(reference, "Copied asset reference to clipboard.")
+	})
+	copySHA := fyne.NewMenuItem("SHA256", func() {
+		shaValue := strings.TrimSpace(selectedRow.FileSHA256)
+		if shaValue == "" {
+			explorer.statusLabel.SetText("This asset has no SHA256 yet.")
+			return
+		}
+		explorer.copyToClipboard(shaValue, "Copied SHA256 to clipboard.")
+	})
+	if strings.TrimSpace(selectedRow.FileSHA256) == "" {
+		copySHA.Disabled = true
+	}
+	copyItem := fyne.NewMenuItem("Copy", nil)
+	copyItem.ChildMenu = fyne.NewMenu("", copyAssetID, copyReference, copySHA)
+	return copyItem
+}
+
+func (explorer *ScanResultsExplorer) buildTagMenuItem() *fyne.MenuItem {
+	assetIDValue := explorer.selectedAssetID
+	tagItems := make([]*fyne.MenuItem, 0, len(AllScanTags()))
+	for _, tag := range AllScanTags() {
+		currentTag := tag
+		var item *fyne.MenuItem
+		if currentTag == ScanTagDuplicated {
+			// Duplicated is a group operation, not a single-row toggle.
+			// Picking it always opens the group picker so the user can
+			// pin which other assets are variants of this one — clicking
+			// it again on a row that's already grouped just lets them
+			// edit that group's membership.
+			item = fyne.NewMenuItem(string(currentTag), func() {
+				explorer.openDuplicateGroupDialog(assetIDValue)
+			})
+		} else {
+			item = fyne.NewMenuItem(string(currentTag), func() {
+				explorer.toggleTag(assetIDValue, currentTag)
+			})
+		}
+		item.Checked = explorer.tagStore.Has(assetIDValue, currentTag)
+		tagItems = append(tagItems, item)
+	}
+	tagItem := fyne.NewMenuItem("Tag", nil)
+	menuItems := make([]*fyne.MenuItem, len(tagItems))
+	copy(menuItems, tagItems)
+	tagItem.ChildMenu = fyne.NewMenu("", menuItems...)
+	return tagItem
+}
+
+func (explorer *ScanResultsExplorer) openDuplicateGroupDialog(primaryAssetID int64) {
+	if explorer == nil || explorer.window == nil || primaryAssetID <= 0 {
+		return
+	}
+	preselected := explorer.tagStore.DuplicateGroupOf(primaryAssetID)
+	showDuplicateGroupDialog(explorer.window, explorer.allResults, primaryAssetID, preselected, func(selectedIDs []int64) {
+		explorer.tagStore.SetDuplicateGroup(selectedIDs)
+		switch {
+		case len(selectedIDs) >= 2:
+			explorer.statusLabel.SetText(fmt.Sprintf("Tagged %d assets as a duplicate group of %d.", len(selectedIDs), primaryAssetID))
+		case len(selectedIDs) == 1:
+			explorer.statusLabel.SetText(fmt.Sprintf("Cleared duplicate group for asset %d (only one selected).", primaryAssetID))
+		default:
+			explorer.statusLabel.SetText("Cleared duplicate group selection.")
+		}
+		// Re-filter for the same reason as toggleTag — Show untagged sees
+		// these tag changes and may need to drop/restore rows.
+		explorer.applySortAndFilters()
+		if explorer.onTagsChanged != nil {
+			explorer.onTagsChanged()
+		}
+	})
+}
+
+func (explorer *ScanResultsExplorer) toggleTag(assetID int64, tag ScanTag) {
+	if explorer == nil || assetID <= 0 {
+		return
+	}
+	added := explorer.tagStore.Toggle(assetID, tag)
+	if added {
+		explorer.statusLabel.SetText(fmt.Sprintf("Tagged asset %d as %s.", assetID, tag))
+	} else {
+		explorer.statusLabel.SetText(fmt.Sprintf("Removed %s tag from asset %d.", tag, assetID))
+	}
+	// Re-filter rather than just refresh — the "Show untagged" filter
+	// hides rows that just gained a tag and reveals rows that just lost
+	// their last tag, so the visible row set can change underneath us.
+	explorer.applySortAndFilters()
+	if explorer.onTagsChanged != nil {
+		explorer.onTagsChanged()
+	}
+}
+
+func (explorer *ScanResultsExplorer) copyToClipboard(value string, statusText string) {
+	if explorer == nil || explorer.window == nil {
+		return
+	}
+	explorer.window.Clipboard().SetContent(value)
+	if strings.TrimSpace(statusText) != "" {
+		explorer.statusLabel.SetText(statusText)
+	}
+}
+
+func (explorer *ScanResultsExplorer) findResultByAssetID(assetID int64) (loader.ScanResult, bool) {
+	if explorer == nil || assetID <= 0 {
+		return loader.ScanResult{}, false
+	}
+	for _, row := range explorer.allResults {
+		if row.AssetID == assetID {
+			return row, true
+		}
+	}
+	return loader.ScanResult{}, false
+}
+
+// TagStore exposes the in-memory tag map so callers (e.g. the
+// Generate-HTML-Report button) can read what's been tagged. Tags are
+// per-explorer and are not persisted across runs.
+func (explorer *ScanResultsExplorer) TagStore() *ScanTagStore {
+	if explorer == nil {
+		return nil
+	}
+	return explorer.tagStore
+}
+
+// SetOnTagsChanged registers a callback that fires whenever a tag is
+// toggled, so the surrounding tab can refresh button-enabled states.
+func (explorer *ScanResultsExplorer) SetOnTagsChanged(callback func()) {
+	if explorer == nil {
+		return
+	}
+	explorer.onTagsChanged = callback
 }
 
 func (explorer *ScanResultsExplorer) defaultSortField() string {
 	if explorer.variant == ScanResultsExplorerVariantHeatmap {
 		return "Total Byte Size"
 	}
-	return "Self Size"
+	// GPU Memory is the metric users actually care about when triaging
+	// scan results — file size on disk understates the cost of normal
+	// maps (BC3 doubles BC1) and overstates re-compressed JPEGs that
+	// blow back up at upload time.
+	return "GPU Memory"
 }
 
 func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
@@ -600,9 +859,9 @@ func (explorer *ScanResultsExplorer) currentColumnHeaders() []string {
 		return headers
 	}
 	if explorer.similarityActive {
-		return []string{"Similarity", "Asset ID", "Use Count", "Type", "Self Size", "GPU Memory", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
+		return []string{"Similarity", "Asset ID", "Tags", "Use Count", "Type", "Self Size", "GPU Memory", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
 	}
-	return []string{"Asset ID", "Use Count", "Type", "Self Size", "GPU Memory", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
+	return []string{"Asset ID", "Tags", "Use Count", "Type", "Self Size", "GPU Memory", "B/stud²", "Dimensions", "Triangles", "Total Triangles", "Asset SHA256"}
 }
 
 func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
@@ -627,6 +886,7 @@ func (explorer *ScanResultsExplorer) columnWidths() map[string]float32 {
 	return map[string]float32{
 		"Similarity":      110,
 		"Asset ID":        140,
+		"Tags":            150,
 		"Use Count":       100,
 		"Type":            190,
 		"Self Size":       90,
@@ -727,6 +987,9 @@ func (explorer *ScanResultsExplorer) matchesActiveFilters(result loader.ScanResu
 		return false
 	}
 	if explorer.showOnlyLargeTextures && !loader.IsLargeTexture(result, explorer.largeTextureThreshold) {
+		return false
+	}
+	if explorer.showOnlyUntagged && len(explorer.tagStore.Tags(result.AssetID)) > 0 {
 		return false
 	}
 	if !loader.ScanResultMatchesCompiledQuery(result, explorer.compiledSearchQuery, loader.ScanQueryContext{HashCounts: hashCounts}) {
@@ -959,6 +1222,25 @@ func (explorer *ScanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 				return
 			}
 			selectedResult = loader.ApplyPreviewToScanResult(selectedResult, fullPreview)
+			// Persist the freshly-loaded preview (Resource, DownloadBytes,
+			// FileSHA256, dimensions, etc.) back into allResults so later
+			// consumers — the duplicate-group picker similarity sort, the
+			// HTML report, anything that reads allResults — see the
+			// populated row instead of the pre-load stub. Match by
+			// AssetReferenceKey so re-import / rescan flows that reuse
+			// asset ids without conflicting AssetInputs don't clobber.
+			loadedKey := extractor.AssetReferenceKey(assetToLoad, assetInputToLoad)
+			for index := range explorer.allResults {
+				existing := explorer.allResults[index]
+				if existing.AssetID != assetToLoad {
+					continue
+				}
+				if extractor.AssetReferenceKey(existing.AssetID, existing.AssetInput) != loadedKey {
+					continue
+				}
+				explorer.allResults[index] = selectedResult
+				break
+			}
 			rootPreview := loader.ScanResultToPreviewResult(selectedResult)
 			explorer.explorerState = ui.NewAssetExplorerState(assetToLoad, rootPreview)
 			explorer.renderSelectedAsset(assetToLoad, filePathToLoad, rootPreview)
@@ -994,6 +1276,16 @@ func (explorer *ScanResultsExplorer) columnValue(row loader.ScanResult, columnNa
 		return row.Side
 	case "Asset ID":
 		return strconv.FormatInt(row.AssetID, 10)
+	case "Tags":
+		tags := explorer.tagStore.Tags(row.AssetID)
+		if len(tags) == 0 {
+			return "-"
+		}
+		labels := make([]string, len(tags))
+		for index, tag := range tags {
+			labels[index] = string(tag)
+		}
+		return strings.Join(labels, ", ")
 	case "Use Count":
 		if row.UseCount > 0 {
 			return strconv.Itoa(row.UseCount)

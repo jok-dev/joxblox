@@ -25,12 +25,14 @@ type MaterialVariantWarningData struct {
 }
 
 type MaterialVariantWarningBanner struct {
-	window     fyne.Window
-	root       *fyne.Container
-	content    *fyne.Container
-	label      *widget.Label
-	viewButton *widget.Button
-	detail     MaterialVariantWarningData
+	window       fyne.Window
+	root         *fyne.Container
+	content      *fyne.Container
+	label        *widget.Label
+	viewButton   *widget.Button
+	ignoreButton *widget.Button
+	detail       MaterialVariantWarningData
+	ignored      bool
 }
 
 func NewMaterialVariantWarningBanner(window fyne.Window) *MaterialVariantWarningBanner {
@@ -40,17 +42,20 @@ func NewMaterialVariantWarningBanner(window fyne.Window) *MaterialVariantWarning
 	label.TextStyle = fyne.TextStyle{Bold: true}
 	viewButton := widget.NewButton("View Missing Materials", nil)
 	viewButton.Importance = widget.HighImportance
+	ignoreButton := widget.NewButton("Ignore", nil)
+	buttons := container.NewHBox(viewButton, ignoreButton)
 	content := container.NewMax(
 		background,
-		container.NewPadded(container.NewBorder(nil, nil, nil, viewButton, label)),
+		container.NewPadded(container.NewBorder(nil, nil, nil, buttons, label)),
 	)
 	root := container.NewVBox()
 	banner := &MaterialVariantWarningBanner{
-		window:     window,
-		root:       root,
-		content:    content,
-		label:      label,
-		viewButton: viewButton,
+		window:       window,
+		root:         root,
+		content:      content,
+		label:        label,
+		viewButton:   viewButton,
+		ignoreButton: ignoreButton,
 	}
 	viewButton.OnTapped = func() {
 		if banner.window == nil || strings.TrimSpace(banner.detail.DetailText) == "" {
@@ -67,6 +72,13 @@ func NewMaterialVariantWarningBanner(window fyne.Window) *MaterialVariantWarning
 			banner.window,
 		)
 	}
+	ignoreButton.OnTapped = func() {
+		banner.ignored = true
+		if banner.root != nil {
+			banner.root.RemoveAll()
+			banner.root.Refresh()
+		}
+	}
 	return banner
 }
 
@@ -81,17 +93,25 @@ func (banner *MaterialVariantWarningBanner) SetWarning(data MaterialVariantWarni
 	if banner == nil || banner.root == nil || banner.content == nil || banner.label == nil || banner.viewButton == nil {
 		return
 	}
+	previousSummary := strings.TrimSpace(banner.detail.Summary)
+	nextSummary := strings.TrimSpace(data.Summary)
+	if previousSummary != nextSummary {
+		banner.ignored = false
+	}
 	banner.detail = data
-	trimmedText := strings.TrimSpace(data.Summary)
 	banner.root.RemoveAll()
-	if trimmedText == "" {
+	if nextSummary == "" {
 		banner.label.SetText("")
 		banner.viewButton.Hide()
 		banner.detail = MaterialVariantWarningData{}
 		banner.root.Refresh()
 		return
 	}
-	banner.label.SetText(trimmedText)
+	if banner.ignored {
+		banner.root.Refresh()
+		return
+	}
+	banner.label.SetText(nextSummary)
 	if strings.TrimSpace(data.DetailText) != "" {
 		banner.viewButton.Show()
 	} else {

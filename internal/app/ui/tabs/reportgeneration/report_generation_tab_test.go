@@ -92,7 +92,7 @@ func TestBuildReportSummaryAndPoints(t *testing.T) {
 		},
 	}
 
-	summary, points, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, points, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold, 0)
 
 	if summary.TotalBytes != 22*format.Megabyte {
 		t.Fatalf("expected total bytes %d, got %d", 22*format.Megabyte, summary.TotalBytes)
@@ -164,7 +164,7 @@ func TestBuildReportSummaryAndPointsNoPositions(t *testing.T) {
 		},
 	}
 
-	summary, points, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, points, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold, 0)
 
 	if summary.TotalBytes != 5*format.Megabyte {
 		t.Errorf("expected total bytes %d, got %d", 5*format.Megabyte, summary.TotalBytes)
@@ -223,7 +223,7 @@ func TestBuildReportSummaryAndPointsCountsDuplicatesByUniqueResolvedReference(t 
 		},
 	}
 
-	summary, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, _, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold, 0)
 
 	if summary.ReferenceCount != 3 {
 		t.Fatalf("expected reference count 3, got %d", summary.ReferenceCount)
@@ -284,7 +284,7 @@ func TestBuildReportSummaryAndPointsCountsTrianglesPerMeshInstance(t *testing.T)
 		},
 	}
 
-	summary, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold)
+	summary, _, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, nil, loader.DefaultLargeTextureThreshold, 0)
 
 	if summary.TriangleCount != 246 {
 		t.Fatalf("expected triangle count 246 across two mesh instances, got %d", summary.TriangleCount)
@@ -327,7 +327,7 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 		{InstanceType: "Part", InstancePath: "Workspace.Part2"},
 	}
 
-	summary, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold)
+	summary, _, _, _, _, _ := buildReportSummaryAndPoints(refs, resolved, mapParts, loader.DefaultLargeTextureThreshold, 0)
 
 	if summary.MeshPartCount != 3 {
 		t.Fatalf("expected MeshPartCount 3 from raw map parts, got %d", summary.MeshPartCount)
