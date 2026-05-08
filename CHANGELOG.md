@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.5.0 - 2026-05-08
+
 ### Added
 
 - Scan: right-click any result row for a context menu with `Copy` (Asset ID / Asset Reference / SHA256) and `Tag` (Downscale, Duplicated, Decimate, Atlas, Remove Alpha, Remove). Active tags show in a new `Tags` column. A `HTML Tag Report` button on the scan toolbar then generates a self-contained HTML page with one section per tag, each showing the tagged assets as image cards (asset ID, type, dimensions, GPU texture memory, instance path). Tags live in memory for the session and are not persisted across rescans
