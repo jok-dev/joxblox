@@ -97,10 +97,29 @@ func BuildBaseScanResultFromHit(hit ScanHit) ScanResult {
 		InstanceType:       strings.TrimSpace(hit.InstanceType),
 		InstanceName:       strings.TrimSpace(hit.InstanceName),
 		InstancePath:       strings.TrimSpace(hit.InstancePath),
+		AllInstancePaths:   copyAllInstancePaths(hit.AllInstancePaths),
 		PropertyName:       strings.TrimSpace(hit.PropertyName),
 		SceneSurfaceArea:   hit.SceneSurfaceArea,
 		LargestSurfacePath: strings.TrimSpace(hit.LargestSurfacePath),
 	}
+}
+
+func copyAllInstancePaths(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, path := range in {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func BuildFailedScanResultFromHit(hit ScanHit, loadErr error) ScanResult {

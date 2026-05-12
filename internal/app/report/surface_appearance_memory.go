@@ -11,6 +11,21 @@ const (
 	SAPropertyRoughness = "roughnessmapcontent"
 )
 
+// IsRoutableSAPBRSlot reports whether normalizedProperty (already lowercased)
+// is one of the four PBR slots `slotPointer` can route. Used by callers
+// that need to distinguish "real PBR slot the engine packs" from
+// "anything containing the substring 'mapcontent'" — e.g. EmissiveMask
+// or MaterialVariant.* properties pass IsSurfaceAppearanceProperty but
+// don't enter a slot, so they should be accounted as standalone
+// per-asset textures rather than dropped.
+func IsRoutableSAPBRSlot(normalizedProperty string) bool {
+	switch normalizedProperty {
+	case SAPropertyColor, SAPropertyNormal, SAPropertyMetalness, SAPropertyRoughness:
+		return true
+	}
+	return false
+}
+
 // SurfaceAppearanceMaterialSlots records per-slot source dimensions for
 // one SurfaceAppearance instance. A slot with empty AssetKey or
 // non-positive dimensions means it wasn't authored for that material.

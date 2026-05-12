@@ -12,6 +12,7 @@ import (
 	"joxblox/internal/app/scan"
 	"joxblox/internal/app/ui"
 	"joxblox/internal/app/ui/menu"
+	"joxblox/internal/app/ui/tabs/diff"
 	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/app/ui/tabs/imageuploader"
 	"joxblox/internal/app/ui/tabs/lodviewer"
@@ -109,7 +110,8 @@ func Run() {
 	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, optimizeassets.NewOptimizeAssetsTab(window))
 	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, imageuploader.NewImageUploaderTab(window))
 	renderdocTab := container.NewTabItem(tabTitleRenderDoc, renderdoctab.NewRenderDocTab(window))
-	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, lodViewerTab, optimizeTab, imageUploaderTab, renderdocTab)
+	diffTab := container.NewTabItem(tabTitleDiff, diff.NewDiffTab(window))
+	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, lodViewerTab, optimizeTab, imageUploaderTab, renderdocTab, diffTab)
 	tabs.Select(reportGenerationTab)
 	ui.OpenSingleAsset = func(assetID int64) {
 		tabs.Select(singleAssetTab)

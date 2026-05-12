@@ -473,22 +473,23 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 	previewPanel := container.NewBorder(nil, nil, nil, nil, previewScroll)
 	// Assets vs Materials: the asset-level table shows literal per-asset
 	// uploads (one row per unique scanned asset, raw GPU bytes at authored
-	// size). The Materials sub-tab groups SurfaceAppearance assets into
-	// engine-deduplicated PBR combos so the user can read the engine's
-	// actual GPU footprint (color + upscaled normal + MR pack) — which is
-	// the figure that matches the report tab's headline.
+	// size) alongside the asset-detail preview. The Materials sub-tab
+	// groups SurfaceAppearance assets into engine-deduplicated PBR combos
+	// so the user can read the engine's actual GPU footprint — and ships
+	// its own 4-up Color/Normal/Metalness/Roughness preview pane, so the
+	// asset-detail preview only attaches to the Assets tab.
+	assetsTabContent := container.NewHSplit(explorer.table, previewPanel)
+	assetsTabContent.Offset = 0.62
 	tableTabs := container.NewAppTabs(
-		container.NewTabItem("Assets", explorer.table),
+		container.NewTabItem("Assets", assetsTabContent),
 		container.NewTabItem("Materials", explorer.materialsView.Content()),
 	)
-	split := container.NewHSplit(tableTabs, previewPanel)
-	split.Offset = 0.62
 	explorer.content = container.NewBorder(
 		controls,
 		nil,
 		nil,
 		nil,
-		container.NewBorder(explorer.statusLabel, nil, nil, nil, split),
+		container.NewBorder(explorer.statusLabel, nil, nil, nil, tableTabs),
 	)
 	explorer.updateLargeTextureFilterControls()
 }
@@ -1240,6 +1241,15 @@ func (explorer *ScanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 				}
 				explorer.allResults[index] = selectedResult
 				break
+			}
+			// Lazy-load can be the first time a SurfaceAppearance row
+			// learns its dimensions. The Materials sub-tab keys off
+			// PixelCount/Width/Height so a 0-dim row drops out of the
+			// list — re-run the aggregation now that we have real
+			// dimensions, otherwise the material stays invisible until
+			// some other event triggers SetResults/AppendResults.
+			if explorer.materialsView != nil {
+				explorer.materialsView.Refresh(explorer.allResults)
 			}
 			rootPreview := loader.ScanResultToPreviewResult(selectedResult)
 			explorer.explorerState = ui.NewAssetExplorerState(assetToLoad, rootPreview)

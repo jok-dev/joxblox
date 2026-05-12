@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Cursor, Read};
+use std::io::{BufRead, BufReader, BufWriter, Cursor, Read};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -12,6 +12,7 @@ use rbx_dom_weak::{Instance, WeakDom};
 use rbx_types::{Content, ContentId, Variant};
 use regex::Regex;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 const RAW_ASSET_CONTEXT_WINDOW: usize = 80;
 const PHYSICS_DATA_PROPERTY_TOKEN: &str = "physicsdata";
@@ -198,9 +199,15 @@ fn run() -> Result<(), String> {
     if args.len() >= 2 && args[1] == "replace" {
         return run_replace(&args);
     }
+    if args.len() >= 2 && args[1] == "diff" {
+        return run_diff(&args);
+    }
+    if args.len() >= 2 && args[1] == "copy" {
+        return run_copy(&args);
+    }
     if args.len() < 2 {
         return Err(
-            "usage: joxblox-rusty-asset-tool <rbxl-file> [max-results] [path-prefixes]\n       joxblox-rusty-asset-tool replace <input.rbxl> <output.rbxl> <replacements.json>".to_string(),
+            "usage: joxblox-rusty-asset-tool <rbxl-file> [max-results] [path-prefixes]\n       joxblox-rusty-asset-tool replace <input.rbxl> <output.rbxl> <replacements.json>\n       joxblox-rusty-asset-tool diff <fileA> <fileB> [--ignore-scripts]\n       joxblox-rusty-asset-tool copy <file> <instance-path>".to_string(),
         );
     }
 
@@ -2551,6 +2558,971 @@ fn replace_asset_ids_in_string(text: &str, replacements: &BTreeMap<String, i64>)
         }
     });
     result.into_owned()
+}
+
+// ---------------------------------------------------------------------------
+// `diff` subcommand: compare two rbxl files via instance path.
+// ---------------------------------------------------------------------------
+
+const PROPERTY_DENYLIST: &[&str] = &[
+    // TexturePack is the CDN-wrapper asset reference Roblox writes
+    // alongside material slot textures (see asset type 63). It's not
+    // user-controlled — it changes whenever the server re-wraps a
+    // texture — and surfaces as diff noise on every save.
+    "TexturePack",
+];
+
+const SCRIPT_CLASSES: &[&str] = &[
+    "Script",
+    "LocalScript",
+    "ModuleScript",
+    "CoreScript",
+    "RobloxLuaScript",
+];
+
+const FLOAT_EQUALITY_EPSILON: f64 = 1e-5;
+
+#[derive(Serialize)]
+struct PropValue {
+    #[serde(rename = "type")]
+    ty: &'static str,
+    value: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct DiffInstanceEntry {
+    path: String,
+    class: String,
+    name: String,
+    properties: BTreeMap<String, PropValue>,
+}
+
+#[derive(Serialize)]
+struct PropertyChange {
+    name: String,
+    #[serde(rename = "type")]
+    ty: &'static str,
+    a: PropValue,
+    b: PropValue,
+}
+
+#[derive(Serialize)]
+struct ChangedInstanceEntry {
+    path: String,
+    class: String,
+    name: String,
+    property_changes: Vec<PropertyChange>,
+}
+
+#[derive(Serialize, Default)]
+struct DiffReport {
+    added: Vec<DiffInstanceEntry>,
+    removed: Vec<DiffInstanceEntry>,
+    changed: Vec<ChangedInstanceEntry>,
+}
+
+fn run_diff(args: &[String]) -> Result<(), String> {
+    if args.len() < 4 {
+        return Err(
+            "usage: joxblox-rusty-asset-tool diff <fileA> <fileB> [--ignore-scripts]".to_string(),
+        );
+    }
+    let file_a = &args[2];
+    let file_b = &args[3];
+    let mut ignore_scripts = false;
+    for extra in &args[4..] {
+        match extra.as_str() {
+            "--ignore-scripts" => ignore_scripts = true,
+            other => return Err(format!("unknown diff flag: {}", other)),
+        }
+    }
+
+    let dom_a = load_dom_for_diff(file_a)?;
+    let dom_b = load_dom_for_diff(file_b)?;
+
+    let index_a = build_path_index(&dom_a, ignore_scripts);
+    let index_b = build_path_index(&dom_b, ignore_scripts);
+
+    let mut report = DiffReport::default();
+
+    for (path, ref_a) in &index_a {
+        if !index_b.contains_key(path) {
+            if let Some(instance) = dom_a.get_by_ref(*ref_a) {
+                report
+                    .removed
+                    .push(make_instance_entry(&dom_a, instance, path));
+            }
+        }
+    }
+
+    for (path, ref_b) in &index_b {
+        if !index_a.contains_key(path) {
+            if let Some(instance) = dom_b.get_by_ref(*ref_b) {
+                report
+                    .added
+                    .push(make_instance_entry(&dom_b, instance, path));
+            }
+        }
+    }
+
+    for (path, ref_a) in &index_a {
+        let Some(ref_b) = index_b.get(path) else {
+            continue;
+        };
+        let Some(instance_a) = dom_a.get_by_ref(*ref_a) else {
+            continue;
+        };
+        let Some(instance_b) = dom_b.get_by_ref(*ref_b) else {
+            continue;
+        };
+        let property_changes = collect_property_changes(&dom_a, instance_a, &dom_b, instance_b);
+        let class_changed = instance_a.class.as_str() != instance_b.class.as_str();
+        let name_changed = instance_a.name != instance_b.name;
+        if property_changes.is_empty() && !class_changed && !name_changed {
+            continue;
+        }
+        report.changed.push(ChangedInstanceEntry {
+            path: path.clone(),
+            class: instance_b.class.as_str().to_string(),
+            name: instance_b.name.clone(),
+            property_changes,
+        });
+    }
+
+    let output = serde_json::to_string(&report)
+        .map_err(|json_err| format!("json failed: {}", json_err))?;
+
+    // Always frame the diff response so the Go side can use the same
+    // framed reader for subsequent session commands. After the diff
+    // result is emitted, sit on stdin reading line-delimited JSON
+    // commands until EOF / shutdown — DOMs stay loaded so each copy is
+    // just a `to_writer` on a subtree.
+    let stdout = std::io::stdout();
+    let mut stdout_locked = stdout.lock();
+    write_frame(&mut stdout_locked, FRAME_OK, output.as_bytes())
+        .map_err(|err| format!("write frame failed: {}", err))?;
+
+    run_diff_session_loop(&mut stdout_locked, &dom_a, &dom_b)
+}
+
+const FRAME_OK: u8 = 0x00;
+const FRAME_ERR: u8 = 0x01;
+
+fn write_frame(out: &mut impl std::io::Write, status: u8, payload: &[u8]) -> std::io::Result<()> {
+    out.write_all(&[status])?;
+    let length = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+    out.write_all(&length.to_le_bytes())?;
+    out.write_all(payload)?;
+    out.flush()
+}
+
+#[derive(serde::Deserialize)]
+struct SessionCommand {
+    op: String,
+    #[serde(default)]
+    file: String,
+    #[serde(default)]
+    path: String,
+}
+
+fn run_diff_session_loop(
+    out: &mut impl std::io::Write,
+    dom_a: &WeakDom,
+    dom_b: &WeakDom,
+) -> Result<(), String> {
+    // Build path indices once for copy lookups. We can't reuse the
+    // ignore-scripts-filtered indices from the diff: the user may
+    // right-click a script row when ignore-scripts is off, and we want
+    // the lookup to find it. Use the unfiltered index here.
+    let index_a = build_path_index(dom_a, false);
+    let index_b = build_path_index(dom_b, false);
+
+    let stdin = std::io::stdin();
+    let stdin_locked = stdin.lock();
+    let mut reader = BufReader::new(stdin_locked);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|err| format!("read stdin failed: {}", err))?;
+        if read == 0 {
+            return Ok(());
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let command: SessionCommand = match serde_json::from_str(trimmed) {
+            Ok(value) => value,
+            Err(parse_err) => {
+                let _ = write_frame(
+                    out,
+                    FRAME_ERR,
+                    format!("bad command: {}", parse_err).as_bytes(),
+                );
+                continue;
+            }
+        };
+        match command.op.as_str() {
+            "copy" => {
+                let dom = match command.file.as_str() {
+                    "a" => dom_a,
+                    "b" => dom_b,
+                    other => {
+                        let _ = write_frame(
+                            out,
+                            FRAME_ERR,
+                            format!("unknown file side: {}", other).as_bytes(),
+                        );
+                        continue;
+                    }
+                };
+                let index = match command.file.as_str() {
+                    "a" => &index_a,
+                    _ => &index_b,
+                };
+                let Some(target) = index.get(&command.path).copied() else {
+                    let _ = write_frame(
+                        out,
+                        FRAME_ERR,
+                        format!("path not found: {}", command.path).as_bytes(),
+                    );
+                    continue;
+                };
+                let mut payload: Vec<u8> = Vec::new();
+                if let Err(err) = rbx_binary::to_writer(&mut payload, dom, &[target]) {
+                    let _ = write_frame(
+                        out,
+                        FRAME_ERR,
+                        format!("serialize failed: {}", err).as_bytes(),
+                    );
+                    continue;
+                }
+                if let Err(err) = write_frame(out, FRAME_OK, &payload) {
+                    return Err(format!("write copy frame failed: {}", err));
+                }
+            }
+            "shutdown" => return Ok(()),
+            other => {
+                let _ = write_frame(
+                    out,
+                    FRAME_ERR,
+                    format!("unknown op: {}", other).as_bytes(),
+                );
+            }
+        }
+    }
+}
+
+fn load_dom_for_diff(file_path: &str) -> Result<WeakDom, String> {
+    let file = File::open(file_path)
+        .map_err(|open_err| format!("open {} failed: {}", file_path, open_err))?;
+    from_reader(BufReader::new(file))
+        .map_err(|parse_err| format!("parse {} failed: {}", file_path, parse_err))
+}
+
+// run_copy serialises a single instance subtree from an rbxl into an
+// `.rbxm` binary on stdout. The Diff tab uses this to populate the
+// system clipboard so the user can paste the instance back into Roblox
+// Studio. Identity is the same dot-separated path the diff subcommand
+// emits — reusing `build_path_index` keeps the two in sync, including
+// the [N] suffix for duplicate sibling names.
+fn run_copy(args: &[String]) -> Result<(), String> {
+    if args.len() < 4 {
+        return Err(
+            "usage: joxblox-rusty-asset-tool copy <file> <instance-path>".to_string(),
+        );
+    }
+    let file_path = &args[2];
+    let instance_path = &args[3];
+
+    let dom = load_dom_for_diff(file_path)?;
+    let index = build_path_index(&dom, false);
+    let target = index
+        .get(instance_path)
+        .copied()
+        .ok_or_else(|| format!("instance path not found: {}", instance_path))?;
+
+    let stdout = std::io::stdout();
+    let mut locked = stdout.lock();
+    rbx_binary::to_writer(&mut locked, &dom, &[target])
+        .map_err(|serialize_err| format!("serialize failed: {}", serialize_err))?;
+    Ok(())
+}
+
+fn build_path_index(
+    dom: &WeakDom,
+    ignore_scripts: bool,
+) -> BTreeMap<String, rbx_dom_weak::types::Ref> {
+    let mut index = BTreeMap::new();
+    let root_ref = dom.root_ref();
+    let root = match dom.get_by_ref(root_ref) {
+        Some(root) => root,
+        None => return index,
+    };
+    for child_ref in root.children().iter().copied() {
+        index_subtree(dom, child_ref, "", &mut index, ignore_scripts);
+    }
+    index
+}
+
+fn index_subtree(
+    dom: &WeakDom,
+    instance_ref: rbx_dom_weak::types::Ref,
+    parent_path: &str,
+    index: &mut BTreeMap<String, rbx_dom_weak::types::Ref>,
+    ignore_scripts: bool,
+) {
+    let Some(instance) = dom.get_by_ref(instance_ref) else {
+        return;
+    };
+    if ignore_scripts && is_script_class(instance.class.as_str()) {
+        return;
+    }
+    let segment = make_path_segment(dom, instance);
+    let path = if parent_path.is_empty() {
+        segment
+    } else {
+        format!("{}.{}", parent_path, segment)
+    };
+    index.insert(path.clone(), instance_ref);
+    for child_ref in instance.children().iter().copied() {
+        index_subtree(dom, child_ref, &path, index, ignore_scripts);
+    }
+}
+
+fn make_path_segment(dom: &WeakDom, instance: &Instance) -> String {
+    let parent_ref = instance.parent();
+    let Some(parent) = dom.get_by_ref(parent_ref) else {
+        return instance.name.clone();
+    };
+    let mut sibling_index: usize = 0;
+    let mut total_with_name: usize = 0;
+    let mut found_self = false;
+    for sibling_ref in parent.children().iter().copied() {
+        let Some(sibling) = dom.get_by_ref(sibling_ref) else {
+            continue;
+        };
+        if sibling.name != instance.name {
+            continue;
+        }
+        if sibling_ref == instance.referent() {
+            sibling_index = total_with_name;
+            found_self = true;
+        }
+        total_with_name += 1;
+    }
+    if !found_self || total_with_name <= 1 {
+        return instance.name.clone();
+    }
+    format!("{}[{}]", instance.name, sibling_index)
+}
+
+fn is_script_class(class_name: &str) -> bool {
+    SCRIPT_CLASSES.iter().any(|candidate| *candidate == class_name)
+}
+
+fn make_instance_entry(dom: &WeakDom, instance: &Instance, path: &str) -> DiffInstanceEntry {
+    let mut properties = BTreeMap::new();
+    for (property_name, property_value) in instance.properties.iter() {
+        let name_str = property_name.as_str();
+        if PROPERTY_DENYLIST.iter().any(|denied| *denied == name_str) {
+            continue;
+        }
+        properties.insert(name_str.to_string(), variant_to_propvalue(dom, property_value));
+    }
+    DiffInstanceEntry {
+        path: path.to_string(),
+        class: instance.class.as_str().to_string(),
+        name: instance.name.clone(),
+        properties,
+    }
+}
+
+fn collect_property_changes(
+    dom_a: &WeakDom,
+    instance_a: &Instance,
+    dom_b: &WeakDom,
+    instance_b: &Instance,
+) -> Vec<PropertyChange> {
+    let mut all_names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (property_name, _value) in instance_a.properties.iter() {
+        all_names.insert(property_name.as_str().to_string());
+    }
+    for (property_name, _value) in instance_b.properties.iter() {
+        all_names.insert(property_name.as_str().to_string());
+    }
+
+    let mut changes = Vec::new();
+    for name in all_names {
+        if PROPERTY_DENYLIST.iter().any(|denied| *denied == name.as_str()) {
+            continue;
+        }
+        let value_a = lookup_property(instance_a, &name);
+        let value_b = lookup_property(instance_b, &name);
+        match (value_a, value_b) {
+            (Some(va), Some(vb)) => {
+                if !variants_equal(dom_a, va, dom_b, vb) {
+                    let a_prop = variant_to_propvalue(dom_a, va);
+                    let b_prop = variant_to_propvalue(dom_b, vb);
+                    let ty = b_prop.ty;
+                    changes.push(PropertyChange {
+                        name,
+                        ty,
+                        a: a_prop,
+                        b: b_prop,
+                    });
+                }
+            }
+            (Some(va), None) => {
+                let a_prop = variant_to_propvalue(dom_a, va);
+                let ty = a_prop.ty;
+                changes.push(PropertyChange {
+                    name,
+                    ty,
+                    a: a_prop,
+                    b: PropValue {
+                        ty: "Absent",
+                        value: serde_json::Value::Null,
+                    },
+                });
+            }
+            (None, Some(vb)) => {
+                let b_prop = variant_to_propvalue(dom_b, vb);
+                let ty = b_prop.ty;
+                changes.push(PropertyChange {
+                    name,
+                    ty,
+                    a: PropValue {
+                        ty: "Absent",
+                        value: serde_json::Value::Null,
+                    },
+                    b: b_prop,
+                });
+            }
+            (None, None) => {}
+        }
+    }
+    changes
+}
+
+fn lookup_property<'a>(instance: &'a Instance, name: &str) -> Option<&'a Variant> {
+    instance
+        .properties
+        .iter()
+        .find(|(prop_name, _)| prop_name.as_str() == name)
+        .map(|(_, value)| value)
+}
+
+fn variant_to_propvalue(dom: &WeakDom, value: &Variant) -> PropValue {
+    use serde_json::{json, Value};
+    match value {
+        Variant::Bool(b) => PropValue {
+            ty: "Bool",
+            value: json!(*b),
+        },
+        Variant::Int32(n) => PropValue {
+            ty: "Int32",
+            value: json!(*n),
+        },
+        Variant::Int64(n) => PropValue {
+            ty: "Int64",
+            value: json!(*n),
+        },
+        Variant::Float32(n) => PropValue {
+            ty: "Float32",
+            value: float_to_json_value(*n as f64),
+        },
+        Variant::Float64(n) => PropValue {
+            ty: "Float64",
+            value: float_to_json_value(*n),
+        },
+        Variant::String(s) => PropValue {
+            ty: "String",
+            value: json!(s),
+        },
+        Variant::Color3(c) => PropValue {
+            ty: "Color3",
+            value: json!([
+                float_to_json_value(c.r as f64),
+                float_to_json_value(c.g as f64),
+                float_to_json_value(c.b as f64)
+            ]),
+        },
+        Variant::Color3uint8(c) => PropValue {
+            ty: "Color3uint8",
+            value: json!([c.r, c.g, c.b]),
+        },
+        Variant::Vector2(v) => PropValue {
+            ty: "Vector2",
+            value: json!([
+                float_to_json_value(v.x as f64),
+                float_to_json_value(v.y as f64)
+            ]),
+        },
+        Variant::Vector3(v) => PropValue {
+            ty: "Vector3",
+            value: json!([
+                float_to_json_value(v.x as f64),
+                float_to_json_value(v.y as f64),
+                float_to_json_value(v.z as f64)
+            ]),
+        },
+        Variant::Vector3int16(v) => PropValue {
+            ty: "Vector3int16",
+            value: json!([v.x, v.y, v.z]),
+        },
+        Variant::UDim(u) => PropValue {
+            ty: "UDim",
+            value: json!([float_to_json_value(u.scale as f64), u.offset]),
+        },
+        Variant::UDim2(u) => PropValue {
+            ty: "UDim2",
+            value: json!([
+                float_to_json_value(u.x.scale as f64),
+                u.x.offset,
+                float_to_json_value(u.y.scale as f64),
+                u.y.offset
+            ]),
+        },
+        Variant::CFrame(cf) => PropValue {
+            ty: "CFrame",
+            value: cframe_to_json(cf),
+        },
+        Variant::OptionalCFrame(opt) => PropValue {
+            ty: "OptionalCFrame",
+            value: match opt {
+                Some(cf) => cframe_to_json(cf),
+                None => Value::Null,
+            },
+        },
+        Variant::Enum(e) => PropValue {
+            ty: "EnumValue",
+            value: json!(e.to_u32()),
+        },
+        Variant::EnumItem(item) => PropValue {
+            ty: "EnumValue",
+            value: json!({ "type": item.ty, "value": item.value }),
+        },
+        Variant::ContentId(c) => PropValue {
+            ty: "ContentId",
+            value: json!(c.as_str()),
+        },
+        Variant::Content(c) => {
+            use rbx_types::ContentType;
+            match c.value() {
+                ContentType::None => PropValue {
+                    ty: "Content",
+                    value: Value::Null,
+                },
+                ContentType::Uri(uri) => PropValue {
+                    ty: "Content",
+                    value: json!({ "uri": uri }),
+                },
+                ContentType::Object(r) => PropValue {
+                    ty: "Content",
+                    value: json!({ "object": resolve_ref_path(dom, *r) }),
+                },
+                _ => PropValue {
+                    ty: "Content",
+                    value: Value::Null,
+                },
+            }
+        }
+        Variant::BrickColor(bc) => PropValue {
+            ty: "BrickColor",
+            value: json!(*bc as u16),
+        },
+        Variant::NumberRange(n) => PropValue {
+            ty: "NumberRange",
+            value: json!([
+                float_to_json_value(n.min as f64),
+                float_to_json_value(n.max as f64)
+            ]),
+        },
+        Variant::NumberSequence(ns) => PropValue {
+            ty: "NumberSequence",
+            value: Value::Array(
+                ns.keypoints
+                    .iter()
+                    .map(|kp| {
+                        json!([
+                            float_to_json_value(kp.time as f64),
+                            float_to_json_value(kp.value as f64),
+                            float_to_json_value(kp.envelope as f64)
+                        ])
+                    })
+                    .collect(),
+            ),
+        },
+        Variant::ColorSequence(cs) => PropValue {
+            ty: "ColorSequence",
+            value: Value::Array(
+                cs.keypoints
+                    .iter()
+                    .map(|kp| {
+                        json!([
+                            float_to_json_value(kp.time as f64),
+                            float_to_json_value(kp.color.r as f64),
+                            float_to_json_value(kp.color.g as f64),
+                            float_to_json_value(kp.color.b as f64)
+                        ])
+                    })
+                    .collect(),
+            ),
+        },
+        Variant::Ray(ray) => PropValue {
+            ty: "Ray",
+            value: json!([
+                float_to_json_value(ray.origin.x as f64),
+                float_to_json_value(ray.origin.y as f64),
+                float_to_json_value(ray.origin.z as f64),
+                float_to_json_value(ray.direction.x as f64),
+                float_to_json_value(ray.direction.y as f64),
+                float_to_json_value(ray.direction.z as f64)
+            ]),
+        },
+        Variant::Rect(rect) => PropValue {
+            ty: "Rect",
+            value: json!([
+                float_to_json_value(rect.min.x as f64),
+                float_to_json_value(rect.min.y as f64),
+                float_to_json_value(rect.max.x as f64),
+                float_to_json_value(rect.max.y as f64)
+            ]),
+        },
+        Variant::Faces(f) => PropValue {
+            ty: "Faces",
+            value: json!(faces_to_strings(*f)),
+        },
+        Variant::Axes(a) => PropValue {
+            ty: "Axes",
+            value: json!(axes_to_strings(*a)),
+        },
+        Variant::Attributes(attrs) => PropValue {
+            ty: "Attributes",
+            value: attributes_to_json(dom, attrs),
+        },
+        Variant::Tags(tags) => {
+            let mut list: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
+            list.sort();
+            PropValue {
+                ty: "Tags",
+                value: json!(list),
+            }
+        }
+        Variant::Ref(r) => PropValue {
+            ty: "Ref",
+            value: match resolve_ref_path(dom, *r) {
+                Some(path) => json!(path),
+                None => Value::Null,
+            },
+        },
+        Variant::BinaryString(bs) => PropValue {
+            ty: "BinaryString",
+            value: json!(hex_sha256(bs.as_ref())),
+        },
+        Variant::SharedString(ss) => PropValue {
+            ty: "SharedString",
+            value: json!(hex_sha256(ss.data())),
+        },
+        _ => PropValue {
+            ty: "Unknown",
+            value: Value::Null,
+        },
+    }
+}
+
+fn cframe_to_json(cf: &rbx_types::CFrame) -> serde_json::Value {
+    serde_json::json!([
+        float_to_json_value(cf.position.x as f64),
+        float_to_json_value(cf.position.y as f64),
+        float_to_json_value(cf.position.z as f64),
+        float_to_json_value(cf.orientation.x.x as f64),
+        float_to_json_value(cf.orientation.x.y as f64),
+        float_to_json_value(cf.orientation.x.z as f64),
+        float_to_json_value(cf.orientation.y.x as f64),
+        float_to_json_value(cf.orientation.y.y as f64),
+        float_to_json_value(cf.orientation.y.z as f64),
+        float_to_json_value(cf.orientation.z.x as f64),
+        float_to_json_value(cf.orientation.z.y as f64),
+        float_to_json_value(cf.orientation.z.z as f64),
+    ])
+}
+
+fn faces_to_strings(faces: rbx_types::Faces) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if faces.contains(rbx_types::Faces::RIGHT) {
+        out.push("Right");
+    }
+    if faces.contains(rbx_types::Faces::TOP) {
+        out.push("Top");
+    }
+    if faces.contains(rbx_types::Faces::BACK) {
+        out.push("Back");
+    }
+    if faces.contains(rbx_types::Faces::LEFT) {
+        out.push("Left");
+    }
+    if faces.contains(rbx_types::Faces::BOTTOM) {
+        out.push("Bottom");
+    }
+    if faces.contains(rbx_types::Faces::FRONT) {
+        out.push("Front");
+    }
+    out
+}
+
+fn axes_to_strings(axes: rbx_types::Axes) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    if axes.contains(rbx_types::Axes::X) {
+        out.push("X");
+    }
+    if axes.contains(rbx_types::Axes::Y) {
+        out.push("Y");
+    }
+    if axes.contains(rbx_types::Axes::Z) {
+        out.push("Z");
+    }
+    out
+}
+
+fn attributes_to_json(dom: &WeakDom, attrs: &rbx_types::Attributes) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (key, value) in attrs.iter() {
+        let entry = variant_to_propvalue(dom, value);
+        map.insert(
+            key.clone(),
+            serde_json::json!({ "type": entry.ty, "value": entry.value }),
+        );
+    }
+    serde_json::Value::Object(map)
+}
+
+fn resolve_ref_path(dom: &WeakDom, target: rbx_types::Ref) -> Option<String> {
+    let instance = dom.get_by_ref(target)?;
+    Some(build_instance_path(dom, instance))
+}
+
+fn float_to_json_value(value: f64) -> serde_json::Value {
+    if value.is_finite() {
+        match serde_json::Number::from_f64(value) {
+            Some(number) => serde_json::Value::Number(number),
+            None => serde_json::Value::Null,
+        }
+    } else {
+        serde_json::Value::String(if value.is_nan() {
+            "NaN".to_string()
+        } else if value > 0.0 {
+            "+Inf".to_string()
+        } else {
+            "-Inf".to_string()
+        })
+    }
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in digest.iter() {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn floats_close(a: f64, b: f64) -> bool {
+    if a.is_nan() && b.is_nan() {
+        return true;
+    }
+    if !a.is_finite() || !b.is_finite() {
+        return a == b;
+    }
+    (a - b).abs() <= FLOAT_EQUALITY_EPSILON
+}
+
+fn vector2_close(a: &rbx_types::Vector2, b: &rbx_types::Vector2) -> bool {
+    floats_close(a.x as f64, b.x as f64) && floats_close(a.y as f64, b.y as f64)
+}
+
+fn vector3_close(a: &rbx_types::Vector3, b: &rbx_types::Vector3) -> bool {
+    floats_close(a.x as f64, b.x as f64)
+        && floats_close(a.y as f64, b.y as f64)
+        && floats_close(a.z as f64, b.z as f64)
+}
+
+fn cframe_close(a: &rbx_types::CFrame, b: &rbx_types::CFrame) -> bool {
+    vector3_close(&a.position, &b.position)
+        && vector3_close(&a.orientation.x, &b.orientation.x)
+        && vector3_close(&a.orientation.y, &b.orientation.y)
+        && vector3_close(&a.orientation.z, &b.orientation.z)
+}
+
+fn udim_close(a: &rbx_types::UDim, b: &rbx_types::UDim) -> bool {
+    floats_close(a.scale as f64, b.scale as f64) && a.offset == b.offset
+}
+
+fn variants_equal(dom_a: &WeakDom, a: &Variant, dom_b: &WeakDom, b: &Variant) -> bool {
+    use rbx_types::ContentType;
+    match (a, b) {
+        (Variant::Bool(x), Variant::Bool(y)) => x == y,
+        (Variant::Int32(x), Variant::Int32(y)) => x == y,
+        (Variant::Int64(x), Variant::Int64(y)) => x == y,
+        (Variant::Float32(x), Variant::Float32(y)) => floats_close(*x as f64, *y as f64),
+        (Variant::Float64(x), Variant::Float64(y)) => floats_close(*x, *y),
+        (Variant::String(x), Variant::String(y)) => x == y,
+        (Variant::Color3(x), Variant::Color3(y)) => {
+            floats_close(x.r as f64, y.r as f64)
+                && floats_close(x.g as f64, y.g as f64)
+                && floats_close(x.b as f64, y.b as f64)
+        }
+        (Variant::Color3uint8(x), Variant::Color3uint8(y)) => x == y,
+        (Variant::Vector2(x), Variant::Vector2(y)) => vector2_close(x, y),
+        (Variant::Vector3(x), Variant::Vector3(y)) => vector3_close(x, y),
+        (Variant::Vector3int16(x), Variant::Vector3int16(y)) => x == y,
+        (Variant::UDim(x), Variant::UDim(y)) => udim_close(x, y),
+        (Variant::UDim2(x), Variant::UDim2(y)) => udim_close(&x.x, &y.x) && udim_close(&x.y, &y.y),
+        (Variant::CFrame(x), Variant::CFrame(y)) => cframe_close(x, y),
+        (Variant::OptionalCFrame(x), Variant::OptionalCFrame(y)) => match (x, y) {
+            (Some(xa), Some(yb)) => cframe_close(xa, yb),
+            (None, None) => true,
+            _ => false,
+        },
+        (Variant::Enum(x), Variant::Enum(y)) => x.to_u32() == y.to_u32(),
+        (Variant::EnumItem(x), Variant::EnumItem(y)) => x.ty == y.ty && x.value == y.value,
+        (Variant::ContentId(x), Variant::ContentId(y)) => x.as_str() == y.as_str(),
+        (Variant::Content(x), Variant::Content(y)) => match (x.value(), y.value()) {
+            (ContentType::None, ContentType::None) => true,
+            (ContentType::Uri(ux), ContentType::Uri(uy)) => ux == uy,
+            (ContentType::Object(rx), ContentType::Object(ry)) => {
+                resolve_ref_path(dom_a, *rx) == resolve_ref_path(dom_b, *ry)
+            }
+            _ => false,
+        },
+        (Variant::BrickColor(x), Variant::BrickColor(y)) => x == y,
+        (Variant::NumberRange(x), Variant::NumberRange(y)) => {
+            floats_close(x.min as f64, y.min as f64) && floats_close(x.max as f64, y.max as f64)
+        }
+        (Variant::NumberSequence(x), Variant::NumberSequence(y)) => {
+            if x.keypoints.len() != y.keypoints.len() {
+                return false;
+            }
+            x.keypoints.iter().zip(y.keypoints.iter()).all(|(kx, ky)| {
+                floats_close(kx.time as f64, ky.time as f64)
+                    && floats_close(kx.value as f64, ky.value as f64)
+                    && floats_close(kx.envelope as f64, ky.envelope as f64)
+            })
+        }
+        (Variant::ColorSequence(x), Variant::ColorSequence(y)) => {
+            if x.keypoints.len() != y.keypoints.len() {
+                return false;
+            }
+            x.keypoints.iter().zip(y.keypoints.iter()).all(|(kx, ky)| {
+                floats_close(kx.time as f64, ky.time as f64)
+                    && floats_close(kx.color.r as f64, ky.color.r as f64)
+                    && floats_close(kx.color.g as f64, ky.color.g as f64)
+                    && floats_close(kx.color.b as f64, ky.color.b as f64)
+            })
+        }
+        (Variant::Ray(x), Variant::Ray(y)) => {
+            vector3_close(&x.origin, &y.origin) && vector3_close(&x.direction, &y.direction)
+        }
+        (Variant::Rect(x), Variant::Rect(y)) => {
+            vector2_close(&x.min, &y.min) && vector2_close(&x.max, &y.max)
+        }
+        (Variant::Faces(x), Variant::Faces(y)) => x == y,
+        (Variant::Axes(x), Variant::Axes(y)) => x == y,
+        (Variant::Attributes(x), Variant::Attributes(y)) => {
+            let mut entries_x: Vec<(&String, &Variant)> = x.iter().collect();
+            let mut entries_y: Vec<(&String, &Variant)> = y.iter().collect();
+            entries_x.sort_by(|a, b| a.0.cmp(b.0));
+            entries_y.sort_by(|a, b| a.0.cmp(b.0));
+            if entries_x.len() != entries_y.len() {
+                return false;
+            }
+            entries_x
+                .iter()
+                .zip(entries_y.iter())
+                .all(|((kx, vx), (ky, vy))| kx == ky && variants_equal(dom_a, vx, dom_b, vy))
+        }
+        (Variant::Tags(x), Variant::Tags(y)) => {
+            let mut tags_x: Vec<&str> = x.iter().collect();
+            let mut tags_y: Vec<&str> = y.iter().collect();
+            tags_x.sort();
+            tags_y.sort();
+            tags_x == tags_y
+        }
+        (Variant::Ref(x), Variant::Ref(y)) => resolve_ref_path(dom_a, *x) == resolve_ref_path(dom_b, *y),
+        (Variant::BinaryString(x), Variant::BinaryString(y)) => {
+            hex_sha256(x.as_ref()) == hex_sha256(y.as_ref())
+        }
+        (Variant::SharedString(x), Variant::SharedString(y)) => {
+            hex_sha256(x.data()) == hex_sha256(y.data())
+        }
+        // For variants we don't model explicitly, fall back to comparing
+        // their serialized PropValue. Both sides serialize to `Unknown` for
+        // truly unknown kinds, so identical-kind unknowns compare equal
+        // rather than appearing as spurious diffs.
+        (lhs, rhs) => {
+            if variant_discriminant(lhs) != variant_discriminant(rhs) {
+                return false;
+            }
+            let lhs_value = variant_to_propvalue(dom_a, lhs);
+            let rhs_value = variant_to_propvalue(dom_b, rhs);
+            lhs_value.ty == rhs_value.ty && lhs_value.value == rhs_value.value
+        }
+    }
+}
+
+fn variant_discriminant(v: &Variant) -> &'static str {
+    match v {
+        Variant::Attributes(_) => "Attributes",
+        Variant::Axes(_) => "Axes",
+        Variant::BinaryString(_) => "BinaryString",
+        Variant::Bool(_) => "Bool",
+        Variant::BrickColor(_) => "BrickColor",
+        Variant::CFrame(_) => "CFrame",
+        Variant::Color3(_) => "Color3",
+        Variant::Color3uint8(_) => "Color3uint8",
+        Variant::ColorSequence(_) => "ColorSequence",
+        Variant::Content(_) => "Content",
+        Variant::ContentId(_) => "ContentId",
+        Variant::Enum(_) => "Enum",
+        Variant::EnumItem(_) => "EnumItem",
+        Variant::Faces(_) => "Faces",
+        Variant::Float32(_) => "Float32",
+        Variant::Float64(_) => "Float64",
+        Variant::Font(_) => "Font",
+        Variant::Int32(_) => "Int32",
+        Variant::Int64(_) => "Int64",
+        Variant::MaterialColors(_) => "MaterialColors",
+        Variant::NumberRange(_) => "NumberRange",
+        Variant::NumberSequence(_) => "NumberSequence",
+        Variant::OptionalCFrame(_) => "OptionalCFrame",
+        Variant::PhysicalProperties(_) => "PhysicalProperties",
+        Variant::Ray(_) => "Ray",
+        Variant::Rect(_) => "Rect",
+        Variant::Ref(_) => "Ref",
+        Variant::Region3(_) => "Region3",
+        Variant::Region3int16(_) => "Region3int16",
+        Variant::SecurityCapabilities(_) => "SecurityCapabilities",
+        Variant::SharedString(_) => "SharedString",
+        Variant::String(_) => "String",
+        Variant::Tags(_) => "Tags",
+        Variant::UDim(_) => "UDim",
+        Variant::UDim2(_) => "UDim2",
+        Variant::UniqueId(_) => "UniqueId",
+        Variant::Vector2(_) => "Vector2",
+        Variant::Vector2int16(_) => "Vector2int16",
+        Variant::Vector3(_) => "Vector3",
+        Variant::Vector3int16(_) => "Vector3int16",
+        Variant::NetAssetRef(_) => "NetAssetRef",
+        _ => "Other",
+    }
 }
 
 #[cfg(test)]

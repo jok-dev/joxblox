@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
+	"joxblox/internal/format"
 )
 
 // ScanMaterialEntry summarises one engine-deduplicated PBR material — i.e.
@@ -64,6 +66,15 @@ type ScanMaterialEntry struct {
 	// resolution — same definition as the report's Mismatched PBR Maps
 	// grade.
 	Mismatched bool
+
+	// LooseImage is true when this entry isn't a SurfaceAppearance combo
+	// — it's a single-asset Image referenced by a Decal, Texture,
+	// ImageLabel, MeshPart.TextureID, etc. Only the Color slot is
+	// populated (NormalAssetID / MetalnessAssetID / RoughnessAssetID
+	// stay zero, NormalBytes / MRPackBytes stay zero). Surfaced in the
+	// Materials sub-tab so users see every image-bearing asset in one
+	// place; not used by the report-tab grades.
+	LooseImage bool
 }
 
 // CollectScanMaterialEntries groups SurfaceAppearance scan rows into one
@@ -283,22 +294,53 @@ func CollectScanMaterialReport(rows []loader.ScanResult) ([]ScanMaterialEntry, i
 		}
 	}
 	var headlineTotal int64
+	var colorBytes, colorBC3Bytes int64
+	colorBC3Count := 0
 	for key, color := range uniqueColors {
 		meta := metaByKey[key]
 		isBC3 := loader.ClassifyAsBC3(meta.hasAlphaChannel, meta.nonOpaqueAlphaPixels, meta.propertyName)
-		headlineTotal += EstimateGPUTextureBytesExact(color.Width, color.Height, isBC3)
+		bytes := EstimateGPUTextureBytesExact(color.Width, color.Height, isBC3)
+		colorBytes += bytes
+		if isBC3 {
+			colorBC3Bytes += bytes
+			colorBC3Count++
+		}
+		headlineTotal += bytes
+		debug.Logf("[Materials-asset] kind=color key=%q id=%d isBC3=%t %dx%d → %s",
+			key, meta.assetID, isBC3, color.Width, color.Height, format.FormatSizeAuto64(bytes))
 	}
+	var normalBytes int64
+	upscaledNormalCount := 0
 	for assetKey, normal := range normalsByKey {
 		w, h := normal.source.width, normal.source.height
-		if normal.maxPairedColor.pixels > normal.source.pixels {
+		upscaled := normal.maxPairedColor.pixels > normal.source.pixels
+		if upscaled {
 			w, h = normal.maxPairedColor.width, normal.maxPairedColor.height
+			upscaledNormalCount++
 		}
-		headlineTotal += EstimateGPUTextureBytesExact(w, h, true)
-		_ = assetKey
+		bytes := EstimateGPUTextureBytesExact(w, h, true)
+		normalBytes += bytes
+		headlineTotal += bytes
+		debug.Logf("[Materials-asset] kind=normal key=%q id=%d upscaled=%t %dx%d → %s",
+			assetKey, metaByKey[assetKey].assetID, upscaled, w, h, format.FormatSizeAuto64(bytes))
 	}
-	for _, pack := range packsByKey {
-		headlineTotal += EstimateGPUTextureBytesExact(pack.width, pack.height, false)
+	var packBytes int64
+	for groupKey, pack := range packsByKey {
+		bytes := EstimateGPUTextureBytesExact(pack.width, pack.height, false)
+		packBytes += bytes
+		headlineTotal += bytes
+		debug.Logf("[Materials-asset] kind=mr-pack groupKey=%q %dx%d → %s",
+			groupKey, pack.width, pack.height, format.FormatSizeAuto64(bytes))
 	}
+	debug.Logf(
+		"[Materials] PBR engine breakdown: %d SA bundles → %d unique colors (%s; %d BC3 = %s) + %d unique normals (%s, %d upscaled) + %d unique MR packs (%s) = %s headline",
+		len(materials),
+		len(uniqueColors), format.FormatSizeAuto64(colorBytes),
+		colorBC3Count, format.FormatSizeAuto64(colorBC3Bytes),
+		len(normalsByKey), format.FormatSizeAuto64(normalBytes), upscaledNormalCount,
+		len(packsByKey), format.FormatSizeAuto64(packBytes),
+		format.FormatSizeAuto64(headlineTotal),
+	)
 	return out, headlineTotal
 }
 
@@ -309,6 +351,158 @@ func CollectScanMaterialReport(rows []loader.ScanResult) ([]ScanMaterialEntry, i
 func TotalScanMaterialGPUBytes(rows []loader.ScanResult) int64 {
 	_, total := CollectScanMaterialReport(rows)
 	return total
+}
+
+// CollectScanMaterialAndImageReport returns the PBR entries from
+// CollectScanMaterialReport plus single-slot entries for every Image
+// asset that isn't already represented in the PBR list — Decal.Texture,
+// Texture.Texture, ImageLabel/ImageButton.Image, MeshPart.TextureID,
+// Sky / ParticleEmitter / Beam / Trail textures, etc. The Materials
+// sub-tab uses this so users see every image-bearing asset in one place,
+// even ones that aren't strictly PBR materials.
+//
+// Loose entries fill the Color slot only; Normal/Metalness/Roughness
+// asset IDs stay zero and NormalBytes / MRPackBytes stay zero. The
+// returned headline includes both PBR engine bytes (deduped per the PBR
+// model) AND each unique loose-image asset's color bytes — so the
+// "Engine GPU memory" stat lines up with the sum of GPU Memory cells
+// shown in the table.
+func CollectScanMaterialAndImageReport(rows []loader.ScanResult) ([]ScanMaterialEntry, int64) {
+	pbrEntries, pbrHeadline := CollectScanMaterialReport(rows)
+	seen := map[int64]bool{}
+	for _, e := range pbrEntries {
+		if e.ColorAssetID > 0 {
+			seen[e.ColorAssetID] = true
+		}
+		if e.NormalAssetID > 0 {
+			seen[e.NormalAssetID] = true
+		}
+		if e.MetalnessAssetID > 0 {
+			seen[e.MetalnessAssetID] = true
+		}
+		if e.RoughnessAssetID > 0 {
+			seen[e.RoughnessAssetID] = true
+		}
+	}
+	type looseAgg struct {
+		entry   ScanMaterialEntry
+		minPath string
+		count   int
+	}
+	looseByID := map[int64]*looseAgg{}
+	for _, row := range rows {
+		if row.AssetID <= 0 {
+			continue
+		}
+		// Match the Report tab's GPU Texture Memory accounting: any
+		// loaded asset with positive pixel dimensions contributes,
+		// regardless of `AssetTypeName`. Thumbnail-loaded assets
+		// (`Thumbnail`), assets pending type resolution (`Unknown`),
+		// or anything else with decoded image bytes still occupies
+		// engine VRAM, so anchoring on `PixelCount > 0` keeps the
+		// Materials headline aligned with the Report headline.
+		if row.PixelCount <= 0 || row.Width <= 0 || row.Height <= 0 {
+			continue
+		}
+		normalizedProperty := strings.ToLower(strings.TrimSpace(row.PropertyName))
+		// Only skip rows whose property is one of the 4 routable PBR
+		// slots — those are the assets buildScanResultMaterialsMap
+		// actually placed into a Color/Normal/M/R slot and are
+		// therefore already accounted for in `pbrEntries`. Anything
+		// else with `mapcontent` in its name (`MaterialVariant.*`,
+		// `EmissiveMaskContent`, etc.) passes IsSurfaceAppearanceProperty
+		// but slotPointer can't route it into a slot, so the PBR
+		// pipeline silently drops the asset — count those as loose
+		// images so they still contribute to the Materials headline.
+		if IsRoutableSAPBRSlot(normalizedProperty) {
+			continue
+		}
+		if seen[row.AssetID] {
+			continue
+		}
+		path := strings.TrimSpace(row.InstancePath)
+		agg, ok := looseByID[row.AssetID]
+		if !ok {
+			isBC3 := loader.ClassifyAsBC3(row.HasAlphaChannel, row.NonOpaqueAlphaPixels, row.PropertyName)
+			agg = &looseAgg{
+				entry: ScanMaterialEntry{
+					ColorAssetID: row.AssetID,
+					ColorWidth:   row.Width,
+					ColorHeight:  row.Height,
+					ColorBytes:   EstimateGPUTextureBytesExact(row.Width, row.Height, isBC3),
+					LooseImage:   true,
+				},
+				minPath: path,
+			}
+			looseByID[row.AssetID] = agg
+		}
+		agg.count++
+		if path != "" && (agg.minPath == "" || path < agg.minPath) {
+			agg.minPath = path
+		}
+	}
+	out := make([]ScanMaterialEntry, 0, len(pbrEntries)+len(looseByID))
+	out = append(out, pbrEntries...)
+	var looseHeadline int64
+	skippedNoDims := 0
+	skippedRoutablePBR := 0
+	skippedAlreadyInPBR := 0
+	skippedZeroAssetID := 0
+	candidateCount := 0
+	for _, row := range rows {
+		if row.AssetID <= 0 {
+			skippedZeroAssetID++
+			continue
+		}
+		if row.PixelCount <= 0 || row.Width <= 0 || row.Height <= 0 {
+			skippedNoDims++
+			continue
+		}
+		normalizedProperty := strings.ToLower(strings.TrimSpace(row.PropertyName))
+		if IsRoutableSAPBRSlot(normalizedProperty) {
+			skippedRoutablePBR++
+			continue
+		}
+		if seen[row.AssetID] {
+			skippedAlreadyInPBR++
+			continue
+		}
+		candidateCount++
+	}
+	for assetID, agg := range looseByID {
+		entry := agg.entry
+		entry.InstanceCount = agg.count
+		entry.InstancePath = agg.minPath
+		out = append(out, entry)
+		looseHeadline += entry.ColorBytes
+		debug.Logf("[Materials-asset] kind=loose id=%d %dx%d refs=%d → %s",
+			assetID, entry.ColorWidth, entry.ColorHeight, entry.InstanceCount, format.FormatSizeAuto64(entry.ColorBytes))
+	}
+	debug.Logf(
+		"[Materials] Loose-image augmentation: %d unique loose assets totaling %s (skipped: %d zero-assetID, %d no-dims, %d routable-PBR-slot, %d already-in-PBR; %d candidates remain → %d unique after assetID dedup)",
+		len(looseByID), format.FormatSizeAuto64(looseHeadline),
+		skippedZeroAssetID, skippedNoDims, skippedRoutablePBR, skippedAlreadyInPBR,
+		candidateCount, len(looseByID),
+	)
+	debug.Logf(
+		"[Materials] Final headline: PBR %s + loose %s = %s (across %d total rows in)",
+		format.FormatSizeAuto64(pbrHeadline),
+		format.FormatSizeAuto64(looseHeadline),
+		format.FormatSizeAuto64(pbrHeadline+looseHeadline),
+		len(rows),
+	)
+	sort.Slice(out, func(i, j int) bool {
+		iTotal := out[i].ColorBytes + out[i].NormalBytes + out[i].MRPackBytes
+		jTotal := out[j].ColorBytes + out[j].NormalBytes + out[j].MRPackBytes
+		if iTotal != jTotal {
+			return iTotal > jTotal
+		}
+		if out[i].InstanceCount != out[j].InstanceCount {
+			return out[i].InstanceCount > out[j].InstanceCount
+		}
+		return out[i].InstancePath < out[j].InstancePath
+	})
+	return out, pbrHeadline + looseHeadline
 }
 
 // buildScanResultMaterialsMap groups SurfaceAppearance texture rows by the
@@ -323,23 +517,67 @@ func buildScanResultMaterialsMap(rows []loader.ScanResult) map[string]SurfaceApp
 		if row.PixelCount <= 0 || row.Width <= 0 || row.Height <= 0 {
 			continue
 		}
-		instancePath := strings.TrimSpace(row.InstancePath)
-		if instancePath == "" {
-			continue
-		}
 		normalizedProperty := strings.ToLower(strings.TrimSpace(row.PropertyName))
 		if !IsSurfaceAppearanceProperty(normalizedProperty, row.InstanceType) {
 			continue
 		}
-		slots := out[instancePath]
+		// ScanResult dedupes per (AssetID, AssetInput) so a Color asset
+		// referenced by 5 SurfaceAppearance instances collapses into a
+		// single row whose primary InstancePath is one of the 5. Walk
+		// AllInstancePaths (when set) so every owning SA gets the slot
+		// assignment and the engine-model headline (MR packs, normal
+		// upscaling) sees the full per-bundle picture instead of just
+		// the primary path's bundle.
+		paths := materialPathsForRow(row)
+		if len(paths) == 0 {
+			continue
+		}
 		slot := SurfaceAppearanceMaterialSlot{
 			AssetKey:   extractor.AssetReferenceKey(row.AssetID, row.AssetInput),
 			Width:      row.Width,
 			Height:     row.Height,
 			PixelCount: row.PixelCount,
 		}
-		slots.TryAssignByProperty(normalizedProperty, slot)
-		out[instancePath] = slots
+		for _, instancePath := range paths {
+			slots := out[instancePath]
+			slots.TryAssignByProperty(normalizedProperty, slot)
+			out[instancePath] = slots
+		}
+	}
+	return out
+}
+
+// materialPathsForRow returns the deduplicated set of instance paths
+// the row's slot assignment should be applied to. Prefers
+// AllInstancePaths when populated; falls back to the singular
+// InstancePath. Empty / blank paths are dropped.
+func materialPathsForRow(row loader.ScanResult) []string {
+	if len(row.AllInstancePaths) == 0 {
+		path := strings.TrimSpace(row.InstancePath)
+		if path == "" {
+			return nil
+		}
+		return []string{path}
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(row.AllInstancePaths))
+	for _, raw := range row.AllInstancePaths {
+		path := strings.TrimSpace(raw)
+		if path == "" {
+			continue
+		}
+		if _, dup := seen[path]; dup {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	if len(out) == 0 {
+		path := strings.TrimSpace(row.InstancePath)
+		if path == "" {
+			return nil
+		}
+		return []string{path}
 	}
 	return out
 }

@@ -102,6 +102,40 @@ func TestCollectScanMaterialEntries_DedupesByAssetCombo(t *testing.T) {
 	}
 }
 
+// TestCollectScanMaterialReport_WalksAllInstancePathsForSharedColor
+// reproduces the actual scan-flow shape: a single ScanResult per
+// (AssetID, AssetInput) with AllInstancePaths listing every owning SA
+// path. Pre-fix this collapsed N SAs into one bundle in the materials
+// map and undercounted MR packs / normal-upscale pairings; post-fix it
+// reconstructs every per-bundle slot assignment.
+func TestCollectScanMaterialReport_WalksAllInstancePathsForSharedColor(t *testing.T) {
+	colorRow := saTextureRow("ColorMapContent", 1001, "Workspace.A.SurfaceAppearance", 1024)
+	colorRow.AllInstancePaths = []string{
+		"Workspace.A.SurfaceAppearance",
+		"Workspace.B.SurfaceAppearance",
+		"Workspace.C.SurfaceAppearance",
+	}
+	normalA := saTextureRow("NormalMapContent", 2001, "Workspace.A.SurfaceAppearance", 1024)
+	normalA.AllInstancePaths = []string{"Workspace.A.SurfaceAppearance"}
+	normalB := saTextureRow("NormalMapContent", 2002, "Workspace.B.SurfaceAppearance", 1024)
+	normalB.AllInstancePaths = []string{"Workspace.B.SurfaceAppearance"}
+	normalC := saTextureRow("NormalMapContent", 2003, "Workspace.C.SurfaceAppearance", 1024)
+	normalC.AllInstancePaths = []string{"Workspace.C.SurfaceAppearance"}
+
+	entries, headline := CollectScanMaterialReport([]loader.ScanResult{colorRow, normalA, normalB, normalC})
+	if len(entries) != 3 {
+		t.Fatalf("got %d entries, want 3 (one per color/normal bundle)", len(entries))
+	}
+
+	// Headline = 1× 1024 BC1 color + 3× 1024 BC3 upscaled normals + 3× 1024 BC1 MR packs.
+	want := EstimateGPUTextureBytesExact(1024, 1024, false) +
+		3*EstimateGPUTextureBytesExact(1024, 1024, true) +
+		3*EstimateGPUTextureBytesExact(1024, 1024, false)
+	if headline != want {
+		t.Errorf("headline = %d, want %d (one color + three upscaled normals + three MR packs)", headline, want)
+	}
+}
+
 func TestTotalScanMaterialGPUBytes_MatchesEngineModel(t *testing.T) {
 	// One SA with 1024 color + 1024 normal + no M/R. Engine model:
 	// 1× 1024 BC1 (color) + 1× 1024 BC3 (normal) + 1× 1024 BC1 (blank MR pack).

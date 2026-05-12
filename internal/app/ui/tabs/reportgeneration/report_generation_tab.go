@@ -804,6 +804,9 @@ func buildReportSummaryAndPoints(refs []extractor.PositionedResult, resolved map
 				summary.BC1PixelCount += stats.PixelCount
 				summary.BC1BytesExact += exactBytes
 			}
+			debug.Logf("[Report-asset] id=%d key=%q prop=%q type=%q isBC3=%t %dx%d → %s",
+				ref.ID, key, strings.TrimSpace(ref.PropertyName), strings.TrimSpace(ref.InstanceType),
+				isBC3, stats.Width, stats.Height, format.FormatSizeAuto64(exactBytes))
 		}
 		summary.MeshBytes += int64(stats.MeshBytes)
 		summary.ResolvedCount++
@@ -1092,6 +1095,12 @@ func countEstimatedDrawCalls(mapParts []heatmaptab.RBXLHeatmapMapPart, refs []ex
 
 func logGPUTextureMemoryBreakdown(summary report.Summary, correction report.SurfaceAppearanceMemoryCorrectionSummary) {
 	totalBytes := summary.BC1BytesExact + summary.BC3BytesExact
+	debug.Logf(
+		"[Report] GPU texture memory headline: %s (BC1 %s, BC3 %s)",
+		format.FormatSizeAuto64(totalBytes),
+		format.FormatSizeAuto64(summary.BC1BytesExact),
+		format.FormatSizeAuto64(summary.BC3BytesExact),
+	)
 	debug.Logf(
 		"GPU texture memory breakdown (exact per-mip, matches RenderDoc):\n"+
 			"  raw per-asset BC1: %s (%d pixels)\n"+

@@ -36,9 +36,15 @@ type ScanResult struct {
 	InstanceType         string
 	InstanceName         string
 	InstancePath         string
-	PropertyName         string
-	Source               string
-	State                string
+	// AllInstancePaths lists every instance path that references this
+	// asset under the same property — propagated from ScanHit so the
+	// Materials sub-tab and engine-model aggregations can rebuild
+	// per-instance bundles even though the row dedupes by asset key.
+	// Empty / nil means "only InstancePath, no other references".
+	AllInstancePaths []string
+	PropertyName     string
+	Source           string
+	State            string
 	Width                int
 	Height               int
 	Duration             time.Duration

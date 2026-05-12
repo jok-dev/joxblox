@@ -10,4 +10,5 @@ const (
 	tabTitleOptimizeAssets   = "Optimize Assets"
 	tabTitleImageGenerator   = "Image Generator"
 	tabTitleRenderDoc        = "RenderDoc"
+	tabTitleDiff             = "Diff"
 )
