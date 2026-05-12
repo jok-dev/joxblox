@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.6.0 - 2026-05-12
+
 ### Added
 
 - Diff tab: compare two .rbxl files and view added, removed, and changed instances with per-property diffs. Script files are ignored by default; toggle off to include them. The `TexturePack` property is never diffed — it's a server-side CDN wrapper that's not user-controlled and only produces noise. Right-click any row to copy the instance to the clipboard in Roblox Studio's native format — paste it back into Studio with Ctrl+V.
