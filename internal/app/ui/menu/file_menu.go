@@ -70,14 +70,6 @@ func BindMainFileMenu(
 		window.SetMainMenu(fyne.NewMainMenu(fileMenu, helpMenu))
 	}
 
-	tabs.OnSelected = func(selectedTab *container.TabItem) {
-		if selectedTab == nil {
-			rebuildMainMenu()
-			return
-		}
-		rebuildMainMenu()
-	}
-
 	rebuildMainMenu()
 }
 
