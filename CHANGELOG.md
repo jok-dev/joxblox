@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- macOS: app no longer SIGSEGVs in Cocoa's `resetDarwinMenu` when switching main tabs. The main file menu was being rebuilt on every tab change via `tabs.OnSelected`, but the rebuild used no tab-specific state — the hook is now removed and the menu is only rebuilt at startup and after loading results
+
 ## v1.6.0 - 2026-05-12
 
 ### Added
