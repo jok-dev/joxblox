@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/audio"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/mesh"
 )
@@ -30,6 +31,7 @@ type AssetDetails struct {
 	AssetTypeDisplay   string `json:"assetTypeDisplay"`
 	DimensionsLabel    string `json:"dimensionsLabel"`
 	DimensionsDisplay  string `json:"dimensionsDisplay"`
+	DurationDisplay    string `json:"durationDisplay"`
 	SelfSizeDisplay    string `json:"selfSizeDisplay"`
 	TotalSizeDisplay   string `json:"totalSizeDisplay"`
 	FormatDisplay      string `json:"formatDisplay"`
@@ -89,6 +91,7 @@ func (s *AssetService) FetchAsset(input string) (AssetDetails, error) {
 		AssetTypeDisplay:   data.AssetTypeDisplay,
 		DimensionsLabel:    data.DimensionsLabel,
 		DimensionsDisplay:  data.DimensionsDisplay,
+		DurationDisplay:    buildDurationDisplay(data.StatsInfo),
 		SelfSizeDisplay:    data.SelfSizeDisplay,
 		TotalSizeDisplay:   data.TotalSizeDisplay,
 		FormatDisplay:      data.FormatDisplay,
@@ -114,6 +117,16 @@ func buildPreviewDataURL(info *loader.ImageInfo) string {
 	}
 	mimeType := http.DetectContentType(imageBytes)
 	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(imageBytes)
+}
+
+// buildDurationDisplay renders an audio asset's playback length using the same
+// compact formatter the Fyne audio controls use, or "" for non-audio assets and
+// assets whose duration could not be extracted.
+func buildDurationDisplay(info *loader.ImageInfo) string {
+	if info == nil || info.Duration <= 0 {
+		return ""
+	}
+	return audio.FormatDurationCompact(info.Duration)
 }
 
 // buildAssetStatusMessage mirrors the human-readable status the Fyne tab set

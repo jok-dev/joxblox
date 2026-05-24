@@ -59,7 +59,7 @@ type materialsView struct {
 	// resourceByAssetID indexes the latest scan rows by AssetID so the
 	// thumbnail decode path can find the PNG/JPEG bytes for any slot
 	// without re-walking the row list. Rebuilt every Refresh.
-	resourceByAssetID map[int64]*fyne.StaticResource
+	resourceByAssetID map[int64]fyne.Resource
 	selectedRow       int
 	// previewGeneration increments on each row click. Background decodes
 	// capture the value at start and discard their result if a newer
@@ -110,7 +110,7 @@ func newMaterialsView() *materialsView {
 		sortField:         "GPU Memory",
 		sortDescending:    true,
 		thumbnails:        materialscommon.NewThumbnailCache(),
-		resourceByAssetID: map[int64]*fyne.StaticResource{},
+		resourceByAssetID: map[int64]fyne.Resource{},
 		selectedRow:       -1,
 	}
 
@@ -190,14 +190,15 @@ func (view *materialsView) updateCountLabel() {
 // for that asset across all rows. Multiple rows can reference the same
 // asset (one per SurfaceAppearance instance); any row's Resource is
 // equivalent for thumbnail purposes, so last-write-wins is fine.
-func buildResourceIndex(rows []loader.ScanResult) map[int64]*fyne.StaticResource {
-	out := map[int64]*fyne.StaticResource{}
+func buildResourceIndex(rows []loader.ScanResult) map[int64]fyne.Resource {
+	out := map[int64]fyne.Resource{}
 	for i := range rows {
 		row := rows[i]
-		if row.Resource == nil || row.AssetID <= 0 {
+		resource := scanRowResource(row)
+		if resource == nil || row.AssetID <= 0 {
 			continue
 		}
-		out[row.AssetID] = row.Resource
+		out[row.AssetID] = resource
 	}
 	return out
 }

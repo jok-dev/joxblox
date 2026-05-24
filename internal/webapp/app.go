@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"joxblox/internal/app/loader"
+	"joxblox/internal/audio"
 )
 
 // App wires application lifecycle and owns the bound service structs.
@@ -52,11 +53,9 @@ func (a *App) Bindings() []interface{} {
 }
 
 // wireLoaderGlobals points the loader package's pluggable globals at the
-// webapp's own implementations, replacing the wiring the Fyne app.Run did.
-// Currently only the asset download cache is wired; the audio-metadata hooks
-// (loader.IsAudioContent / loader.ExtractAudio) live in the Fyne ui package and
-// are left unset — they are nil-guarded in the loader, so audio assets simply
-// load without a duration until that helper is also decoupled.
+// webapp's own implementations, replacing the wiring the Fyne app.Run did:
+// the asset download cache plus the audio-metadata hooks, which now resolve to
+// the Fyne-free internal/audio package so audio assets report a duration.
 func (a *App) wireLoaderGlobals() {
 	loader.LoadCacheSettings = func() loader.CacheSettings {
 		settings, err := a.Settings.GetSettings()
@@ -64,5 +63,13 @@ func (a *App) wireLoaderGlobals() {
 			return loader.CacheSettings{}
 		}
 		return loader.CacheSettings{Enabled: settings.CacheEnabled, Folder: settings.CacheFolder}
+	}
+	loader.IsAudioContent = audio.IsAudioContent
+	loader.ExtractAudio = func(fileName, contentType string, data []byte) (*loader.AudioMetadata, error) {
+		meta, err := audio.ExtractAudioMetadata(fileName, contentType, data)
+		if err != nil {
+			return nil, err
+		}
+		return &loader.AudioMetadata{Duration: meta.Duration, Format: meta.Format}, nil
 	}
 }

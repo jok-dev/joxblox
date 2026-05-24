@@ -2,8 +2,6 @@ package loader
 
 import (
 	"time"
-
-	"fyne.io/fyne/v2"
 )
 
 const (
@@ -82,7 +80,11 @@ type ScanResult struct {
 	MeshNumFaces         uint32
 	MeshNumVerts         uint32
 	MeshVersion          string
-	Resource             *fyne.StaticResource
+	// PreviewBytes / PreviewName carry the row's preview image (PNG/JPEG/…) and
+	// a suggested filename, replacing the old *fyne.StaticResource so the loader
+	// stays Fyne-free. The Fyne UI rebuilds a resource from these on demand.
+	PreviewBytes         []byte
+	PreviewName          string
 	DownloadBytes        []byte
 	DownloadFileName     string
 	DownloadIsOriginal   bool

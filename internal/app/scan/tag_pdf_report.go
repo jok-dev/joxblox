@@ -279,17 +279,17 @@ func writePDFCard(pdf *gofpdf.Fpdf, row loader.ScanResult, x, y float64, embedIm
 // supports PNG / JPEG / GIF; everything else falls through to the
 // placeholder).
 func drawPDFThumbnail(pdf *gofpdf.Fpdf, row loader.ScanResult, x, y, width, height float64) bool {
-	if row.Resource == nil || len(row.Resource.StaticContent) == 0 {
+	if len(row.PreviewBytes) == 0 {
 		return false
 	}
-	imageType := pdfImageTypeFor(row.ContentType, row.Resource.StaticContent)
+	imageType := pdfImageTypeFor(row.ContentType, row.PreviewBytes)
 	if imageType == "" {
 		return false
 	}
 	imageName := fmt.Sprintf("asset-%d", row.AssetID)
 	if pdf.GetImageInfo(imageName) == nil {
 		options := gofpdf.ImageOptions{ImageType: imageType, ReadDpi: false}
-		pdf.RegisterImageOptionsReader(imageName, options, bytes.NewReader(row.Resource.StaticContent))
+		pdf.RegisterImageOptionsReader(imageName, options, bytes.NewReader(row.PreviewBytes))
 		if pdf.Err() {
 			// Drop the error on the floor — drawing the placeholder
 			// is preferable to abandoning the whole report. Clear so

@@ -7,8 +7,6 @@ import (
 	"image/png"
 	"testing"
 
-	"fyne.io/fyne/v2"
-
 	"joxblox/internal/app/loader"
 )
 
@@ -38,13 +36,13 @@ func TestBuildTagPDFReportProducesValidPDFBytes(t *testing.T) {
 		{
 			AssetID: 101, AssetTypeName: "Texture", Width: 1024, Height: 1024,
 			BytesSize: 2_500_000, PixelCount: 1024 * 1024, PropertyName: "ColorMapContent",
-			Resource:    fyne.NewStaticResource("101.png", pngBytesForTest(t)),
+			PreviewBytes: pngBytesForTest(t), PreviewName: "101.png",
 			ContentType: "image/png",
 		},
 		{
 			AssetID: 202, AssetTypeName: "Texture", Width: 512, Height: 512,
 			BytesSize: 600_000, PixelCount: 512 * 512, PropertyName: "ColorMapContent",
-			Resource:    fyne.NewStaticResource("202.png", pngBytesForTest(t)),
+			PreviewBytes: pngBytesForTest(t), PreviewName: "202.png",
 			ContentType: "image/png",
 		},
 		{
@@ -86,7 +84,7 @@ func TestBuildTagPDFReport_EmbedImagesFalseSkipsThumbnails(t *testing.T) {
 	store.Toggle(101, ScanTagDownscale)
 	results := []loader.ScanResult{
 		{AssetID: 101, AssetTypeName: "Texture", Width: 1024, Height: 1024, PixelCount: 1024 * 1024,
-			Resource: fyne.NewStaticResource("101.png", pngBytesForTest(t)), ContentType: "image/png"},
+			PreviewBytes: pngBytesForTest(t), PreviewName: "101.png", ContentType: "image/png"},
 	}
 	withImages, err := BuildTagPDFReport(results, store, TagPDFReportOptions{EmbedImages: true})
 	if err != nil {

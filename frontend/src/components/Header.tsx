@@ -3,6 +3,7 @@ import { webapp } from "../../wailsjs/go/models";
 type Props = {
   authStatus: webapp.AuthStatus | null;
   placeFile: string;
+  onLoadFile: () => void;
   onOpenSettings: () => void;
 };
 
@@ -12,14 +13,18 @@ function authLabel(status: webapp.AuthStatus | null): string {
   return status.enabled ? (status.saved ? "Auth: Saved" : "Auth: Enabled") : "Auth: Disabled";
 }
 
-export default function Header({ authStatus, placeFile, onOpenSettings }: Props) {
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+export default function Header({ authStatus, placeFile, onLoadFile, onOpenSettings }: Props) {
   const authOn = !!authStatus?.enabled;
   return (
     <header className="header">
       <div className="brand">joxblox</div>
-      <div className="file-bar" title="Shared place file (loading hookup in progress)">
-        <span className="name">{placeFile || "No place file loaded"}</span>
-        <button disabled title="Coming soon — file loading binding is being ported">
+      <div className="file-bar" title={placeFile || "No place file loaded"}>
+        <span className="name">{placeFile ? fileName(placeFile) : "No place file loaded"}</span>
+        <button onClick={onLoadFile} title="Load an .rbxl/.rbxm file for all tabs">
           Load file…
         </button>
       </div>

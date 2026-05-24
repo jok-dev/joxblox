@@ -10,6 +10,7 @@ export namespace webapp {
 	    assetTypeDisplay: string;
 	    dimensionsLabel: string;
 	    dimensionsDisplay: string;
+	    durationDisplay: string;
 	    selfSizeDisplay: string;
 	    totalSizeDisplay: string;
 	    formatDisplay: string;
@@ -37,6 +38,7 @@ export namespace webapp {
 	        this.assetTypeDisplay = source["assetTypeDisplay"];
 	        this.dimensionsLabel = source["dimensionsLabel"];
 	        this.dimensionsDisplay = source["dimensionsDisplay"];
+	        this.durationDisplay = source["durationDisplay"];
 	        this.selfSizeDisplay = source["selfSizeDisplay"];
 	        this.totalSizeDisplay = source["totalSizeDisplay"];
 	        this.formatDisplay = source["formatDisplay"];

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- Single Asset: audio assets now show a `Duration` row, decoded from the file bytes
+- Cross-tab navigation: the Asset Breakdown asset-detail pane gains an `Open in Single Asset ↗` button that switches to the Single Asset tab and loads the selected asset
+
 ### Changed
 
 - UI redesign: the flat top tab bar is replaced with a grouped left sidebar (`Core Analytics`: Report Generation, Scan, Heatmap, 3D Heatmap · `Asset Management`: Single Asset, LOD Viewer, Optimize Assets · `Utilities`: Image Generator, RenderDoc, Diff). A persistent top header now holds the app title, a shared place-file bar, an auth-status indicator, and a Settings gear

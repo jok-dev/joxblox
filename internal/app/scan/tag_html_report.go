@@ -235,12 +235,12 @@ func tagReportGPUMemoryLine(row loader.ScanResult) string {
 }
 
 func tagReportImageSource(row loader.ScanResult, embedImages bool) string {
-	if embedImages && row.Resource != nil && len(row.Resource.StaticContent) > 0 {
+	if embedImages && len(row.PreviewBytes) > 0 {
 		mimeType := strings.TrimSpace(row.ContentType)
 		if mimeType == "" {
 			mimeType = "image/png"
 		}
-		encoded := base64.StdEncoding.EncodeToString(row.Resource.StaticContent)
+		encoded := base64.StdEncoding.EncodeToString(row.PreviewBytes)
 		return "data:" + mimeType + ";base64," + encoded
 	}
 	if row.AssetID > 0 && rowLikelyHasThumbnail(row) {

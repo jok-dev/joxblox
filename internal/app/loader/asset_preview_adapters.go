@@ -10,8 +10,6 @@ import (
 	"joxblox/internal/extractor"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/mesh"
-
-	"fyne.io/fyne/v2"
 )
 
 // BuildLocalImagePreview wraps a local image file's bytes in an
@@ -41,7 +39,8 @@ func BuildLocalImagePreview(fileName string, fileBytes []byte) (*AssetPreviewRes
 	}
 
 	imageInfo := &ImageInfo{
-		Resource:                 fyne.NewStaticResource(resourceName, fileBytes),
+		PreviewBytes:             fileBytes,
+		PreviewName:              resourceName,
 		Width:                    imageConfig.Width,
 		Height:                   imageConfig.Height,
 		BytesSize:                len(fileBytes),
@@ -141,9 +140,11 @@ func BuildFailedScanResultFromHit(hit ScanHit, loadErr error) ScanResult {
 
 func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResult) ScanResult {
 	statsInfo := ResolveStatsInfo(previewResult.Stats, previewResult.Image)
-	resource := (*fyne.StaticResource)(nil)
+	var previewBytes []byte
+	var previewName string
 	if previewResult.Image != nil {
-		resource = previewResult.Image.Resource
+		previewBytes = previewResult.Image.PreviewBytes
+		previewName = previewResult.Image.PreviewName
 	}
 
 	var meshFaces, meshVerts uint32
@@ -198,7 +199,8 @@ func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResu
 		result.HasAlphaChannel = statsInfo.HasAlphaChannel
 		result.NonOpaqueAlphaPixels = statsInfo.NonOpaqueAlphaPixels
 	}
-	result.Resource = resource
+	result.PreviewBytes = previewBytes
+	result.PreviewName = previewName
 	result.DownloadBytes = append([]byte(nil), previewResult.DownloadBytes...)
 	result.DownloadFileName = previewResult.DownloadFileName
 	result.DownloadIsOriginal = previewResult.DownloadIsOriginal
@@ -207,7 +209,7 @@ func ApplyPreviewToScanResult(result ScanResult, previewResult *AssetPreviewResu
 
 func ScanResultToPreviewResult(result ScanResult) *AssetPreviewResult {
 	return &AssetPreviewResult{
-		Image: &ImageInfo{Resource: result.Resource, SHA256: result.FileSHA256},
+		Image: &ImageInfo{PreviewBytes: result.PreviewBytes, PreviewName: result.PreviewName, SHA256: result.FileSHA256},
 		Stats: &ImageInfo{
 			Width:                    result.Width,
 			Height:                   result.Height,

@@ -1,6 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { webapp } from "../../wailsjs/go/models";
 import { FetchAsset } from "../../wailsjs/go/webapp/AssetService";
+
+type Props = {
+  // target is a cross-tab navigation payload (asset ID / rbxthumb URL). When it
+  // changes to a non-empty value, the view auto-loads it.
+  target?: string;
+  // onTargetConsumed clears the parent's target once it has been loaded so that
+  // re-selecting the same asset from another tab loads it again.
+  onTargetConsumed?: () => void;
+};
 
 type MetaRow = { label: string; value: string };
 
@@ -8,6 +17,7 @@ function metaRows(d: webapp.AssetDetails): MetaRow[] {
   const rows: MetaRow[] = [
     { label: "Asset Type", value: d.assetTypeDisplay },
     { label: d.dimensionsLabel || "Dimensions", value: d.dimensionsDisplay },
+    { label: "Duration", value: d.durationDisplay },
     { label: "Format", value: d.formatDisplay },
     { label: "Content Type", value: d.contentTypeDisplay },
     { label: "Self Size", value: d.selfSizeDisplay },
@@ -31,20 +41,21 @@ function jsonSections(d: webapp.AssetDetails): JsonSection[] {
   ].filter((s) => s.json && s.json.trim() !== "");
 }
 
-export default function SingleAsset() {
+export default function SingleAsset({ target, onTargetConsumed }: Props) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Enter an asset ID or rbxthumb URL and click Go.");
   const [error, setError] = useState("");
   const [details, setDetails] = useState<webapp.AssetDetails | null>(null);
 
-  async function load() {
-    if (busy || input.trim() === "") return;
+  async function load(value?: string) {
+    const query = (value ?? input).trim();
+    if (busy || query === "") return;
     setBusy(true);
     setError("");
     setStatus("Loading…");
     try {
-      const d = await FetchAsset(input);
+      const d = await FetchAsset(query);
       setDetails(d);
       setStatus(d.statusMessage || "Loaded.");
     } catch (e: any) {
@@ -56,6 +67,16 @@ export default function SingleAsset() {
     }
   }
 
+  // Auto-load when another tab hands us a navigation target.
+  useEffect(() => {
+    const trimmed = target?.trim();
+    if (!trimmed) return;
+    setInput(trimmed);
+    void load(trimmed);
+    onTargetConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
   return (
     <div className="asset-view">
       <div className="asset-input-row">
@@ -66,7 +87,7 @@ export default function SingleAsset() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && load()}
         />
-        <button className="primary" disabled={busy} onClick={load}>
+        <button className="primary" disabled={busy} onClick={() => load()}>
           {busy ? "Loading…" : "Go"}
         </button>
       </div>
@@ -111,7 +132,7 @@ export default function SingleAsset() {
                       className="id-chip"
                       onClick={() => {
                         setInput(String(id));
-                        setTimeout(load, 0);
+                        void load(String(id));
                       }}
                     >
                       {id}

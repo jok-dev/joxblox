@@ -1238,7 +1238,7 @@ func (explorer *ScanResultsExplorer) updatePreviewFromRow(rowIndex int) {
 	explorer.explorerState = ui.NewAssetExplorerState(selectedResult.AssetID, rootPreview)
 	explorer.renderSelectedAsset(selectedResult.AssetID, selectedResult.FilePath, rootPreview)
 	needsFullPreview := selectedResult.AssetID > 0 && selectedResult.State != loader.FailedScanRowState &&
-		(selectedResult.Resource == nil || selectedResult.Source == roblox.SourceNoThumbnail || strings.TrimSpace(selectedResult.Source) == "")
+		(len(selectedResult.PreviewBytes) == 0 || selectedResult.Source == roblox.SourceNoThumbnail || strings.TrimSpace(selectedResult.Source) == "")
 	if !needsFullPreview {
 		return
 	}

@@ -1,4 +1,4 @@
-package ui
+package audio
 
 import (
 	"bytes"

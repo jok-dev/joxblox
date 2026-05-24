@@ -155,7 +155,7 @@ func lookupOrLoadPrimaryWithBytes(allRows []loader.ScanResult, primaryAssetID in
 	}
 	debug.Logf("DupDialog primary lookup: id=%d found typeID=%d typeName=%q sha=%q downloadBytes=%d hasResource=%t resourceBytes=%d source=%q state=%q",
 		primary.AssetID, primary.AssetTypeID, primary.AssetTypeName, primary.FileSHA256,
-		len(primary.DownloadBytes), primary.Resource != nil, resourceContentLen(primary.Resource),
+		len(primary.DownloadBytes), len(primary.PreviewBytes) > 0, len(primary.PreviewBytes),
 		primary.Source, primary.State)
 	if len(scanResultDecodableImageBytes(primary)) > 0 {
 		return primary
@@ -177,17 +177,8 @@ func lookupOrLoadPrimaryWithBytes(allRows []loader.ScanResult, primaryAssetID in
 	}
 	loaded := loader.ApplyPreviewToScanResult(primary, preview)
 	debug.Logf("DupDialog primary lazy-load OK: sha=%q downloadBytes=%d hasResource=%t resourceBytes=%d",
-		loaded.FileSHA256, len(loaded.DownloadBytes), loaded.Resource != nil, resourceContentLen(loaded.Resource))
+		loaded.FileSHA256, len(loaded.DownloadBytes), len(loaded.PreviewBytes) > 0, len(loaded.PreviewBytes))
 	return loaded
-}
-
-// resourceContentLen distinguishes "nil Resource" from "non-nil Resource
-// with empty StaticContent" in diagnostic logs — both are common.
-func resourceContentLen(res *fyne.StaticResource) int {
-	if res == nil {
-		return 0
-	}
-	return len(res.Content())
 }
 
 // filterCandidateDuplicates returns the row list to render (primary first,
@@ -412,27 +403,23 @@ func tryHashRow[T any](row loader.ScanResult, hashFn func([]byte) (T, error)) (T
 		if err == nil {
 			return hash, true, "download", "", len(row.DownloadBytes)
 		}
-		if row.Resource != nil {
-			content := row.Resource.Content()
-			if len(content) > 0 {
-				if rh, rerr := hashFn(content); rerr == nil {
-					return rh, true, "resource(after-download-fail)", "", len(content)
-				} else {
-					return zero, false, "both", fmt.Sprintf("download:%v resource:%v", err, rerr), len(row.DownloadBytes)
-				}
+		if len(row.PreviewBytes) > 0 {
+			content := row.PreviewBytes
+			if rh, rerr := hashFn(content); rerr == nil {
+				return rh, true, "resource(after-download-fail)", "", len(content)
+			} else {
+				return zero, false, "both", fmt.Sprintf("download:%v resource:%v", err, rerr), len(row.DownloadBytes)
 			}
 		}
 		return zero, false, "download", err.Error(), len(row.DownloadBytes)
 	}
-	if row.Resource != nil {
-		content := row.Resource.Content()
-		if len(content) > 0 {
-			hash, err := hashFn(content)
-			if err == nil {
-				return hash, true, "resource", "", len(content)
-			}
-			return zero, false, "resource", err.Error(), len(content)
+	if len(row.PreviewBytes) > 0 {
+		content := row.PreviewBytes
+		hash, err := hashFn(content)
+		if err == nil {
+			return hash, true, "resource", "", len(content)
 		}
+		return zero, false, "resource", err.Error(), len(content)
 	}
 	return zero, false, "none", "no bytes available", 0
 }
@@ -445,10 +432,8 @@ func scanResultDecodableImageBytes(row loader.ScanResult) []byte {
 	if len(row.DownloadBytes) > 0 {
 		return row.DownloadBytes
 	}
-	if row.Resource != nil {
-		if content := row.Resource.Content(); len(content) > 0 {
-			return content
-		}
+	if len(row.PreviewBytes) > 0 {
+		return row.PreviewBytes
 	}
 	return nil
 }
@@ -629,8 +614,8 @@ func (d *duplicateGroupDialog) showPreview(row loader.ScanResult) {
 		hint = "Primary asset (will always be in the group). Double-click another row to add it as a duplicate."
 	}
 	d.previewHintLabel.SetText(hint)
-	if row.Resource != nil && len(row.Resource.StaticContent) > 0 {
-		d.previewImage.Resource = row.Resource
+	if resource := scanRowResource(row); resource != nil {
+		d.previewImage.Resource = resource
 		d.previewImage.Refresh()
 		d.previewImage.Show()
 		d.previewPlaceholder.Hide()

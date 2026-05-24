@@ -140,10 +140,8 @@ func scanResultImageBytes(result ScanResult) []byte {
 	if len(result.DownloadBytes) > 0 {
 		return result.DownloadBytes
 	}
-	if result.Resource != nil {
-		if content := result.Resource.Content(); len(content) > 0 {
-			return content
-		}
+	if len(result.PreviewBytes) > 0 {
+		return result.PreviewBytes
 	}
 	return nil
 }

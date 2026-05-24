@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { webapp } from "../../wailsjs/go/models";
-import { PickRBXLFile, ScanFile } from "../../wailsjs/go/webapp/ScanService";
+import { ScanFile } from "../../wailsjs/go/webapp/ScanService";
+import { FetchAsset } from "../../wailsjs/go/webapp/AssetService";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
+
+type Props = {
+  // filePath is the shared "current file" set via the global Load file… bar.
+  filePath: string;
+  // onPickFile opens the shared file picker (updates the global current file).
+  onPickFile: () => void;
+  // onOpenInSingleAsset switches to the Single Asset tab loaded with this asset.
+  onOpenInSingleAsset: (assetId: number) => void;
+};
 
 type SortField =
   | "assetId"
@@ -37,8 +47,7 @@ function Card({ value, caption, accent }: { value: string; caption: string; acce
   );
 }
 
-export default function Scan() {
-  const [filePath, setFilePath] = useState("");
+export default function Scan({ filePath, onPickFile, onOpenInSingleAsset }: Props) {
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [report, setReport] = useState<webapp.ScanReport | null>(null);
@@ -55,19 +64,16 @@ export default function Scan() {
   const [pathFilter, setPathFilter] = useState("");
   const [largeThresholdMB, setLargeThresholdMB] = useState(0);
 
+  // Row selection / preview.
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<webapp.AssetDetails | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+
   useEffect(() => {
     EventsOn("scan:progress", (p: { done: number; total: number }) => setProgress(p));
     return () => EventsOff("scan:progress");
   }, []);
-
-  async function pick() {
-    try {
-      const path = await PickRBXLFile();
-      if (path) setFilePath(path);
-    } catch (e: any) {
-      setError(String(e));
-    }
-  }
 
   async function runScan() {
     if (scanning || !filePath) return;
@@ -119,6 +125,20 @@ export default function Scan() {
     });
   }, [report, query, typeFilter, sortField, sortDir]);
 
+  async function selectRow(assetId: number) {
+    setSelectedId(assetId);
+    setDetail(null);
+    setDetailError("");
+    setDetailLoading(true);
+    try {
+      setDetail(await FetchAsset(String(assetId)));
+    } catch (e: any) {
+      setDetailError(String(e));
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   function toggleSort(field: SortField) {
     if (field === sortField) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -134,9 +154,9 @@ export default function Scan() {
   return (
     <div className="scan-view">
       <div className="file-row">
-        <button onClick={pick}>Select File…</button>
+        <button onClick={onPickFile}>Select File…</button>
         <span className="file-path" title={filePath}>
-          {filePath || "No .rbxl/.rbxm file selected."}
+          {filePath || "No .rbxl/.rbxm file selected. Use Select File… or the header Load file… bar."}
         </span>
         <button className="primary" disabled={scanning || !filePath} onClick={runScan}>
           {scanning ? "Scanning…" : "Scan"}
@@ -224,6 +244,7 @@ export default function Scan() {
             Showing {rows.length} of {report.rows.length} assets
           </div>
 
+          <div className="scan-split">
           <div className="scan-table-wrap">
             <table className="scan-table">
               <thead>
@@ -246,8 +267,12 @@ export default function Scan() {
                 {rows.map((r, i) => (
                   <tr
                     key={`${r.assetId}-${i}`}
+                    onClick={() => selectRow(r.assetId)}
                     className={
-                      (r.state === "Failed" ? "row-failed" : "") + (r.isLarge ? " row-large" : "")
+                      "row-clickable" +
+                      (r.state === "Failed" ? " row-failed" : "") +
+                      (r.isLarge ? " row-large" : "") +
+                      (r.assetId === selectedId ? " row-selected" : "")
                     }
                   >
                     <td className="num">{r.assetId}</td>
@@ -270,6 +295,66 @@ export default function Scan() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {selectedId !== null && (
+            <aside className="asset-detail-panel">
+              <div className="detail-header">
+                <span>Asset {selectedId}</span>
+                <div className="detail-header-actions">
+                  <button
+                    title="Open this asset in the Single Asset tab"
+                    onClick={() => onOpenInSingleAsset(selectedId)}
+                  >
+                    Open in Single Asset ↗
+                  </button>
+                  <button className="icon" title="Close" onClick={() => setSelectedId(null)}>
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {detailLoading && <div className="hint">Loading preview…</div>}
+              {detailError && <div className="status-line error">{detailError}</div>}
+
+              {detail && (
+                <>
+                  <div className="detail-preview">
+                    {detail.previewDataUrl ? (
+                      <img src={detail.previewDataUrl} alt={`Asset ${selectedId}`} />
+                    ) : (
+                      <div className="asset-preview-empty">No preview image</div>
+                    )}
+                  </div>
+                  {detail.statusMessage && <div className="hint">{detail.statusMessage}</div>}
+                  <table className="detail-meta">
+                    <tbody>
+                      {[
+                        { label: "Type", value: detail.assetTypeDisplay },
+                        { label: detail.dimensionsLabel || "Dimensions", value: detail.dimensionsDisplay },
+                        { label: "Format", value: detail.formatDisplay },
+                        { label: "Self Size", value: detail.selfSizeDisplay },
+                        { label: "Total Size", value: detail.totalSizeDisplay },
+                        { label: "Referenced", value: detail.referencedDisplay },
+                        { label: "Source", value: detail.sourceDisplay },
+                        { label: "State", value: detail.stateDescription },
+                      ]
+                        .filter((m) => m.value && m.value.trim() !== "")
+                        .map((m) => (
+                          <tr key={m.label}>
+                            <td className="meta-label">{m.label}</td>
+                            <td className="meta-value">{m.value}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                  {detail.warningMessage && (
+                    <div className="status-line warn">⚠ {detail.warningMessage}</div>
+                  )}
+                </>
+              )}
+            </aside>
+          )}
           </div>
         </>
       )}
