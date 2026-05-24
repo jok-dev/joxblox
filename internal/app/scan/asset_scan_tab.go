@@ -856,9 +856,11 @@ func newAssetScanTab(window fyne.Window, options assetScanTabOptions) (fyne.Canv
 		sourceLabels = append(sourceLabels, secondarySourceLabel)
 	}
 	pathWhitelistRow := container.NewBorder(nil, nil, pathWhitelistCheck, nil, pathWhitelistEntry)
+	// Path Filter lives inside the explorer's collapsible Advanced Filters
+	// panel rather than as a permanent toolbar row.
+	explorer.AddAdvancedFilterContent(pathWhitelistRow)
 	topControls := container.NewVBox(
 		container.NewHBox(controlButtons...),
-		pathWhitelistRow,
 		container.NewVBox(sourceLabels...),
 		warningBanner.BannerRoot(),
 	)

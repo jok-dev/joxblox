@@ -158,7 +158,7 @@ func newTexturesSubTab(window fyne.Window, onLoaded func(path string)) (fyne.Can
 	previewCanvas := canvas.NewImageFromImage(nil)
 	previewCanvas.FillMode = canvas.ImageFillContain
 	previewCanvas.ScaleMode = canvas.ImageScaleFastest
-	previewCanvas.SetMinSize(fyne.NewSize(320, 320))
+	previewCanvas.SetMinSize(fyne.NewSize(220, 220))
 
 	// Use a disabled multi-line Entry instead of a Label so the user can
 	// select and copy substrings (resource ID, format, pixel hash). Disabled

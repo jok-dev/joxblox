@@ -2,8 +2,16 @@
 
 ## Unreleased
 
+### Changed
+
+- UI redesign: the flat top tab bar is replaced with a grouped left sidebar (`Core Analytics`: Report Generation, Scan, Heatmap, 3D Heatmap · `Asset Management`: Single Asset, LOD Viewer, Optimize Assets · `Utilities`: Image Generator, RenderDoc, Diff). A persistent top header now holds the app title, a shared place-file bar, an auth-status indicator, and a Settings gear
+- Shared place file: loading an `.rbxl`/`.rbxm` from the new top-bar `Load file…` button keeps it loaded across the Report Generation, Scan, and Heatmap tabs (each tab is prefilled without auto-running, so you trigger Generate/Scan/Build when ready). Report Generation gains a `Generate Report` button to run analysis on the loaded file
+- The `.ROBLOSECURITY` auth controls moved out of the always-visible bottom footer into Settings → Authentication (open via the top-right gear); auth state is still surfaced by the header status indicator
+- Scan tab declutter: the `Type` / `Instance Type` / `Property Name` dropdowns and the `Path Filter` are now folded into a collapsible `Advanced Filters` panel (the `Show duplicates` / `Show untagged` / `Show large textures` toggles stay visible). The metric counters (Failed, Duplicates, sizes, triangles) render as a horizontal dashboard of summary cards — bold value above a small caption — and the Assets-tab split now wraps the results table and asset-detail pane in titled cards so the two frames read as distinct panels
+
 ### Fixed
 
+- macOS: default window size reduced from 1350×900 to 1280×760 so the window fits within the usable screen area on laptop displays — previously the bottom edge could sit below the screen, making the window impossible to resize smaller
 - macOS: app no longer SIGSEGVs in Cocoa's `resetDarwinMenu` when switching main tabs. The main file menu was being rebuilt on every tab change via `tabs.OnSelected`, but the rebuild used no tab-specific state — the hook is now removed and the menu is only rebuilt at startup and after loading results
 
 ## v1.6.0 - 2026-05-12

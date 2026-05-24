@@ -58,7 +58,7 @@ type reportGenerationInstanceRenderInfo struct {
 
 const reportGenerationCellSizeStuds = 1000.0
 
-func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string)) {
+func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string), onViewInHeatmap func(string)) (fyne.CanvasObject, func(string), func(string)) {
 	selectedFilePath := ""
 	currentSummary := report.Summary{}
 	currentCells := []heatmap.Cell{}
@@ -436,12 +436,32 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 		showAssetTypeDialog()
 	}
 
+	// setPlaceFile prefills the selected file (e.g. from the shared place-file
+	// bar) without opening the asset-type dialog, so loading a file globally
+	// doesn't force report generation on a tab the user isn't looking at.
+	setPlaceFile := func(filePath string) {
+		trimmedPath := strings.TrimSpace(filePath)
+		if !common.IsRobloxDOMFilePath(trimmedPath) {
+			return
+		}
+		selectedFilePath = trimmedPath
+		filePathLabel.SetText(selectedFilePath)
+		statusLabel.SetText("Click Generate Report and choose an asset type")
+	}
+
 	browseButton := widget.NewButtonWithIcon("Choose File", theme.FolderOpenIcon(), func() {
 		common.PickRBXLSource(window, loadReportFile, func(err error) {
 			statusLabel.SetText(fmt.Sprintf("Pick failed: %s", err.Error()))
 		})
 	})
 	browseButton.Importance = widget.HighImportance
+	generateButton := widget.NewButtonWithIcon("Generate Report", theme.DocumentCreateIcon(), func() {
+		if strings.TrimSpace(selectedFilePath) == "" {
+			statusLabel.SetText("Load an .rbxl/.rbxm file first")
+			return
+		}
+		loadReportFile(selectedFilePath)
+	})
 	cancelLoadButton = widget.NewButton("Cancel", func() {
 		cancelActiveLoad(true)
 	})
@@ -456,7 +476,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 	controls := container.NewVBox(
 		container.NewCenter(dropLabel),
 		container.NewCenter(container.NewHBox(progressBar, cancelLoadButton)),
-		container.NewCenter(container.NewHBox(browseButton, workspaceOnlyCheck)),
+		container.NewCenter(container.NewHBox(browseButton, generateButton, workspaceOnlyCheck)),
 		filePathLabel,
 		warningBanner.BannerRoot(),
 	)
@@ -467,7 +487,7 @@ func NewReportGenerationTab(window fyne.Window, onViewInScan func(path string, w
 		nil,
 		nil,
 		container.NewVScroll(profileContainer),
-	), loadReportFile
+	), loadReportFile, setPlaceFile
 }
 
 func resolveReportGenerationAssets(references []heatmap.AssetReference, onProgress func(done int, total int, memoryRequestCount int, diskRequestCount int, networkRequestCount int), shouldCancel func() bool) map[string]reportGenerationResolvedAsset {
@@ -741,9 +761,9 @@ func buildReportGenerationStatsFromPreview(assetID int64, previewResult *loader.
 }
 
 type duplicateGroupDetail struct {
-	FileSHA256        string
-	AssetBytes        int64
-	AssetIDs          []int64
+	FileSHA256         string
+	AssetBytes         int64
+	AssetIDs           []int64
 	SampleInstancePath string
 }
 
@@ -958,12 +978,12 @@ func collectReportGenerationOversizedTextures(refs []extractor.PositionedResult,
 }
 
 type bannedTextureDetail struct {
-	AssetID        int64
-	InstancePath   string
-	Width          int
-	Height         int
+	AssetID         int64
+	InstancePath    string
+	Width           int
+	Height          int
 	GPUTextureBytes int64
-	IsBC3          bool
+	IsBC3           bool
 }
 
 // collectReportGenerationBannedTextures judges each texture by its
@@ -1576,7 +1596,6 @@ func showBannedTexturesDialog(window fyne.Window, details []bannedTextureDetail,
 	scroll.SetMinSize(fyne.NewSize(720, 360))
 	dialog.ShowCustom(fmt.Sprintf("Banned Images (%d)", len(details)), "Close", scroll, window)
 }
-
 
 func formatOversizedTextureHeader(d oversizedTextureDetail) string {
 	parts := []string{}

@@ -98,6 +98,7 @@ type ScanResultsExplorer struct {
 	showOnlyDuplicatesCheck          *widget.Check
 	showOnlyLargeTexturesCheck       *widget.Check
 	showOnlyUntaggedCheck            *widget.Check
+	advancedFilterBox                *fyne.Container
 	largeTextureThresholdEntry       *widget.Entry
 	bannedTextureSizeMB              float64
 	bannedTextureLimitBytes          int64
@@ -140,13 +141,13 @@ func NewScanResultsExplorer(window fyne.Window, options ScanResultsExplorerOptio
 	explorer.instanceTypeFilterSelect.SetSelected(loader.ScanFilterAllOption)
 	explorer.propertyNameFilterSelect = widget.NewSelect([]string{loader.ScanFilterAllOption}, nil)
 	explorer.propertyNameFilterSelect.SetSelected(loader.ScanFilterAllOption)
-	explorer.statsFailedLabel = widget.NewLabel("Failed: 0")
-	explorer.statsDuplicateLabel = widget.NewLabel("Duplicates: 0")
-	explorer.statsDuplicateSizeLabel = widget.NewLabel("Duplicate Size: 0 B")
-	explorer.statsSizeLabel = widget.NewLabel("Shown Size: 0 B")
-	explorer.statsGPUMemoryLabel = widget.NewLabel("Shown GPU Memory: 0 B")
-	explorer.statsTrianglesLabel = widget.NewLabel("Shown Triangles: 0")
-	explorer.statsTotalTrianglesLabel = widget.NewLabel("Shown Total Triangles: 0")
+	explorer.statsFailedLabel = newStatValueLabel("0")
+	explorer.statsDuplicateLabel = newStatValueLabel("0")
+	explorer.statsDuplicateSizeLabel = newStatValueLabel("0 B")
+	explorer.statsSizeLabel = newStatValueLabel("0 B")
+	explorer.statsGPUMemoryLabel = newStatValueLabel("0 B")
+	explorer.statsTrianglesLabel = newStatValueLabel("0")
+	explorer.statsTotalTrianglesLabel = newStatValueLabel("0")
 	explorer.showOnlyDuplicatesCheck = widget.NewCheck("Show duplicates", func(checked bool) {
 		explorer.showOnlyDuplicates = checked
 		explorer.applySortAndFilters()
@@ -403,7 +404,10 @@ func (explorer *ScanResultsExplorer) SetControlsEnabled(enabled bool) {
 }
 
 func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOptions) {
-	filterRow := container.NewHBox(
+	// Advanced dropdowns (Type / Instance Type / Property Name) and the Path
+	// Filter are tucked into a collapsible panel so the scan toolbar isn't a
+	// wall of competing controls before any data is visible.
+	advancedDropdowns := container.NewHBox(
 		widget.NewLabel("Type:"),
 		container.NewGridWrap(fyne.NewSize(260, 36), explorer.typeFilterSelect),
 		widget.NewLabel("Instance Type:"),
@@ -411,38 +415,42 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 		widget.NewLabel("Property Name:"),
 		container.NewGridWrap(fyne.NewSize(280, 36), explorer.propertyNameFilterSelect),
 	)
-	// The filter row sums to ~1020px minimum across its fixed-width grids; a
+	// The dropdown row sums to ~1020px minimum across its fixed-width grids; a
 	// bare HBox would force the whole window to stay that wide because AppTabs
 	// inherits the largest MinSize across its children. Wrap it in an HScroll
 	// so the window can shrink below that threshold (the row then scrolls
 	// horizontally instead of pinning the window).
-	filterRowScroll := container.NewHScroll(filterRow)
+	// advancedFilterBox also receives the Path Filter row appended later via
+	// AddAdvancedFilterContent (the path filter widgets are owned by the
+	// per-variant scan tab, not the explorer).
+	explorer.advancedFilterBox = container.NewVBox(container.NewHScroll(advancedDropdowns))
+	advancedAccordion := widget.NewAccordion(widget.NewAccordionItem("Advanced Filters", explorer.advancedFilterBox))
+
+	// The frequently-toggled checkboxes stay visible above the advanced panel.
+	quickFilters := container.NewHBox()
 	if options.ShowDuplicateUI {
-		filterRow.Add(explorer.showOnlyDuplicatesCheck)
+		quickFilters.Add(explorer.showOnlyDuplicatesCheck)
 	}
 	// Show untagged sits next to Show duplicates / Show large textures so
 	// triagers can quickly drill into "rows that still need a decision"
 	// after they've already burned through the obvious tags.
-	filterRow.Add(explorer.showOnlyUntaggedCheck)
+	quickFilters.Add(explorer.showOnlyUntaggedCheck)
 	if options.ShowLargeTextureUI {
-		filterRow.Add(explorer.showOnlyLargeTexturesCheck)
-		filterRow.Add(widget.NewLabel("Min B/stud^2:"))
-		filterRow.Add(container.NewGridWrap(fyne.NewSize(110, 36), explorer.largeTextureThresholdEntry))
+		quickFilters.Add(explorer.showOnlyLargeTexturesCheck)
+		quickFilters.Add(widget.NewLabel("Min B/stud^2:"))
+		quickFilters.Add(container.NewGridWrap(fyne.NewSize(110, 36), explorer.largeTextureThresholdEntry))
 	}
+
+	// Metric counters render as a horizontal dashboard of summary cards
+	// (bold value above a small caption) instead of a run of plain text.
 	statsRow := container.NewHBox(
-		explorer.statsFailedLabel,
-		widget.NewSeparator(),
-		explorer.statsDuplicateLabel,
-		widget.NewSeparator(),
-		explorer.statsDuplicateSizeLabel,
-		widget.NewSeparator(),
-		explorer.statsSizeLabel,
-		widget.NewSeparator(),
-		explorer.statsGPUMemoryLabel,
-		widget.NewSeparator(),
-		explorer.statsTrianglesLabel,
-		widget.NewSeparator(),
-		explorer.statsTotalTrianglesLabel,
+		buildStatCard("Failed", explorer.statsFailedLabel),
+		buildStatCard("Duplicates", explorer.statsDuplicateLabel),
+		buildStatCard("Duplicate Size", explorer.statsDuplicateSizeLabel),
+		buildStatCard("Shown Size", explorer.statsSizeLabel),
+		buildStatCard("Shown GPU Memory", explorer.statsGPUMemoryLabel),
+		buildStatCard("Shown Triangles", explorer.statsTrianglesLabel),
+		buildStatCard("Shown Total Triangles", explorer.statsTotalTrianglesLabel),
 	)
 	controlItems := []fyne.CanvasObject{}
 	if options.HeaderContent != nil {
@@ -451,14 +459,15 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 	explorer.searchSuggestionsBox = container.NewHBox()
 	explorer.searchSuggestionsRow = container.NewHScroll(explorer.searchSuggestionsBox)
 	explorer.searchSuggestionsRow.Hide()
-	// statsRow also strings many labels together horizontally; wrap for the
-	// same reason.
+	// statsRow also strings many cards together horizontally; wrap so it can
+	// scroll instead of pinning the window wide.
 	statsRowScroll := container.NewHScroll(statsRow)
 	controlItems = append(controlItems,
 		widget.NewLabel("Filters"),
 		container.NewBorder(nil, nil, widget.NewLabel("Search:"), nil, explorer.searchEntry),
 		explorer.searchSuggestionsRow,
-		filterRowScroll,
+		quickFilters,
+		advancedAccordion,
 		statsRowScroll,
 	)
 	controls := container.NewVBox(controlItems...)
@@ -478,7 +487,12 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 	// so the user can read the engine's actual GPU footprint — and ships
 	// its own 4-up Color/Normal/Metalness/Roughness preview pane, so the
 	// asset-detail preview only attaches to the Assets tab.
-	assetsTabContent := container.NewHSplit(explorer.table, previewPanel)
+	// Wrap each side of the split in a card so the table frame and the
+	// asset-detail frame read as visually distinct panels.
+	assetsTabContent := container.NewHSplit(
+		widget.NewCard("Results", "", explorer.table),
+		widget.NewCard("Asset Detail", "", previewPanel),
+	)
 	assetsTabContent.Offset = 0.62
 	tableTabs := container.NewAppTabs(
 		container.NewTabItem("Assets", assetsTabContent),
@@ -492,6 +506,31 @@ func (explorer *ScanResultsExplorer) buildContent(options ScanResultsExplorerOpt
 		container.NewBorder(explorer.statusLabel, nil, nil, nil, tableTabs),
 	)
 	explorer.updateLargeTextureFilterControls()
+}
+
+// AddAdvancedFilterContent appends a control (e.g. the per-variant Path Filter
+// row) into the collapsible Advanced Filters panel.
+func (explorer *ScanResultsExplorer) AddAdvancedFilterContent(content fyne.CanvasObject) {
+	if explorer.advancedFilterBox == nil || content == nil {
+		return
+	}
+	explorer.advancedFilterBox.Add(content)
+}
+
+// newStatValueLabel builds the bold, centered value label shown at the top of
+// a summary dashboard card.
+func newStatValueLabel(initial string) *widget.Label {
+	return widget.NewLabelWithStyle(initial, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+}
+
+// buildStatCard wraps a metric value label with a small caption beneath it in a
+// bordered card, so counters read as a dashboard rather than plain text.
+func buildStatCard(caption string, value *widget.Label) fyne.CanvasObject {
+	captionText := canvas.NewText(caption, theme.Color(theme.ColorNameForeground))
+	captionText.TextSize = theme.CaptionTextSize()
+	captionText.Alignment = fyne.TextAlignCenter
+	inner := container.NewVBox(value, container.NewCenter(captionText))
+	return widget.NewCard("", "", inner)
 }
 
 func (explorer *ScanResultsExplorer) hasLargeTextureMetrics() bool {
@@ -1069,13 +1108,13 @@ func (explorer *ScanResultsExplorer) updateStatsLabels() {
 			}
 		}
 	}
-	explorer.statsFailedLabel.SetText(fmt.Sprintf("Failed: %d", failedRowsCount))
-	explorer.statsDuplicateLabel.SetText(fmt.Sprintf("Duplicates: %d", explorer.duplicateRowsCount))
-	explorer.statsDuplicateSizeLabel.SetText(fmt.Sprintf("Duplicate Size: %s", format.FormatSizeAuto(explorer.duplicateBytesTotal)))
-	explorer.statsSizeLabel.SetText(fmt.Sprintf("Shown Size: %s", format.FormatSizeAuto(shownBytesTotal)))
-	explorer.statsGPUMemoryLabel.SetText(fmt.Sprintf("Shown GPU Memory: %s", format.FormatSizeAuto64(shownGPUBytesTotal)))
-	explorer.statsTrianglesLabel.SetText(fmt.Sprintf("Shown Triangles: %d", shownTrianglesTotal))
-	explorer.statsTotalTrianglesLabel.SetText(fmt.Sprintf("Shown Total Triangles: %d", shownTotalTrianglesTotal))
+	explorer.statsFailedLabel.SetText(fmt.Sprintf("%d", failedRowsCount))
+	explorer.statsDuplicateLabel.SetText(fmt.Sprintf("%d", explorer.duplicateRowsCount))
+	explorer.statsDuplicateSizeLabel.SetText(format.FormatSizeAuto(explorer.duplicateBytesTotal))
+	explorer.statsSizeLabel.SetText(format.FormatSizeAuto(shownBytesTotal))
+	explorer.statsGPUMemoryLabel.SetText(format.FormatSizeAuto64(shownGPUBytesTotal))
+	explorer.statsTrianglesLabel.SetText(fmt.Sprintf("%d", shownTrianglesTotal))
+	explorer.statsTotalTrianglesLabel.SetText(fmt.Sprintf("%d", shownTotalTrianglesTotal))
 }
 
 func (explorer *ScanResultsExplorer) updateFilterOptions(hashCounts map[string]int) {

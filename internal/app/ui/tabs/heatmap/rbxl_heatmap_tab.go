@@ -193,7 +193,7 @@ var heatmapAssetStatsCache = struct {
 	statsByAsset: map[string]heatmap.AssetStats{},
 }
 
-func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
+func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string), func(string)) {
 	selectedFilePath := ""
 	selectedCompareFilePath := ""
 	selectedMapImagePath := ""
@@ -706,9 +706,9 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 				fyne.Do(func() {
 					statusLabel.SetText("Rendering 3D top-down map...")
 				})
-			topDownBytes, topDownErr := RenderTopDownMapImageFromParts(
-				mapParts, refs,
-				rbxlHeatmapImageSize, rbxlHeatmapImageSize,
+				topDownBytes, topDownErr := RenderTopDownMapImageFromParts(
+					mapParts, refs,
+					rbxlHeatmapImageSize, rbxlHeatmapImageSize,
 					func(done int, total int) {
 						fyne.Do(func() {
 							statusLabel.SetText(fmt.Sprintf("Resolving mesh assets for map... %d/%d", done, total))
@@ -839,6 +839,19 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		}
 	}
 
+	// setPlaceFile prefills the selected file (e.g. from the shared place-file
+	// bar) without auto-building the heatmap.
+	setPlaceFile := func(path string) {
+		trimmedPath := strings.TrimSpace(path)
+		if trimmedPath == "" || loading.Load() {
+			return
+		}
+		selectedFilePath = trimmedPath
+		filePathLabel.SetText(selectedFilePath)
+		setWarning(ui.MaterialVariantWarningData{})
+		statusLabel.SetText("Ready to build heatmap.")
+	}
+
 	// Wrap the whole tab in a VScroll so the tall controls stack
 	// (~400px) doesn't pin the main window's minimum height. When the
 	// window is tall the scroll is invisible; when it's short the
@@ -850,7 +863,7 @@ func NewRBXLHeatmapTab(window fyne.Window) (fyne.CanvasObject, func(string)) {
 		nil,
 		nil,
 		viewerStack,
-	)), loadRBXLFile
+	)), loadRBXLFile, setPlaceFile
 }
 
 func buildRBXLHeatmapScene(
@@ -2431,4 +2444,3 @@ func blankHeatmapPreviewOption() ui.PreviewDownloadOption {
 		Height:    2,
 	}
 }
-

@@ -36,6 +36,21 @@ build_mesh_renderer() {
   (cd "$ROOT_DIR/tools/mesh-renderer" && go build -o "$ROOT_DIR/joxblox-mesh-renderer$(go env GOEXE)" .)
 }
 
+build_wails() {
+  echo "Building Wails (web-rendered) app..."
+  local wails_bin
+  wails_bin="$(command -v wails || true)"
+  if [ -z "$wails_bin" ]; then
+    wails_bin="$(go env GOPATH)/bin/wails"
+  fi
+  if [ ! -x "$wails_bin" ]; then
+    echo "wails CLI not found. Install with:"
+    echo "  go install github.com/wailsapp/wails/v2/cmd/wails@latest"
+    exit 1
+  fi
+  (cd "$ROOT_DIR" && "$wails_bin" build)
+}
+
 build_release() {
   : "${VERSION_NAME:?VERSION_NAME must be set for release builds (e.g. VERSION_NAME=v1.2.3 ./build.sh release)}"
 
@@ -85,6 +100,9 @@ case "$TARGET" in
   mesh-renderer)
     build_mesh_renderer
     ;;
+  wails)
+    build_wails
+    ;;
   release)
     build_release
     ;;
@@ -94,7 +112,7 @@ case "$TARGET" in
     build_mesh_renderer
     ;;
   *)
-    echo "Usage: $0 [go|rust|mesh-renderer|release|all]"
+    echo "Usage: $0 [go|rust|mesh-renderer|wails|release|all]"
     exit 1
     ;;
 esac

@@ -22,12 +22,10 @@ import (
 	"joxblox/internal/app/ui/tabs/singleasset"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
-	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/mesh"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
@@ -81,11 +79,11 @@ func Run() {
 	guiApp.SetIcon(appIcon)
 	window := guiApp.NewWindow(fmt.Sprintf("%s %s", appDisplayName, appVersion))
 	window.SetIcon(appIcon)
-	window.Resize(fyne.NewSize(1350, 900))
+	window.Resize(fyne.NewSize(1280, 760))
 
 	var viewInScanCallback func(string, bool, float64, []loader.ScanResult, string)
 	var viewInHeatmapCallback func(string)
-	reportGenerationContent, loadReportFile := reportgeneration.NewReportGenerationTab(
+	reportGenerationContent, loadReportFile, setReportPlaceFile := reportgeneration.NewReportGenerationTab(
 		window,
 		func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string) {
 			if viewInScanCallback != nil {
@@ -98,29 +96,37 @@ func Run() {
 			}
 		},
 	)
-	reportGenerationTab := container.NewTabItem(tabTitleReportGeneration, reportGenerationContent)
 	singleAssetContent, loadSingleAssetByID := singleasset.NewSingleAssetTab(window)
-	singleAssetTab := container.NewTabItem(tabTitleSingleAsset, singleAssetContent)
-	scanContent, scanFileActions, allScanFileActions, selectScanContext, loadScanRBXLFile := scan.NewScanTab(window)
-	scanTab := container.NewTabItem(tabTitleScan, scanContent)
-	rbxlHeatmapContent, loadHeatmapRBXLFile := heatmaptab.NewRBXLHeatmapTab(window)
-	rbxlHeatmapTab := container.NewTabItem(tabTitleRBXLHeatmap, rbxlHeatmapContent)
-	modelHeatmapTab := container.NewTabItem(tabTitleModelHeatmap, heatmaptab.NewModelHeatmapTab(window))
-	lodViewerTab := container.NewTabItem(tabTitleLodViewer, lodviewer.NewLodViewerTab(window))
-	optimizeTab := container.NewTabItem(tabTitleOptimizeAssets, optimizeassets.NewOptimizeAssetsTab(window))
-	imageUploaderTab := container.NewTabItem(tabTitleImageGenerator, imageuploader.NewImageUploaderTab(window))
-	renderdocTab := container.NewTabItem(tabTitleRenderDoc, renderdoctab.NewRenderDocTab(window))
-	diffTab := container.NewTabItem(tabTitleDiff, diff.NewDiffTab(window))
-	tabs := container.NewAppTabs(reportGenerationTab, singleAssetTab, scanTab, rbxlHeatmapTab, modelHeatmapTab, lodViewerTab, optimizeTab, imageUploaderTab, renderdocTab, diffTab)
-	tabs.Select(reportGenerationTab)
+	scanContent, scanFileActions, allScanFileActions, selectScanContext, loadScanRBXLFile, setScanPlaceFile := scan.NewScanTab(window)
+	rbxlHeatmapContent, loadHeatmapRBXLFile, setHeatmapPlaceFile := heatmaptab.NewRBXLHeatmapTab(window)
+
+	nav := newNavigator([]navGroupDef{
+		{title: "Core Analytics", items: []navItemDef{
+			{key: tabTitleReportGeneration, title: tabTitleReportGeneration, content: reportGenerationContent},
+			{key: tabTitleScan, title: tabTitleScan, content: scanContent},
+			{key: tabTitleRBXLHeatmap, title: tabTitleRBXLHeatmap, content: rbxlHeatmapContent},
+			{key: tabTitleModelHeatmap, title: tabTitleModelHeatmap, content: heatmaptab.NewModelHeatmapTab(window)},
+		}},
+		{title: "Asset Management", items: []navItemDef{
+			{key: tabTitleSingleAsset, title: tabTitleSingleAsset, content: singleAssetContent},
+			{key: tabTitleLodViewer, title: tabTitleLodViewer, content: lodviewer.NewLodViewerTab(window)},
+			{key: tabTitleOptimizeAssets, title: tabTitleOptimizeAssets, content: optimizeassets.NewOptimizeAssetsTab(window)},
+		}},
+		{title: "Utilities", items: []navItemDef{
+			{key: tabTitleImageGenerator, title: tabTitleImageGenerator, content: imageuploader.NewImageUploaderTab(window)},
+			{key: tabTitleRenderDoc, title: tabTitleRenderDoc, content: renderdoctab.NewRenderDocTab(window)},
+			{key: tabTitleDiff, title: tabTitleDiff, content: diff.NewDiffTab(window)},
+		}},
+	})
+	nav.Select(tabTitleReportGeneration)
 	ui.OpenSingleAsset = func(assetID int64) {
-		tabs.Select(singleAssetTab)
+		nav.Select(tabTitleSingleAsset)
 		if loadSingleAssetByID != nil {
 			loadSingleAssetByID(assetID)
 		}
 	}
 	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string) {
-		tabs.Select(scanTab)
+		nav.Select(tabTitleScan)
 		if loadScanRBXLFile != nil {
 			pathFilter := ""
 			if workspaceOnly {
@@ -135,10 +141,20 @@ func Run() {
 		}
 	}
 	viewInHeatmapCallback = func(path string) {
-		tabs.Select(rbxlHeatmapTab)
+		nav.Select(tabTitleRBXLHeatmap)
 		if loadHeatmapRBXLFile != nil {
 			loadHeatmapRBXLFile(path)
 		}
+	}
+	selectScanTab := func() { nav.Select(tabTitleScan) }
+	placeFileBar, setSharedPlaceFile := buildPlaceFileBar(window, []func(string){
+		setReportPlaceFile,
+		setScanPlaceFile,
+		setHeatmapPlaceFile,
+	})
+	auth := newAuthController(window)
+	showSettings := func(w fyne.Window) {
+		showSettingsDialog(w, auth.settingsSection())
 	}
 	helpAbout := menu.AboutMeta{
 		DisplayName: appDisplayName,
@@ -149,12 +165,11 @@ func Run() {
 	}
 	menu.BindMainFileMenu(
 		window,
-		tabs,
-		scanTab,
+		selectScanTab,
 		scanFileActions,
 		allScanFileActions,
 		selectScanContext,
-		showSettingsDialog,
+		showSettings,
 		func(w fyne.Window) *fyne.Menu {
 			return menu.BuildHelpMenu(w, helpAbout, loadChangelogText, loadLicenseText)
 		},
@@ -181,7 +196,7 @@ func Run() {
 					}
 					importFormat := scan.DetectScanImportFormat(importBytes)
 					fyne.Do(func() {
-						tabs.Select(scanTab)
+						nav.Select(tabTitleScan)
 						if importFormat == scan.ScanImportFormatWorkspace {
 							menu.LoadAllScanResultsFromPathAsync(window, allScanFileActions, importPath, func(selectedContext string, loaded bool) {
 								if loaded && selectScanContext != nil && selectedContext != "" {
@@ -209,7 +224,8 @@ func Run() {
 					continue
 				}
 				fyne.Do(func() {
-					tabs.Select(reportGenerationTab)
+					setSharedPlaceFile(candidatePath)
+					nav.Select(tabTitleReportGeneration)
 					if loadReportFile != nil {
 						loadReportFile(candidatePath)
 					}
@@ -218,185 +234,30 @@ func Run() {
 			}
 		})
 	}
-	authPanel := newAuthPanel(window)
-	mainContent := container.NewBorder(nil, authPanel, nil, nil, tabs)
+	header := buildHeaderBar(auth, showSettings, window, placeFileBar)
+	mainContent := container.NewBorder(header, nil, nil, nil, nav.Root())
 	window.SetContent(fynetooltip.AddWindowToolTipLayer(mainContent, window.Canvas()))
+	window.CenterOnScreen()
+	debug.Logf("WINFIT maincontent min -> %.0f x %.0f", mainContent.MinSize().Width, mainContent.MinSize().Height)
 	debug.Logf("Application started")
 	window.ShowAndRun()
 }
 
-func newAuthPanel(window fyne.Window) fyne.CanvasObject {
-	statusLabel := widget.NewLabel("Auth: Disabled")
-	statusDot := canvas.NewCircle(theme.Color(theme.ColorNameError))
-	statusDotWrapper := container.NewCenter(container.NewGridWrap(fyne.NewSize(10, 10), statusDot))
-	cookieEntry := widget.NewPasswordEntry()
-	cookieEntry.SetPlaceHolder("Optional .ROBLOSECURITY cookie value")
-	rememberAuthCheck := widget.NewCheck("Save to keychain", nil)
-	isAuthSaved := false
-	authValidationFailed := false
-	applyAuthIndicator := func() {
-		if authValidationFailed {
-			statusLabel.SetText("Auth: Failed")
-			statusDot.FillColor = theme.Color(theme.ColorNameError)
-			statusDot.Refresh()
-			return
+// buildHeaderBar constructs the persistent top header: app brand on the left,
+// the shared place-file bar in the center, and the auth-status indicator plus
+// a Settings gear on the right.
+func buildHeaderBar(auth *authController, showSettings func(fyne.Window), window fyne.Window, placeFileBar fyne.CanvasObject) fyne.CanvasObject {
+	brand := widget.NewLabelWithStyle(appDisplayName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	gearButton := widget.NewButtonWithIcon("", theme.SettingsIcon(), func() {
+		if showSettings != nil {
+			showSettings(window)
 		}
-		if roblox.IsAuthenticationEnabled() {
-			if isAuthSaved {
-				statusLabel.SetText("Auth: Saved")
-			} else {
-				statusLabel.SetText("Auth: Enabled")
-			}
-			statusDot.FillColor = theme.Color(theme.ColorNameSuccess)
-		} else {
-			statusLabel.SetText("Auth: Disabled")
-			statusDot.FillColor = theme.Color(theme.ColorNameError)
-		}
-		statusDot.Refresh()
-	}
-	helpButton := widget.NewButton("?", func() {
-		dialog.ShowInformation(
-			".ROBLOSECURITY Help",
-			"How to get it:\n"+
-				"1) Sign in at https://www.roblox.com in your browser.\n"+
-				"2) Open browser developer tools.\n"+
-				"3) Go to Storage/Application -> Cookies -> .roblox.com.\n"+
-				"4) Copy the .ROBLOSECURITY cookie value.\n"+
-				"5) Paste it here and click Apply Auth.\n\n"+
-				"Security note: This cookie grants account access. Treat it like a password and do not share it.\n\n"+
-				"When 'Remember Auth' is enabled, this app stores the cookie in your OS secure credential store "+
-				"(for example, Keychain on macOS). It is not saved in plaintext project files.\n"+
-				"Using Clear Auth removes the in-memory cookie and deletes the saved keychain credential.",
-			window,
-		)
 	})
-	helpButton.Resize(fyne.NewSize(32, 32))
-
-	applyButton := widget.NewButton("Apply Auth", func() {
-		authValidationFailed = false
-		rawCookie := strings.TrimSpace(cookieEntry.Text)
-		if rawCookie == "" {
-			debug.Logf("Auth cookie cleared via Apply Auth")
-			roblox.ClearRoblosecurityCookie()
-			isAuthSaved = false
-			_ = roblox.DeleteRoblosecurityCookieFromKeyring()
-			rememberAuthCheck.SetChecked(false)
-			applyAuthIndicator()
-			return
-		}
-
-		validationErr := roblox.ValidateRoblosecurityCookie(rawCookie)
-		if validationErr != nil {
-			debug.Logf("Auth validation failed: %s", roblox.SanitizeAuthErrorMessage(validationErr))
-			roblox.ClearRoblosecurityCookie()
-			isAuthSaved = false
-			authValidationFailed = true
-			applyAuthIndicator()
-			statusLabel.SetText(fmt.Sprintf("Auth: Failed (%s)", roblox.SanitizeAuthErrorMessage(validationErr)))
-			return
-		}
-
-		roblox.SetRoblosecurityCookie(rawCookie)
-		debug.Logf("Auth cookie applied successfully")
-		isAuthSaved = false
-
-		if rememberAuthCheck.Checked {
-			if err := roblox.SaveRoblosecurityCookieToKeyring(rawCookie); err != nil {
-				debug.Logf("Auth keychain save failed: %s", err.Error())
-				applyAuthIndicator()
-				statusLabel.SetText(fmt.Sprintf("Auth: Enabled (save failed: %s)", err.Error()))
-				return
-			}
-			isAuthSaved = true
-			debug.Logf("Auth cookie saved to secure keychain")
-		} else {
-			_ = roblox.DeleteRoblosecurityCookieFromKeyring()
-		}
-
-		applyAuthIndicator()
-	})
-	clearButton := widget.NewButton("Clear Auth", func() {
-		debug.Logf("Auth cleared")
-		roblox.ClearRoblosecurityCookie()
-		authValidationFailed = false
-		deleteErr := roblox.DeleteRoblosecurityCookieFromKeyring()
-		if deleteErr == nil {
-			isAuthSaved = false
-		}
-		cookieEntry.SetText("")
-		applyAuthIndicator()
-		if deleteErr != nil {
-			statusLabel.SetText(fmt.Sprintf("Auth: Disabled (clear failed: %s)", deleteErr.Error()))
-			return
-		}
-		rememberAuthCheck.SetChecked(false)
-	})
-
-	labeledEntry := container.NewBorder(
-		nil,
-		nil,
-		widget.NewLabel("Auth Cookie:"),
-		container.NewHBox(rememberAuthCheck),
-		cookieEntry,
-	)
-	leftControls := container.NewBorder(
-		nil,
-		nil,
-		nil,
-		container.NewHBox(helpButton, applyButton, clearButton),
-		labeledEntry,
-	)
-	rightStatus := container.NewHBox(statusDotWrapper, statusLabel)
-	footerRow := container.NewBorder(nil, nil, nil, rightStatus, leftControls)
-
-	loadErrorMessage := ""
-	storedCookie, loadErr := roblox.LoadRoblosecurityCookieFromKeyring()
-	if loadErr != nil {
-		debug.Logf("Failed to load auth cookie from keychain: %s", loadErr.Error())
-		loadErrorMessage = fmt.Sprintf("Auth: Disabled (load failed: %s)", loadErr.Error())
-	} else if storedCookie != "" {
-		debug.Logf("Loaded auth cookie from keychain")
-		roblox.SetRoblosecurityCookie(storedCookie)
-		cookieEntry.SetText(storedCookie)
-		rememberAuthCheck.SetChecked(true)
-		isAuthSaved = true
-		authValidationFailed = false
-	}
-	applyAuthIndicator()
-	if loadErrorMessage != "" {
-		statusLabel.SetText(loadErrorMessage)
-	}
-
-	if storedCookie != "" {
-		statusLabel.SetText("Auth: Validating...")
-		// Defer until the Fyne driver loop is running, otherwise fyne.Do may
-		// execute inline on the background goroutine and trip the 2.6 thread
-		// check when touching widgets.
-		fyne.CurrentApp().Lifecycle().SetOnStarted(func() {
-			go func() {
-				validationErr := roblox.ValidateRoblosecurityCookie(storedCookie)
-				fyne.Do(func() {
-					if validationErr != nil {
-						debug.Logf("Startup auth validation failed: %s", roblox.SanitizeAuthErrorMessage(validationErr))
-						authValidationFailed = true
-						applyAuthIndicator()
-						statusLabel.SetText(fmt.Sprintf("Auth: Expired (%s)", roblox.SanitizeAuthErrorMessage(validationErr)))
-						dialog.ShowError(
-							fmt.Errorf("your saved auth cookie is expired or invalid — please update it in the Auth panel below"),
-							window,
-						)
-					} else {
-						debug.Logf("Startup auth validation succeeded")
-						authValidationFailed = false
-						applyAuthIndicator()
-					}
-				})
-			}()
-		})
-	}
-
+	gearButton.Importance = widget.LowImportance
+	rightControls := container.NewHBox(auth.statusObject(), gearButton)
+	headerRow := container.NewBorder(nil, nil, container.NewVBox(brand), rightControls, container.NewVBox(placeFileBar))
 	return container.NewVBox(
+		container.NewPadded(headerRow),
 		widget.NewSeparator(),
-		widget.NewCard("", "", footerRow),
 	)
 }

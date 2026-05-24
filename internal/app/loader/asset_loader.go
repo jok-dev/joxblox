@@ -103,6 +103,17 @@ type ImageInfo struct {
 	NonOpaqueAlphaPixels int64
 }
 
+// ImageBytes returns the raw encoded preview bytes (PNG/JPEG/…) carried by
+// the Fyne resource, or nil when no preview image is present. It lets
+// Fyne-free callers (e.g. the web UI) read the preview without importing
+// fyne or touching the *fyne.StaticResource type directly.
+func (info *ImageInfo) ImageBytes() []byte {
+	if info == nil || info.Resource == nil {
+		return nil
+	}
+	return info.Resource.Content()
+}
+
 type ChildAssetInfo struct {
 	AssetID      int64
 	BytesSize    int

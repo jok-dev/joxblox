@@ -46,3 +46,9 @@ joxblox-private-tests/
 .claude/settings.local.json
 
 joxblox
+
+# Wails / web frontend
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/gitkeep
+build/bin/
