@@ -8,6 +8,8 @@ import (
 
 	"joxblox/internal/app/loader"
 	"joxblox/internal/audio"
+	"joxblox/internal/extractor"
+	"joxblox/internal/roblox/mesh"
 )
 
 // App wires application lifecycle and owns the bound service structs.
@@ -18,6 +20,7 @@ type App struct {
 	Settings *SettingsService
 	Asset    *AssetService
 	Scan     *ScanService
+	Report   *ReportService
 }
 
 // NewApp constructs the app and its services.
@@ -27,6 +30,7 @@ func NewApp() *App {
 		Settings: NewSettingsService(),
 		Asset:    NewAssetService(),
 		Scan:     NewScanService(),
+		Report:   NewReportService(),
 	}
 }
 
@@ -37,7 +41,19 @@ func (a *App) Startup(ctx context.Context) {
 	a.Auth.startup(ctx)
 	a.Asset.startup(ctx)
 	a.Scan.startup(ctx)
+	a.Report.startup(ctx)
 	a.wireLoaderGlobals()
+	wireNativeHelpers()
+}
+
+// wireNativeHelpers points the Fyne-free native-helper hooks at the webapp's
+// bundled implementations, replacing the wiring the Fyne app.Run did: the Rust
+// asset-tool binary (embedded in release builds, sidecar/cargo in dev) and the
+// core mesh-stats fallback used for triangle counts. The mesh-renderer side
+// binary is intentionally not wired — no web tab renders 3D previews yet.
+func wireNativeHelpers() {
+	extractor.BinaryProvider = bundledRustyAssetToolBinary
+	mesh.CoreMeshFallback = extractor.ExtractMeshStatsFromBytes
 }
 
 // Bindings returns the service structs exposed to the frontend. App itself is
@@ -49,6 +65,7 @@ func (a *App) Bindings() []interface{} {
 		a.Settings,
 		a.Asset,
 		a.Scan,
+		a.Report,
 	}
 }
 

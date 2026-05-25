@@ -1,14 +1,14 @@
-package reportgeneration
+package report
 
 import (
 	"math"
 	"testing"
 
 	"joxblox/internal/app/loader"
-	"joxblox/internal/app/ui/tabs/heatmap"
 	"joxblox/internal/extractor"
 	"joxblox/internal/format"
 	"joxblox/internal/heatmap"
+	"joxblox/internal/rbxlscene"
 )
 
 func TestBuildReportSummaryAndPoints(t *testing.T) {
@@ -319,7 +319,7 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 			FileSHA256: "hash1",
 		},
 	}
-	mapParts := []heatmaptab.RBXLHeatmapMapPart{
+	mapParts := []rbxlscene.RBXLHeatmapMapPart{
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart1"},
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2"},
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart3"},
@@ -341,7 +341,7 @@ func TestBuildReportSummaryAndPointsUsesMapPartsForCounts(t *testing.T) {
 }
 
 func TestBuildReportGenerationCellsUsesFixedCellSize(t *testing.T) {
-	points := []heatmaptab.RBXLHeatmapPoint{
+	points := []rbxlscene.RBXLHeatmapPoint{
 		{
 			AssetID: 1,
 			Stats:   heatmap.AssetStats{TotalBytes: 100},
@@ -355,7 +355,7 @@ func TestBuildReportGenerationCellsUsesFixedCellSize(t *testing.T) {
 			Z:       10,
 		},
 	}
-	mapParts := []heatmaptab.RBXLHeatmapMapPart{
+	mapParts := []rbxlscene.RBXLHeatmapMapPart{
 		{
 			InstanceType: "Part",
 			InstancePath: "Workspace.Part1",
@@ -378,7 +378,7 @@ func TestBuildReportGenerationCellsUsesFixedCellSize(t *testing.T) {
 }
 
 func TestBuildReportGenerationCellsUsesMapPartsForPartCounts(t *testing.T) {
-	points := []heatmaptab.RBXLHeatmapPoint{
+	points := []rbxlscene.RBXLHeatmapPoint{
 		{
 			AssetID: 1,
 			Stats:   heatmap.AssetStats{TotalBytes: 100},
@@ -386,7 +386,7 @@ func TestBuildReportGenerationCellsUsesMapPartsForPartCounts(t *testing.T) {
 			Z:       10,
 		},
 	}
-	mapParts := []heatmaptab.RBXLHeatmapMapPart{
+	mapParts := []rbxlscene.RBXLHeatmapMapPart{
 		{
 			InstanceType: "MeshPart",
 			InstancePath: "Workspace.MeshPart1",
@@ -430,7 +430,7 @@ func TestBuildReportGenerationCellsUsesMapPartsForPartCounts(t *testing.T) {
 }
 
 func TestBuildReportGenerationCellsDeduplicatesAssetSizeWithinCell(t *testing.T) {
-	points := []heatmaptab.RBXLHeatmapPoint{
+	points := []rbxlscene.RBXLHeatmapPoint{
 		{
 			AssetID:      1,
 			InstancePath: "Workspace.MeshPart1",
@@ -472,7 +472,7 @@ func TestBuildReportGenerationCellsDeduplicatesAssetSizeWithinCell(t *testing.T)
 }
 
 func TestCountEstimatedDrawCallsGroupsMeshPartsByInstancingKey(t *testing.T) {
-	mapParts := []heatmaptab.RBXLHeatmapMapPart{
+	mapParts := []rbxlscene.RBXLHeatmapMapPart{
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart1", MaterialKey: "metal"},
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart2", MaterialKey: "metal"},
 		{InstanceType: "MeshPart", InstancePath: "Workspace.MeshPart3", MaterialKey: "wood"},
@@ -495,7 +495,7 @@ func TestCountEstimatedDrawCallsGroupsMeshPartsByInstancingKey(t *testing.T) {
 func TestBuildReportGenerationCellsEstimatesDrawCallsFromRefs(t *testing.T) {
 	x1, y1, z1 := 10.0, 5.0, 10.0
 	x2, y2, z2 := 20.0, 5.0, 20.0
-	points := []heatmaptab.RBXLHeatmapPoint{
+	points := []rbxlscene.RBXLHeatmapPoint{
 		{
 			AssetID:      1,
 			InstanceType: "MeshPart",
@@ -552,7 +552,7 @@ func TestCountReportGenerationOversizedTextures(t *testing.T) {
 			Stats: heatmap.AssetStats{TextureBytes: 10_000},
 		},
 	}
-	mapParts := []heatmaptab.RBXLHeatmapMapPart{
+	mapParts := []rbxlscene.RBXLHeatmapMapPart{
 		{
 			InstancePath: "Workspace.BigTexture",
 			SizeX:        5,

@@ -68,20 +68,6 @@ export namespace webapp {
 	        this.message = source["message"];
 	    }
 	}
-	export class ScanOptions {
-	    pathFilter: string;
-	    largeTextureThresholdMb: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new ScanOptions(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.pathFilter = source["pathFilter"];
-	        this.largeTextureThresholdMb = source["largeTextureThresholdMb"];
-	    }
-	}
 	export class ScanSummary {
 	    totalAssets: number;
 	    failedCount: number;
@@ -200,6 +186,175 @@ export namespace webapp {
 		    return a;
 		}
 	}
+	export class CachedScanReport {
+	    found: boolean;
+	    report: ScanReport;
+	
+	    static createFrom(source: any = {}) {
+	        return new CachedScanReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.found = source["found"];
+	        this.report = this.convertValues(source["report"], ScanReport);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DataModelService {
+	    name: string;
+	    className: string;
+	    instanceCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DataModelService(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.className = source["className"];
+	        this.instanceCount = source["instanceCount"];
+	    }
+	}
+	export class ReportDetailRow {
+	    header: string;
+	    lines: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ReportDetailRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.header = source["header"];
+	        this.lines = source["lines"];
+	    }
+	}
+	export class ReportGrade {
+	    grade: string;
+	    label: string;
+	    value: string;
+	    avgCellValue: string;
+	    maxCellValue: string;
+	    description: string;
+	    metricDescription: string;
+	    hasDetail: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ReportGrade(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.grade = source["grade"];
+	        this.label = source["label"];
+	        this.value = source["value"];
+	        this.avgCellValue = source["avgCellValue"];
+	        this.maxCellValue = source["maxCellValue"];
+	        this.description = source["description"];
+	        this.metricDescription = source["metricDescription"];
+	        this.hasDetail = source["hasDetail"];
+	    }
+	}
+	export class ReportResult {
+	    hasData: boolean;
+	    assetTypeLabel: string;
+	    overallGrade: string;
+	    overallScore: number;
+	    overallGradeIgnoringBan: string;
+	    overallScoreIgnoringBan: number;
+	    rangeNote: string;
+	    cellCount: number;
+	    wholeFileMode: boolean;
+	    grades: ReportGrade[];
+	    hasDuplicates: boolean;
+	    bannedCount: number;
+	    bannedLimitMb: number;
+	    warning: string;
+	    warningDetail: string;
+	    mismatchedPbr: ReportDetailRow[];
+	    oversized: ReportDetailRow[];
+	    banned: ReportDetailRow[];
+	    duplicates: ReportDetailRow[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ReportResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.hasData = source["hasData"];
+	        this.assetTypeLabel = source["assetTypeLabel"];
+	        this.overallGrade = source["overallGrade"];
+	        this.overallScore = source["overallScore"];
+	        this.overallGradeIgnoringBan = source["overallGradeIgnoringBan"];
+	        this.overallScoreIgnoringBan = source["overallScoreIgnoringBan"];
+	        this.rangeNote = source["rangeNote"];
+	        this.cellCount = source["cellCount"];
+	        this.wholeFileMode = source["wholeFileMode"];
+	        this.grades = this.convertValues(source["grades"], ReportGrade);
+	        this.hasDuplicates = source["hasDuplicates"];
+	        this.bannedCount = source["bannedCount"];
+	        this.bannedLimitMb = source["bannedLimitMb"];
+	        this.warning = source["warning"];
+	        this.warningDetail = source["warningDetail"];
+	        this.mismatchedPbr = this.convertValues(source["mismatchedPbr"], ReportDetailRow);
+	        this.oversized = this.convertValues(source["oversized"], ReportDetailRow);
+	        this.banned = this.convertValues(source["banned"], ReportDetailRow);
+	        this.duplicates = this.convertValues(source["duplicates"], ReportDetailRow);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ScanOptions {
+	    pathFilter: string;
+	    largeTextureThresholdMb: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScanOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pathFilter = source["pathFilter"];
+	        this.largeTextureThresholdMb = source["largeTextureThresholdMb"];
+	    }
+	}
+	
 	
 	
 	export class Settings {

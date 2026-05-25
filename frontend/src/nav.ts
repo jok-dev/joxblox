@@ -7,7 +7,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: "Core Analytics",
     items: [
-      { key: "report", title: "Report Generation" },
+      { key: "report", title: "Summary" },
       { key: "scan", title: "Asset Breakdown" },
       { key: "heatmap", title: "Heatmap" },
       { key: "heatmap3d", title: "3D Heatmap" },

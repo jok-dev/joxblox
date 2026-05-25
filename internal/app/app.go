@@ -18,7 +18,6 @@ import (
 	"joxblox/internal/app/ui/tabs/lodviewer"
 	"joxblox/internal/app/ui/tabs/optimizeassets"
 	renderdoctab "joxblox/internal/app/ui/tabs/renderdoc"
-	"joxblox/internal/app/ui/tabs/reportgeneration"
 	"joxblox/internal/app/ui/tabs/singleasset"
 	"joxblox/internal/debug"
 	"joxblox/internal/extractor"
@@ -81,28 +80,12 @@ func Run() {
 	window.SetIcon(appIcon)
 	window.Resize(fyne.NewSize(1280, 760))
 
-	var viewInScanCallback func(string, bool, float64, []loader.ScanResult, string)
-	var viewInHeatmapCallback func(string)
-	reportGenerationContent, loadReportFile, setReportPlaceFile := reportgeneration.NewReportGenerationTab(
-		window,
-		func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string) {
-			if viewInScanCallback != nil {
-				viewInScanCallback(path, workspaceOnly, oversizedTextureThreshold, prebuiltResults, assetTypeLabel)
-			}
-		},
-		func(path string) {
-			if viewInHeatmapCallback != nil {
-				viewInHeatmapCallback(path)
-			}
-		},
-	)
 	singleAssetContent, loadSingleAssetByID := singleasset.NewSingleAssetTab(window)
 	scanContent, scanFileActions, allScanFileActions, selectScanContext, loadScanRBXLFile, setScanPlaceFile := scan.NewScanTab(window)
-	rbxlHeatmapContent, loadHeatmapRBXLFile, setHeatmapPlaceFile := heatmaptab.NewRBXLHeatmapTab(window)
+	rbxlHeatmapContent, _, setHeatmapPlaceFile := heatmaptab.NewRBXLHeatmapTab(window)
 
 	nav := newNavigator([]navGroupDef{
 		{title: "Core Analytics", items: []navItemDef{
-			{key: tabTitleReportGeneration, title: tabTitleReportGeneration, content: reportGenerationContent},
 			{key: tabTitleScan, title: tabTitleScan, content: scanContent},
 			{key: tabTitleRBXLHeatmap, title: tabTitleRBXLHeatmap, content: rbxlHeatmapContent},
 			{key: tabTitleModelHeatmap, title: tabTitleModelHeatmap, content: heatmaptab.NewModelHeatmapTab(window)},
@@ -118,37 +101,15 @@ func Run() {
 			{key: tabTitleDiff, title: tabTitleDiff, content: diff.NewDiffTab(window)},
 		}},
 	})
-	nav.Select(tabTitleReportGeneration)
+	nav.Select(tabTitleScan)
 	ui.OpenSingleAsset = func(assetID int64) {
 		nav.Select(tabTitleSingleAsset)
 		if loadSingleAssetByID != nil {
 			loadSingleAssetByID(assetID)
 		}
 	}
-	viewInScanCallback = func(path string, workspaceOnly bool, oversizedTextureThreshold float64, prebuiltResults []loader.ScanResult, assetTypeLabel string) {
-		nav.Select(tabTitleScan)
-		if loadScanRBXLFile != nil {
-			pathFilter := ""
-			if workspaceOnly {
-				pathFilter = "Workspace.*\nMaterialService.*"
-			}
-			loadScanRBXLFile(path, scan.ScanLoadOptions{
-				PathFilterText:        pathFilter,
-				LargeTextureThreshold: oversizedTextureThreshold,
-				AssetTypeLabel:        assetTypeLabel,
-				PrebuiltResults:       prebuiltResults,
-			})
-		}
-	}
-	viewInHeatmapCallback = func(path string) {
-		nav.Select(tabTitleRBXLHeatmap)
-		if loadHeatmapRBXLFile != nil {
-			loadHeatmapRBXLFile(path)
-		}
-	}
 	selectScanTab := func() { nav.Select(tabTitleScan) }
 	placeFileBar, setSharedPlaceFile := buildPlaceFileBar(window, []func(string){
-		setReportPlaceFile,
 		setScanPlaceFile,
 		setHeatmapPlaceFile,
 	})
@@ -225,9 +186,9 @@ func Run() {
 				}
 				fyne.Do(func() {
 					setSharedPlaceFile(candidatePath)
-					nav.Select(tabTitleReportGeneration)
-					if loadReportFile != nil {
-						loadReportFile(candidatePath)
+					nav.Select(tabTitleScan)
+					if loadScanRBXLFile != nil {
+						loadScanRBXLFile(candidatePath, scan.ScanLoadOptions{})
 					}
 				})
 				return

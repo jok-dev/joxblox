@@ -393,6 +393,68 @@ func ExtractInstanceCount(filePath string, pathPrefixes []string, stopChannel <-
 	return InstanceCountResult{Count: payload.Count, Positions: positions}, nil
 }
 
+// DataModelNode is one top-level service from the rust `tree` subcommand: a
+// direct child of the file root plus the total instance count in its subtree.
+type DataModelNode struct {
+	Name          string `json:"name"`
+	ClassName     string `json:"className"`
+	InstanceCount int64  `json:"instanceCount"`
+}
+
+// ExtractDataModelTree returns the place file's top-level services (the direct
+// children of the DataModel root) with each subtree's instance count. Backs the
+// Asset Breakdown "Datamodel" selector that lets the user pick which parts of
+// the file to analyze.
+func ExtractDataModelTree(filePath string, stopChannel <-chan struct{}) ([]DataModelNode, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return nil, nil
+	}
+	debug.Logf("Rusty Asset Tool tree: %s", filePath)
+
+	commandContext, cancelCommand := context.WithCancel(context.Background())
+	defer cancelCommand()
+	if stopChannel != nil {
+		go func() {
+			select {
+			case <-stopChannel:
+				cancelCommand()
+			case <-commandContext.Done():
+			}
+		}()
+	}
+
+	commandName, commandArgs, _, resolveErr := resolveSubcommand("tree", filePath)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	command := exec.CommandContext(commandContext, commandName, commandArgs...)
+	procutil.HideWindow(command)
+	command.Env = appendCargoEnv(os.Environ())
+	var stdoutBuffer bytes.Buffer
+	var stderrBuffer bytes.Buffer
+	command.Stdout = &stdoutBuffer
+	command.Stderr = &stderrBuffer
+	runErr := command.Run()
+	if commandContext.Err() != nil {
+		return nil, ErrCancelled
+	}
+	if runErr != nil {
+		stderrText := strings.TrimSpace(stderrBuffer.String())
+		if stderrText != "" {
+			return nil, fmt.Errorf("Rusty Asset Tool failed: %s", stderrText)
+		}
+		return nil, fmt.Errorf("Rusty Asset Tool failed: %s", runErr.Error())
+	}
+
+	var nodes []DataModelNode
+	if err := json.Unmarshal(stdoutBuffer.Bytes(), &nodes); err != nil {
+		return nil, fmt.Errorf("Rusty Asset Tool JSON parse failed: %s", err.Error())
+	}
+	debug.Logf("Rusty Asset Tool tree returned %d top-level services", len(nodes))
+	return nodes, nil
+}
+
 func ExtractMapRenderParts(filePath string, pathPrefixes []string, stopChannel <-chan struct{}) ([]MapRenderPartResult, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return nil, nil

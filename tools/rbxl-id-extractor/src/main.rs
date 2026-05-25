@@ -196,6 +196,9 @@ fn run() -> Result<(), String> {
     if args.len() >= 2 && args[1] == "instance-count" {
         return run_instance_count(&args);
     }
+    if args.len() >= 2 && args[1] == "tree" {
+        return run_tree(&args);
+    }
     if args.len() >= 2 && args[1] == "replace" {
         return run_replace(&args);
     }
@@ -1316,6 +1319,62 @@ fn run_instance_count(args: &[String]) -> Result<(), String> {
     buf.push_str("]}");
     println!("{}", buf);
     Ok(())
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DataModelServiceNode {
+    name: String,
+    class_name: String,
+    instance_count: u64,
+}
+
+/// Dump the DataModel's top-level services (the direct children of the file
+/// root) with the total number of instances in each subtree. Used by the
+/// Asset Breakdown "Datamodel" selector to let the user pick which parts of
+/// the place to analyze.
+fn run_tree(args: &[String]) -> Result<(), String> {
+    if args.len() < 3 {
+        return Err("usage: joxblox-rusty-asset-tool tree <rbxl-file>".to_string());
+    }
+
+    let file_path = &args[2];
+    let file = File::open(file_path).map_err(|open_err| format!("open failed: {}", open_err))?;
+    let dom = from_reader(BufReader::new(file)).map_err(|e| format!("parse failed: {}", e))?;
+
+    let root_ref = dom.root_ref();
+    let root = dom
+        .get_by_ref(root_ref)
+        .ok_or_else(|| "missing root instance".to_string())?;
+
+    let mut nodes: Vec<DataModelServiceNode> = Vec::new();
+    for child_ref in root.children().iter().copied() {
+        let Some(child) = dom.get_by_ref(child_ref) else {
+            continue;
+        };
+        nodes.push(DataModelServiceNode {
+            name: child.name.trim().to_string(),
+            class_name: child.class.as_str().to_string(),
+            instance_count: count_subtree_instances(&dom, child_ref),
+        });
+    }
+
+    let output =
+        serde_json::to_string(&nodes).map_err(|json_err| format!("json failed: {}", json_err))?;
+    println!("{}", output);
+    Ok(())
+}
+
+/// Count an instance plus every descendant under it.
+fn count_subtree_instances(dom: &WeakDom, instance_ref: rbx_dom_weak::types::Ref) -> u64 {
+    let Some(instance) = dom.get_by_ref(instance_ref) else {
+        return 0;
+    };
+    let mut total: u64 = 1;
+    for child_ref in instance.children().iter().copied() {
+        total += count_subtree_instances(dom, child_ref);
+    }
+    total
 }
 
 fn run_material_warnings(args: &[String]) -> Result<(), String> {

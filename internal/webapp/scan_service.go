@@ -80,6 +80,21 @@ type ScanProgress struct {
 	Total int `json:"total"`
 }
 
+// DataModelService is one top-level service of a place file, shown as a
+// checkbox in the Asset Breakdown "Datamodel" selector.
+type DataModelService struct {
+	Name          string `json:"name"`
+	ClassName     string `json:"className"`
+	InstanceCount int64  `json:"instanceCount"`
+}
+
+// CachedScanReport is the result of a cache lookup: Found reports whether a
+// previously-processed report exists for the file (unchanged) and options.
+type CachedScanReport struct {
+	Found  bool       `json:"found"`
+	Report ScanReport `json:"report"`
+}
+
 // ScanService runs .rbxl/.rbxm asset scans for the web UI, reusing the shared
 // Fyne-free scan engine in the loader package.
 type ScanService struct {
@@ -94,11 +109,51 @@ func (s *ScanService) startup(ctx context.Context) { s.ctx = ctx }
 // the chosen path ("" if the user cancelled).
 func (s *ScanService) PickRBXLFile() (string, error) {
 	return wailsRuntime.OpenFileDialog(s.ctx, wailsRuntime.OpenDialogOptions{
-		Title: "Select an .rbxl or .rbxm file",
+		Title: "Select a Roblox place or model file",
 		Filters: []wailsRuntime.FileFilter{
 			{DisplayName: "Roblox place/model files", Pattern: "*.rbxl;*.rbxm"},
 		},
 	})
+}
+
+// GetDataModelTree returns the place file's top-level services so the web UI
+// can offer a "which parts of the DataModel to analyze" selector. Only
+// meaningful for .rbxl place files; callers gate on the extension.
+func (s *ScanService) GetDataModelTree(path string) ([]DataModelService, error) {
+	trimmedPath := strings.TrimSpace(path)
+	if trimmedPath == "" {
+		return []DataModelService{}, nil
+	}
+	nodes, err := extractor.ExtractDataModelTree(trimmedPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	services := make([]DataModelService, 0, len(nodes))
+	for _, node := range nodes {
+		services = append(services, DataModelService{
+			Name:          node.Name,
+			ClassName:     node.ClassName,
+			InstanceCount: node.InstanceCount,
+		})
+	}
+	return services, nil
+}
+
+// GetCachedScan returns the previously-processed report for this file and
+// options if one exists and the file is unchanged. Found is false when the
+// file has never been processed (with these options) or has changed since,
+// in which case the UI shows the "Process" button.
+func (s *ScanService) GetCachedScan(path string, options ScanOptions) (CachedScanReport, error) {
+	trimmedPath := strings.TrimSpace(path)
+	if trimmedPath == "" {
+		return CachedScanReport{}, nil
+	}
+	report, found, err := readScanCache(trimmedPath, options)
+	if err != nil {
+		// A cache read error is non-fatal — fall back to "not processed".
+		return CachedScanReport{}, nil
+	}
+	return CachedScanReport{Found: found, Report: report}, nil
 }
 
 // ScanFile extracts asset references from the file and resolves each asset's
@@ -173,7 +228,9 @@ func (s *ScanService) ScanFile(path string, options ScanOptions) (ScanReport, er
 	summary.TotalBytesDisplay = format.FormatSizeAuto(summary.TotalBytes)
 	summary.TotalGPUDisplay = format.FormatSizeAuto64(summary.TotalGPUBytes)
 
-	return ScanReport{FilePath: trimmedPath, Rows: rows, Summary: summary}, nil
+	report := ScanReport{FilePath: trimmedPath, Rows: rows, Summary: summary}
+	writeScanCache(trimmedPath, options, report)
+	return report, nil
 }
 
 func buildScanRow(result loader.ScanResult, thresholdBytes int64) ScanRow {

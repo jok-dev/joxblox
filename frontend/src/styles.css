@@ -78,18 +78,76 @@ input:focus { outline: none; border-color: var(--accent); }
 .header .spacer { flex: 1; }
 .header .file-bar, .header .right { -webkit-app-region: no-drag; }
 
+/* Global DataModel scope selector, sat next to the file bar in the header. */
+.header .datamodel-control { -webkit-app-region: no-drag; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.datamodel-control .dm-trigger { white-space: nowrap; }
+.datamodel-control .scope-chip { max-width: 240px; }
+
 .file-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 3px 4px 3px 10px;
+  padding: 3px 4px 3px 4px;
   min-width: 280px;
   max-width: 520px;
 }
-.file-bar .name { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-bar .name { color: var(--text-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+
+/* Recent-files trigger: looks like the old static label, acts as a dropdown. */
+.file-bar .file-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  background: transparent;
+  border-color: transparent;
+}
+.file-bar .file-pick:hover:not(:disabled) { background: var(--bg-elev-2); }
+.file-bar .file-pick:disabled { opacity: 1; cursor: default; }
+.file-bar .file-pick .caret { color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
+
+.file-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.file-menu-title {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-faint);
+  padding: 4px 8px;
+  font-weight: 600;
+}
+.file-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.file-menu-item:hover { background: var(--bg-elev); }
+.file-menu-item.active { background: var(--accent-dim); }
+.file-menu-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-menu-path { color: var(--text-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 
 .right { display: flex; align-items: center; gap: 10px; }
 .auth-status { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
@@ -160,6 +218,17 @@ input:focus { outline: none; border-color: var(--accent); }
   padding: 18px 20px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.5);
 }
+.auth-gate {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.auth-gate .modal { margin: 0; }
+.auth-gate .brand {
+  font-weight: 700; letter-spacing: 0.3px; font-size: 18px;
+  color: var(--accent); margin-bottom: 6px;
+}
+
 .modal h2 { margin: 0 0 4px; font-size: 16px; }
 .modal .section { margin-top: 18px; }
 .modal .section-title { font-weight: 600; color: var(--text); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
@@ -260,6 +329,41 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; 
   border-radius: var(--radius); padding: 5px 10px;
 }
 
+.scope-chip {
+  font-size: 11.5px; color: var(--text-dim);
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 3px 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%;
+}
+
+/* Centered "Process" prompt before a file has been analyzed. */
+.scan-empty {
+  flex: 1;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; text-align: center; color: var(--text-faint);
+}
+.scan-empty .scan-empty-title { color: var(--text-dim); font-size: 16px; font-weight: 600; }
+.scan-empty .hint { max-width: 480px; }
+button.big { font-size: 14px; padding: 9px 22px; }
+
+/* Datamodel selector modal. */
+.dm-actions-row { display: flex; gap: 8px; margin: 12px 0 8px; }
+.dm-list {
+  max-height: 50vh; overflow: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg);
+}
+.dm-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.dm-item:last-child { border-bottom: none; }
+.dm-item:hover { background: var(--bg-elev-2); }
+.dm-item .dm-name { color: var(--text); font-weight: 600; }
+.dm-item .dm-count { margin-left: auto; white-space: nowrap; }
+
 select {
   font: inherit; color: var(--text); background: var(--bg-elev-2);
   border: 1px solid var(--border-strong); border-radius: var(--radius);
@@ -343,3 +447,70 @@ input[type="number"] { width: 120px; }
 .detail-meta td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 12px; }
 .detail-meta .meta-label { color: var(--text-dim); white-space: nowrap; width: 90px; }
 .detail-meta .meta-value { color: var(--text); word-break: break-all; }
+
+/* ── Report Generation ─────────────────────────────────────────────── */
+.report-view { padding: 16px 20px; overflow-y: auto; }
+.report-view.empty { display: flex; flex-direction: column; height: 100%; }
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.report-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.report-toolbar .spacer { flex: 1; }
+
+.report-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin: 8px 0;
+  font-weight: 600;
+}
+.report-banner.warn { background: #3a2e00; color: #fbbf24; }
+.report-banner.banned { background: #5a1414; color: #fca5a5; }
+.report-banner-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.report-warning-detail {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: pre-wrap;
+  margin: 4px 0 8px;
+}
+
+.report-profile { margin-top: 12px; }
+.report-heading { font-size: 20px; font-weight: 700; text-align: center; }
+.report-range-note { text-align: center; color: var(--text-faint); font-size: 12px; margin: 4px 0; }
+.report-overall { text-align: center; font-size: 28px; font-weight: 700; margin: 8px 0 16px; }
+
+.report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-table th {
+  text-align: left;
+  color: var(--text-faint);
+  font-weight: 500;
+  font-style: italic;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.report-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.report-grade-cell { font-size: 18px; font-weight: 700; text-align: center; width: 44px; }
+.report-metric { font-weight: 600; color: var(--text); }
+
+.report-detail-modal { max-width: 760px; width: 90%; }
+.report-detail-list { max-height: 60vh; overflow-y: auto; }
+.report-detail-row { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.report-detail-header { font-weight: 600; color: var(--text); }
+.report-detail-line { color: var(--text-dim); padding-left: 16px; font-size: 12px; }

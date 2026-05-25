@@ -9,7 +9,7 @@ import (
 // produced by BuildReportExport. Bump it when fields move, change
 // meaning, or stop being best-effort optional. The HTML viewer reads
 // this to decide whether it can render the bundle.
-const ReportExportFormatVersion = "1.0.0"
+const ReportExportFormatVersion = "1.1.0"
 
 // ReportExport is the canonical JSON shape for a full Report Generation
 // run. Designed so a viewer (separate static HTML page, future webapp,
@@ -34,10 +34,12 @@ type ReportExport struct {
 
 // ReportExportSource captures what was analysed.
 type ReportExportSource struct {
-	FileName       string `json:"file_name,omitempty"`
-	FileSizeBytes  int64  `json:"file_size_bytes,omitempty"`
-	AssetType      string `json:"asset_type,omitempty"`
-	WorkspaceOnly  bool   `json:"workspace_only,omitempty"`
+	FileName      string `json:"file_name,omitempty"`
+	FileSizeBytes int64  `json:"file_size_bytes,omitempty"`
+	AssetType     string `json:"asset_type,omitempty"`
+	// Scope is the comma-separated list of top-level DataModel services the
+	// analysis was limited to. Empty means the whole file was analysed.
+	Scope string `json:"scope,omitempty"`
 }
 
 // ReportExportOverall is the top-line headline grade.

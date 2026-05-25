@@ -19,7 +19,7 @@ func TestMarshalReportExportShape(t *testing.T) {
 			FileName:      "place.rbxl",
 			FileSizeBytes: 12345,
 			AssetType:     "Map",
-			WorkspaceOnly: true,
+			Scope:         "Workspace,MaterialService",
 		},
 		Overall: ReportExportOverall{Grade: "C", ScorePercent: 56},
 		Grades: []ReportExportGrade{{
@@ -47,11 +47,11 @@ func TestMarshalReportExportShape(t *testing.T) {
 	jsonText := string(data)
 
 	mustContain := []string{
-		`"format_version": "1.0.0"`,
+		`"format_version": "1.1.0"`,
 		`"report_id": "rep_test"`,
 		`"file_name": "place.rbxl"`,
 		`"asset_type": "Map"`,
-		`"workspace_only": true`,
+		`"scope": "Workspace,MaterialService"`,
 		`"grade": "C"`,
 		`"score_percent": 56`,
 		`"label": "GPU Texture Memory"`,

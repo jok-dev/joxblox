@@ -52,3 +52,4 @@ frontend/node_modules/
 frontend/dist/*
 !frontend/dist/gitkeep
 build/bin/
+internal/webapp/release-assets/*.bin
