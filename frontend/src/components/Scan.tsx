@@ -193,15 +193,6 @@ function matchesTextField(row: webapp.ScanRow, field: string, value: string): bo
   }
 }
 
-function Card({ value, caption, accent }: { value: string; caption: string; accent?: boolean }) {
-  return (
-    <div className={"stat-card" + (accent ? " accent" : "")}>
-      <div className="stat-value">{value}</div>
-      <div className="stat-caption">{caption}</div>
-    </div>
-  );
-}
-
 export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleAsset }: Props) {
   const [scanning, setScanning] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -425,7 +416,6 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
     }
   }
 
-  const s = report?.summary;
   const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
   return (
@@ -444,16 +434,6 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
       )}
 
       {error && <div className="status-line error">{error}</div>}
-
-      {s && (
-        <div className="stat-cards">
-          <Card value={String(s.totalAssets)} caption="Assets" />
-          <Card value={s.totalBytesDisplay || "0 B"} caption="Download Size" />
-          <Card value={s.totalGpuDisplay || "0 B"} caption="GPU Memory" />
-          <Card value={s.totalTriangles.toLocaleString()} caption="Triangles" />
-          <Card value={String(s.failedCount)} caption="Failed" accent={s.failedCount > 0} />
-        </div>
-      )}
 
       {/* Empty / prompt states (no report and not scanning). */}
       {!report && !scanning && (
