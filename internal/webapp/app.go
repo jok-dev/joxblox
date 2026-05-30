@@ -22,6 +22,7 @@ type App struct {
 	Scan     *ScanService
 	Report   *ReportService
 	Tags     *TagService
+	Diff     *DiffService
 }
 
 // NewApp constructs the app and its services.
@@ -33,6 +34,7 @@ func NewApp() *App {
 		Scan:     NewScanService(),
 		Report:   NewReportService(),
 		Tags:     NewTagService(),
+		Diff:     NewDiffService(),
 	}
 }
 
@@ -45,8 +47,16 @@ func (a *App) Startup(ctx context.Context) {
 	a.Scan.startup(ctx)
 	a.Report.startup(ctx)
 	a.Tags.startup(ctx)
+	a.Diff.startup(ctx)
 	a.wireLoaderGlobals()
 	wireNativeHelpers()
+}
+
+// Shutdown is the Wails OnShutdown hook; it releases resources that outlive the
+// frontend, currently the Diff tab's live Rust process. Not bound to the
+// frontend.
+func (a *App) Shutdown(ctx context.Context) {
+	a.Diff.shutdown()
 }
 
 // wireNativeHelpers points the Fyne-free native-helper hooks at the webapp's
@@ -70,6 +80,7 @@ func (a *App) Bindings() []interface{} {
 		a.Scan,
 		a.Report,
 		a.Tags,
+		a.Diff,
 	}
 }
 

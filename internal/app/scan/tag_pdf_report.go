@@ -3,6 +3,7 @@ package scan
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -118,6 +119,10 @@ func BuildTagPDFReportOrdered(
 
 	writePDFHeader(pdf, options, taggedCount)
 
+	// Overview first: one line per tagged asset present in the file (path +
+	// tags), then the per-tag card grids below give each its full breakdown.
+	writePDFTagSummaryList(pdf, resultsByID, idsByTag, order)
+
 	totalRendered := 0
 	for _, tag := range order {
 		assetIDs := idsByTag[tag]
@@ -174,6 +179,70 @@ func writePDFHeader(pdf *gofpdf.Fpdf, options TagPDFReportOptions, taggedCount i
 	metaLine += fmt.Sprintf("  ·  %d tagged assets", taggedCount)
 	pdf.MultiCell(0, 5, metaLine, "", "L", false)
 	pdf.Ln(2)
+}
+
+// writePDFTagSummaryList draws a compact "tagged assets" overview before the
+// per-tag card grids — one line per tagged asset that resolved in this file,
+// showing its instance path and the tags applied to it (in the caller's render
+// order). Assets not present in the file are omitted here; the grids below note
+// nothing for them anyway.
+func writePDFTagSummaryList(
+	pdf *gofpdf.Fpdf,
+	resultsByID map[int64]loader.ScanResult,
+	idsByTag map[string][]int64,
+	order []string,
+) {
+	// Invert tag→ids into id→tags, keeping tags in the caller's render order.
+	tagsByID := map[int64][]string{}
+	for _, tag := range order {
+		for _, id := range idsByTag[tag] {
+			tagsByID[id] = append(tagsByID[id], tag)
+		}
+	}
+
+	ids := make([]int64, 0, len(tagsByID))
+	for id := range tagsByID {
+		if _, ok := resultsByID[id]; ok {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		pi := strings.ToLower(strings.TrimSpace(resultsByID[ids[i]].InstancePath))
+		pj := strings.ToLower(strings.TrimSpace(resultsByID[ids[j]].InstancePath))
+		if pi != pj {
+			return pi < pj
+		}
+		return ids[i] < ids[j]
+	})
+
+	pdf.SetFont("Helvetica", "B", pdfTagFontSize)
+	pdf.MultiCell(0, 6, fmt.Sprintf("Tagged assets summary  (%d)", len(ids)), "B", "L", false)
+	pdf.Ln(1)
+
+	pageWidth, _ := pdf.GetPageSize()
+	leftMargin, _, rightMargin, _ := pdf.GetMargins()
+	usableWidth := pageWidth - leftMargin - rightMargin
+	pathWidth := usableWidth * 0.6
+	tagsWidth := usableWidth - pathWidth
+
+	for _, id := range ids {
+		row := resultsByID[id]
+		label := strings.TrimSpace(row.InstancePath)
+		if label == "" {
+			label = "ID " + strconv.FormatInt(id, 10)
+		}
+		tagsText := strings.Join(tagsByID[id], ", ")
+
+		pdf.SetX(leftMargin)
+		pdf.SetFont("Helvetica", "", pdfBodyFontSize)
+		pdf.CellFormat(pathWidth, 4.5, truncateForPDFCell(pdf, label, pathWidth), "", 0, "L", false, 0, "")
+		pdf.SetFont("Helvetica", "I", pdfMetaFontSize)
+		pdf.CellFormat(tagsWidth, 4.5, truncateForPDFCell(pdf, tagsText, tagsWidth), "", 1, "L", false, 0, "")
+	}
+	pdf.Ln(pdfTagSectionGapMM)
 }
 
 func writePDFTagHeading(pdf *gofpdf.Fpdf, tagName string, count int) {

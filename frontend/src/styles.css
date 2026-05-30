@@ -666,9 +666,94 @@ input[type="number"] { width: 120px; }
 }
 .tag-suggestion:hover { border-color: var(--accent); }
 
+/* ---- Diff view ---- */
+.diff-view { display: flex; flex-direction: column; gap: 10px; height: 100%; }
+
+.diff-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.diff-pickers { display: flex; gap: 12px; flex: 1; min-width: 0; flex-wrap: wrap; }
+.diff-picker {
+  display: flex; align-items: center; gap: 8px;
+  flex: 1; min-width: 220px;
+}
+.diff-picker-name {
+  flex: 1; min-width: 0; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 5px 10px;
+}
+.diff-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.diff-summary { color: var(--text-dim); font-weight: 600; white-space: nowrap; }
+
+.diff-check { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); cursor: pointer; white-space: nowrap; }
+.diff-check input { cursor: pointer; }
+
+.diff-filter { flex-wrap: wrap; }
+.diff-filter input { min-width: 200px; }
+
+/* Tree (left) + property detail (right) split. */
+.diff-split { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.diff-tree {
+  flex: 0 0 45%; min-width: 0; overflow: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-elev); padding: 4px 0;
+}
+.diff-empty-tree { padding: 12px; }
+
+.diff-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px 3px 6px; cursor: pointer; white-space: nowrap;
+  font-size: 12px;
+}
+.diff-row:hover { background: var(--bg-elev-2); }
+.diff-row-selected, .diff-row-selected:hover { background: var(--accent-dim); color: #fff; }
+.diff-caret { display: inline-block; width: 12px; flex-shrink: 0; color: var(--text-faint); text-align: center; }
+.diff-badge { display: inline-block; width: 10px; flex-shrink: 0; font-weight: 700; text-align: center; }
+.diff-name { overflow: hidden; text-overflow: ellipsis; }
+.diff-class { color: var(--text-faint); flex-shrink: 0; }
+.diff-counts { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink: 0; padding-left: 8px; }
+.diff-row-selected .diff-class, .diff-row-selected .diff-counts, .diff-row-selected .diff-caret { color: #cbd5e1; }
+
+.diff-detail {
+  flex: 1; min-width: 0; overflow: auto;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-elev); padding: 10px 12px;
+}
+.diff-detail-empty { padding: 4px; }
+.diff-detail-header {
+  font-weight: 600; margin-bottom: 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.diff-prop-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.diff-prop-table th, .diff-prop-table td {
+  padding: 5px 8px; text-align: left; vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.diff-prop-table th { color: var(--text-dim); font-weight: 600; position: sticky; top: -10px; background: var(--bg-elev); }
+.diff-prop-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-dim); word-break: break-word; }
+.diff-prop-changed td:first-child { box-shadow: inset 3px 0 0 rgba(206, 160, 42, 0.5); }
+.diff-value-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.diff-value-absent { color: var(--text-faint); font-style: italic; }
+.diff-value-color { display: inline-flex; align-items: center; gap: 6px; }
+.diff-swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid var(--border-strong); flex-shrink: 0; }
+
 /* Tag Report summary table + inline toolbar field. */
 .report-field.inline { flex-direction: row; align-items: center; gap: 6px; }
 .tag-report-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
 .tag-report-table th, .tag-report-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
 .tag-report-table th { color: var(--text-dim); font-weight: 600; font-size: 12px; }
 .tag-report-table .num { text-align: right; }
+
+/* Expandable tag rows: click a tag to reveal its tagged instances. */
+.tag-report-row { cursor: pointer; }
+.tag-report-row:hover td { background: var(--bg-elev); }
+.tag-report-caret { display: inline-block; width: 14px; color: var(--text-faint); font-size: 10px; }
+.tag-report-detail > td { padding: 0 8px 10px 26px; }
+.tagged-asset-list { display: flex; flex-direction: column; gap: 10px; }
+.tagged-asset { border-left: 2px solid var(--border); padding-left: 10px; }
+.tagged-asset-head { display: flex; align-items: center; gap: 10px; margin-bottom: 3px; }
+.tagged-asset-id { font-weight: 600; font-size: 13px; }
+.tagged-asset-open { font-size: 12px; padding: 2px 8px; }
+.tagged-instance { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; padding: 2px 0; }
+.tagged-instance-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.tagged-instance-meta { color: var(--text-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tagged-instance-empty { font-size: 12px; }

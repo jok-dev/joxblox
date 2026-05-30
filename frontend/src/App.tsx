@@ -6,6 +6,7 @@ import AuthGate from "./components/AuthGate";
 import SingleAsset from "./components/SingleAsset";
 import Scan from "./components/Scan";
 import Report from "./components/Report";
+import Diff from "./components/Diff";
 import TagManagement from "./components/TagManagement";
 import TagReport from "./components/TagReport";
 import DataModelSelector from "./components/DataModelSelector";
@@ -108,7 +109,14 @@ export default function App() {
           ) : active === "tag-management" ? (
             <TagManagement />
           ) : active === "tag-report" ? (
-            <TagReport filePath={currentFile} onPickFile={loadFile} />
+            <TagReport
+              filePath={currentFile}
+              scope={scope}
+              onPickFile={loadFile}
+              onOpenInSingleAsset={openInSingleAsset}
+            />
+          ) : active === "diff" ? (
+            <Diff />
           ) : (
             <Placeholder title={NAV_TITLES[active] ?? active} currentFile={currentFile} />
           )}

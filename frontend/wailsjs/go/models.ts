@@ -234,6 +234,138 @@ export namespace webapp {
 	        this.instanceCount = source["instanceCount"];
 	    }
 	}
+	export class DiffValue {
+	    type: string;
+	    display: string;
+	    colorHex: string;
+	    absent: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiffValue(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.display = source["display"];
+	        this.colorHex = source["colorHex"];
+	        this.absent = source["absent"];
+	    }
+	}
+	export class DiffProperty {
+	    name: string;
+	    a: DiffValue;
+	    b: DiffValue;
+	
+	    static createFrom(source: any = {}) {
+	        return new DiffProperty(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.a = this.convertValues(source["a"], DiffValue);
+	        this.b = this.convertValues(source["b"], DiffValue);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DiffEntry {
+	    status: string;
+	    path: string;
+	    class: string;
+	    name: string;
+	    properties: DiffProperty[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DiffEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.path = source["path"];
+	        this.class = source["class"];
+	        this.name = source["name"];
+	        this.properties = this.convertValues(source["properties"], DiffProperty);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class DiffResultPayload {
+	    fileA: string;
+	    fileB: string;
+	    added: number;
+	    removed: number;
+	    changed: number;
+	    entries: DiffEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DiffResultPayload(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.fileA = source["fileA"];
+	        this.fileB = source["fileB"];
+	        this.added = source["added"];
+	        this.removed = source["removed"];
+	        this.changed = source["changed"];
+	        this.entries = this.convertValues(source["entries"], DiffEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class ReportDetailRow {
 	    header: string;
 	    lines: string[];
