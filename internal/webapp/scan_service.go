@@ -180,27 +180,7 @@ func (s *ScanService) ScanFile(path string, options ScanOptions) (ScanReport, er
 		return ScanReport{FilePath: trimmedPath, Rows: []ScanRow{}}, nil
 	}
 
-	resolved := loader.RunResolveWorkers(
-		hits,
-		func(hit loader.ScanHit) string {
-			return extractor.AssetReferenceKey(hit.AssetID, hit.AssetInput)
-		},
-		func(hit loader.ScanHit) loader.ScanResult {
-			result, err := loader.LoadScanResult(hit)
-			if err != nil {
-				return loader.BuildFailedScanResultFromHit(hit, err)
-			}
-			return result
-		},
-		2,
-		func(done, total int) {
-			// Throttle so a multi-thousand-row scan doesn't flood the webview.
-			if done == total || done%5 == 0 {
-				wailsRuntime.EventsEmit(s.ctx, "scan:progress", ScanProgress{Done: done, Total: total})
-			}
-		},
-		nil,
-	)
+	resolved := resolveScanResults(s.ctx, hits, "scan:progress")
 
 	thresholdBytes := format.MegabytesToBytes(options.LargeTextureThresholdMB)
 	rows := make([]ScanRow, 0, len(hits))

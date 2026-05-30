@@ -21,6 +21,7 @@ type App struct {
 	Asset    *AssetService
 	Scan     *ScanService
 	Report   *ReportService
+	Tags     *TagService
 }
 
 // NewApp constructs the app and its services.
@@ -31,6 +32,7 @@ func NewApp() *App {
 		Asset:    NewAssetService(),
 		Scan:     NewScanService(),
 		Report:   NewReportService(),
+		Tags:     NewTagService(),
 	}
 }
 
@@ -42,6 +44,7 @@ func (a *App) Startup(ctx context.Context) {
 	a.Asset.startup(ctx)
 	a.Scan.startup(ctx)
 	a.Report.startup(ctx)
+	a.Tags.startup(ctx)
 	a.wireLoaderGlobals()
 	wireNativeHelpers()
 }
@@ -66,6 +69,7 @@ func (a *App) Bindings() []interface{} {
 		a.Asset,
 		a.Scan,
 		a.Report,
+		a.Tags,
 	}
 }
 

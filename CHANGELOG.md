@@ -9,6 +9,9 @@
 - Cross-tab navigation: the Asset Breakdown asset-detail pane gains an `Open in Single Asset ↗` button that switches to the Single Asset tab and loads the selected asset
 - Top bar: the place-file bar is now a dropdown of recently analyzed files (persisted across sessions) — click the file name to quickly re-load a previously opened `.rbxl`/`.rbxm` without re-picking it from disk
 - Summary (formerly `Report Generation`): the tab is now functional in the new web frontend — it uses the shared top-bar place file (no per-tab file button), showing a centered `Load file…` prompt when none is loaded just like Asset Breakdown; pick an asset type, `Generate Report` to grade the loaded file, then read the overall grade plus the per-metric table (with `typical`/`max/cell` columns in spatial mode), open `View` drill-downs for mismatched PBR maps / oversized textures / banned images / duplicates, toggle the banned-image grade override, and export the report as `JSON`, a self-contained `HTML` page, or a `PDF`
+- Asset Breakdown: right-click any instance row to tag it or add a custom note. The tag picker shows your existing tags for quick selection (toggle to apply/remove), an inline field to create a new tag on the fly, and a free-form custom-note box. A new `Tags` column lists each instance's tags inline. Tagged rows get an accent marker and the asset-detail pane lists the asset's tags as removable chips and shows its custom note. Tags and notes are persisted globally (to `tags.json`) keyed by asset id, so they survive tab switches, re-scans, and app restarts
+- Tag Management (new `Tagging` sidebar group): manage your tag library — add, rename, recolor, reorder, and delete tags, each with an optional optimization hint. Prefilled with suggested presets (Decimate, Reduce, Duplicate, plus Atlas / Remove Alpha / Remove) offered as one-click adds when missing. Renaming a tag keeps its tagged instances; deleting one untags them
+- Report Generation (new `Tagging` sidebar group): generate a PDF of every tagged instance found in the current file, grouped by tag in your library order, with per-asset thumbnail cards (asset id, type, dimensions, GPU memory, instance path). Shows a per-tag tagged-asset summary and an `Embed images` toggle for a slim text-only PDF
 
 ### Changed
 
@@ -21,6 +24,7 @@
 
 ### Fixed
 
+- Asset Breakdown: asset type ID 63 now displays as `TexturePack` instead of the fallback `Type 63` label
 - macOS: default window size reduced from 1350×900 to 1280×760 so the window fits within the usable screen area on laptop displays — previously the bottom edge could sit below the screen, making the window impossible to resize smaller
 - macOS: app no longer SIGSEGVs in Cocoa's `resetDarwinMenu` when switching main tabs. The main file menu was being rebuilt on every tab change via `tabs.OnSelected`, but the rebuild used no tab-specific state — the hook is now removed and the menu is only rebuilt at startup and after loading results
 

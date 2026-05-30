@@ -69,6 +69,46 @@ func TestBuildTagPDFReportProducesValidPDFBytes(t *testing.T) {
 	}
 }
 
+func TestBuildTagPDFReportOrderedRendersCustomTags(t *testing.T) {
+	results := []loader.ScanResult{
+		{AssetID: 1, AssetTypeName: "Texture", Width: 1024, Height: 1024, PixelCount: 1024 * 1024,
+			PreviewBytes: pngBytesForTest(t), PreviewName: "1.png", ContentType: "image/png"},
+		{AssetID: 2, AssetTypeName: "Mesh", MeshNumFaces: 5000},
+	}
+	idsByTag := map[string][]int64{
+		"Decimate": {2},
+		"Reduce":   {1},
+	}
+	order := []string{"Reduce", "Decimate"}
+	got, err := BuildTagPDFReportOrdered(results, idsByTag, order, 2, TagPDFReportOptions{
+		Title:       "Custom Tag Report",
+		SourcePath:  "C:/scan/place.rbxl",
+		EmbedImages: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildTagPDFReportOrdered: %s", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF-")) {
+		t.Errorf("output doesn't start with the PDF magic header")
+	}
+	if !bytes.Contains(got, []byte("%%EOF")) {
+		t.Errorf("output missing PDF EOF marker")
+	}
+	if len(got) < 1500 {
+		t.Errorf("PDF suspiciously small (%d bytes) for two tagged cards", len(got))
+	}
+}
+
+func TestBuildTagPDFReportOrderedEmptyEmitsMessage(t *testing.T) {
+	got, err := BuildTagPDFReportOrdered(nil, map[string][]int64{}, nil, 0, TagPDFReportOptions{})
+	if err != nil {
+		t.Fatalf("BuildTagPDFReportOrdered: %s", err)
+	}
+	if !bytes.HasPrefix(got, []byte("%PDF-")) {
+		t.Errorf("empty ordered report should still be a valid PDF")
+	}
+}
+
 func TestBuildTagPDFReportEmptyStoreEmitsEmptyMessage(t *testing.T) {
 	got, err := BuildTagPDFReport(nil, NewScanTagStore(), TagPDFReportOptions{})
 	if err != nil {

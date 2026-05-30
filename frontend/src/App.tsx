@@ -6,6 +6,8 @@ import AuthGate from "./components/AuthGate";
 import SingleAsset from "./components/SingleAsset";
 import Scan from "./components/Scan";
 import Report from "./components/Report";
+import TagManagement from "./components/TagManagement";
+import TagReport from "./components/TagReport";
 import DataModelSelector from "./components/DataModelSelector";
 import { NAV_TITLES } from "./nav";
 import { webapp } from "../wailsjs/go/models";
@@ -103,6 +105,10 @@ export default function App() {
             />
           ) : active === "report" ? (
             <Report filePath={currentFile} scope={scope} onPickFile={loadFile} />
+          ) : active === "tag-management" ? (
+            <TagManagement />
+          ) : active === "tag-report" ? (
+            <TagReport filePath={currentFile} onPickFile={loadFile} />
           ) : (
             <Placeholder title={NAV_TITLES[active] ?? active} currentFile={currentFile} />
           )}

@@ -91,6 +91,59 @@ func BuildTagPDFReport(results []loader.ScanResult, store *ScanTagStore, options
 	return buf.Bytes(), nil
 }
 
+// BuildTagPDFReportOrdered renders the same card-grid document as
+// BuildTagPDFReport but driven by an explicit, caller-supplied tag order and
+// asset-id grouping instead of the fixed ScanTag enum. This is what the web
+// Tag Report uses so user-created custom tags render in the order the user
+// arranged them in Tag Management. There is no Duplicated-group special
+// casing here — every tag is a flat card grid.
+//
+//   - idsByTag maps a tag name to the asset ids carrying it.
+//   - order lists the tag names in render order; tags missing from idsByTag (or
+//     with zero ids) are skipped.
+//   - taggedCount is the number of distinct tagged assets (header subtitle).
+func BuildTagPDFReportOrdered(
+	results []loader.ScanResult,
+	idsByTag map[string][]int64,
+	order []string,
+	taggedCount int,
+	options TagPDFReportOptions,
+) ([]byte, error) {
+	resultsByID := buildPDFResultsByID(results)
+
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(pdfPageMarginMM, pdfPageMarginMM, pdfPageMarginMM)
+	pdf.SetAutoPageBreak(true, pdfPageMarginMM)
+	pdf.AddPage()
+
+	writePDFHeader(pdf, options, taggedCount)
+
+	totalRendered := 0
+	for _, tag := range order {
+		assetIDs := idsByTag[tag]
+		if len(assetIDs) == 0 {
+			continue
+		}
+		writePDFTagHeading(pdf, tag, len(assetIDs))
+		totalRendered += writePDFCardGrid(pdf, assetIDs, resultsByID, options.EmbedImages)
+		pdf.Ln(pdfTagSectionGapMM)
+	}
+
+	if totalRendered == 0 {
+		pdf.SetFont("Helvetica", "I", pdfBodyFontSize)
+		pdf.MultiCell(0, 6, "No tagged assets yet. Right-click a row in the Asset Breakdown tab and pick a tag.", "", "C", false)
+	}
+
+	if pdf.Err() {
+		return nil, pdf.Error()
+	}
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func buildPDFResultsByID(results []loader.ScanResult) map[int64]loader.ScanResult {
 	out := map[int64]loader.ScanResult{}
 	for _, result := range results {

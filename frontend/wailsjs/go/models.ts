@@ -375,6 +375,22 @@ export namespace webapp {
 	        this.meshLookSensitivity = source["meshLookSensitivity"];
 	    }
 	}
+	export class TagDefinition {
+	    name: string;
+	    description: string;
+	    color: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TagDefinition(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.color = source["color"];
+	    }
+	}
 
 }
 

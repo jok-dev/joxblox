@@ -3,7 +3,6 @@ package webapp
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -175,23 +174,7 @@ func (s *ReportService) cachedProfile() (string, string, report.ProfileResult, b
 }
 
 func (s *ReportService) saveBytes(title, defaultName, filterName, filterPattern string, data []byte) (bool, error) {
-	targetPath, dialogErr := wailsRuntime.SaveFileDialog(s.ctx, wailsRuntime.SaveDialogOptions{
-		Title:           title,
-		DefaultFilename: defaultName,
-		Filters: []wailsRuntime.FileFilter{
-			{DisplayName: filterName, Pattern: filterPattern},
-		},
-	})
-	if dialogErr != nil {
-		return false, dialogErr
-	}
-	if strings.TrimSpace(targetPath) == "" {
-		return false, nil
-	}
-	if writeErr := os.WriteFile(targetPath, data, 0o644); writeErr != nil {
-		return false, writeErr
-	}
-	return true, nil
+	return saveBytesViaDialog(s.ctx, title, defaultName, filterName, filterPattern, data)
 }
 
 func buildReportResult(profile report.ProfileResult) ReportResult {

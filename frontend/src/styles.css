@@ -412,6 +412,9 @@ input[type="number"] { width: 120px; }
 }
 .scan-table th:hover { color: #fff; }
 .scan-table td.num, .scan-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Keep every cell on a single line so selecting a row (which narrows the table
+   to make room for the detail panel) never reflows rows to a taller two lines. */
+.scan-table td { white-space: nowrap; }
 .scan-table td.path { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
 .scan-table tr:hover td { background: var(--bg-elev); }
 .scan-table tr.row-failed td { color: var(--text-faint); }
@@ -514,3 +517,148 @@ input[type="number"] { width: 120px; }
 .report-detail-row { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .report-detail-header { font-weight: 600; color: var(--text); }
 .report-detail-line { color: var(--text-dim); padding-left: 16px; font-size: 12px; }
+
+/* ---- Tagging: context menu, chips, management & report ----------------- */
+
+/* A tagged row gets a subtle left accent so flagged instances stand out. */
+.scan-table tr.row-tagged td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* Tags column: compact chips kept on one clipped line (no row growth). */
+.scan-table td.tags-cell { max-width: 220px; overflow: hidden; }
+.scan-table td.tags-cell .tag-chip-mini { margin-right: 4px; }
+.tags-cell-empty { color: var(--text-faint); }
+.tag-chip-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text);
+}
+.tag-chip-mini .tag-dot { width: 8px; height: 8px; }
+
+/* Right-click tag picker (floating menu anchored at the cursor). */
+.context-menu-backdrop { position: fixed; inset: 0; z-index: 200; }
+.context-menu {
+  position: fixed;
+  min-width: 220px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 8px;
+}
+.context-menu-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 2px 4px 6px;
+}
+.tag-picker-list { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; }
+.tag-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 5px 6px;
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+.tag-option:hover { background: var(--bg-elev); }
+.tag-option.on { background: var(--bg-elev); }
+.tag-option-name { flex: 1; }
+.tag-option-check { color: var(--accent); font-weight: 700; }
+.tag-picker-add { display: flex; gap: 6px; margin-top: 8px; }
+.tag-picker-add .field { flex: 1; }
+
+/* Custom note editor inside the right-click menu. */
+.tag-picker-note { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
+.tag-picker-note textarea.field { width: 100%; resize: vertical; min-height: 48px; font-family: inherit; }
+
+.tag-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+
+/* Tag chips (detail panel + report summary). */
+.detail-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text);
+}
+.detail-tags .tag-chip { cursor: pointer; }
+.tag-chip-x { color: var(--text-faint); font-size: 10px; }
+.detail-tags .tag-chip:hover .tag-chip-x { color: var(--error); }
+.tag-add-btn {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.tag-add-btn:hover { color: var(--text); border-color: var(--accent); }
+
+/* Saved custom note shown in the detail panel. */
+.detail-note {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Tag Management table. */
+.tag-mgmt { display: flex; flex-direction: column; gap: 10px; }
+.tag-mgmt-table { width: 100%; border-collapse: collapse; }
+.tag-mgmt-table th, .tag-mgmt-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.tag-mgmt-table th { color: var(--text-dim); font-weight: 600; font-size: 12px; }
+.tag-mgmt-table .num { text-align: right; }
+.tag-col-color { width: 48px; }
+.tag-col-color input[type="color"] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--border-strong); border-radius: 4px; background: transparent; cursor: pointer; }
+.tag-col-name { width: 200px; }
+.tag-col-count { width: 70px; }
+.tag-col-actions { width: 96px; text-align: right; white-space: nowrap; }
+.tag-mgmt-table .icon { background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 2px 4px; font-size: 13px; }
+.tag-mgmt-table .icon:hover:not(:disabled) { color: var(--text); }
+.tag-mgmt-table .icon.danger:hover:not(:disabled) { color: var(--error); }
+.tag-mgmt-table .icon:disabled { opacity: 0.3; cursor: default; }
+
+.tag-suggestions { margin-top: 4px; }
+.tag-suggestion-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.tag-suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.tag-suggestion:hover { border-color: var(--accent); }
+
+/* Tag Report summary table + inline toolbar field. */
+.report-field.inline { flex-direction: row; align-items: center; gap: 6px; }
+.tag-report-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.tag-report-table th, .tag-report-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+.tag-report-table th { color: var(--text-dim); font-weight: 600; font-size: 12px; }
+.tag-report-table .num { text-align: right; }

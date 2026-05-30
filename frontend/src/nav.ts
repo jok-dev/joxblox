@@ -22,6 +22,13 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    title: "Tagging",
+    items: [
+      { key: "tag-management", title: "Tag Management" },
+      { key: "tag-report", title: "Report Generation" },
+    ],
+  },
+  {
     title: "Utilities",
     items: [
       { key: "image-gen", title: "Image Generator" },

@@ -2,7 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { webapp } from "../../wailsjs/go/models";
 import { GetCachedScan, ScanFile } from "../../wailsjs/go/webapp/ScanService";
 import { FetchAsset } from "../../wailsjs/go/webapp/AssetService";
+import {
+  GetAssignments,
+  GetNotes,
+  ListTagDefinitions,
+  SaveTagDefinitions,
+  SetAssetNote,
+  SetAssetTags,
+} from "../../wailsjs/go/webapp/TagService";
 import { EventsOff, EventsOn } from "../../wailsjs/runtime/runtime";
+import TagPicker, { TagDef } from "./TagPicker";
 
 type Props = {
   // filePath is the shared "current file" set via the global Load file… bar.
@@ -25,6 +34,7 @@ type SortField =
   | "gpuMemoryBytes"
   | "meshTriangles"
   | "instancePath"
+  | "tags"
   | "state";
 
 const COLUMNS: { field: SortField; label: string; numeric: boolean }[] = [
@@ -36,6 +46,7 @@ const COLUMNS: { field: SortField; label: string; numeric: boolean }[] = [
   { field: "gpuMemoryBytes", label: "GPU Memory", numeric: true },
   { field: "meshTriangles", label: "Tris", numeric: true },
   { field: "instancePath", label: "Instance Path", numeric: false },
+  { field: "tags", label: "Tags", numeric: false },
   { field: "state", label: "State", numeric: false },
 ];
 
@@ -210,7 +221,86 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
 
+  // Tagging: the global tag library + the global asset-id→tags assignments,
+  // both persisted by TagService so they survive tab switches and re-scans.
+  // ctxMenu holds the right-clicked asset and where to anchor the tag picker.
+  const [tagDefs, setTagDefs] = useState<TagDef[]>([]);
+  const [assignments, setAssignments] = useState<Record<string, string[]>>({});
+  // notes holds the global asset-id→custom-note map, persisted by TagService.
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [ctxMenu, setCtxMenu] = useState<{ assetId: number; x: number; y: number } | null>(null);
+
   const isRbxl = filePath.toLowerCase().endsWith(".rbxl");
+
+  // Load the tag library and assignments once; both are global (not per file).
+  useEffect(() => {
+    ListTagDefinitions()
+      .then((defs) => setTagDefs(defs ?? []))
+      .catch(() => {});
+    GetAssignments()
+      .then((a) => setAssignments(a ?? {}))
+      .catch(() => {});
+    GetNotes()
+      .then((n) => setNotes(n ?? {}))
+      .catch(() => {});
+  }, []);
+
+  function tagsForAsset(assetId: number): string[] {
+    return assignments[String(assetId)] ?? [];
+  }
+
+  function noteForAsset(assetId: number): string {
+    return notes[String(assetId)] ?? "";
+  }
+
+  // saveNote persists (or clears) the custom note for an asset and updates the
+  // local map optimistically, refetching only if the write fails.
+  async function saveNote(assetId: number, note: string) {
+    const trimmed = note.trim();
+    setNotes((prev) => {
+      const copy = { ...prev };
+      if (trimmed === "") delete copy[String(assetId)];
+      else copy[String(assetId)] = trimmed;
+      return copy;
+    });
+    try {
+      await SetAssetNote(assetId, trimmed);
+    } catch {
+      GetNotes().then((n) => setNotes(n ?? {})).catch(() => {});
+    }
+  }
+
+  // toggleTag flips one tag on the asset and persists the new set.
+  async function toggleTag(assetId: number, tag: string) {
+    const current = tagsForAsset(assetId);
+    const next = current.includes(tag)
+      ? current.filter((t) => t !== tag)
+      : [...current, tag];
+    setAssignments((prev) => {
+      const copy = { ...prev };
+      if (next.length === 0) delete copy[String(assetId)];
+      else copy[String(assetId)] = next;
+      return copy;
+    });
+    try {
+      await SetAssetTags(assetId, next);
+    } catch {
+      // Persist failed — refetch to stay consistent with disk.
+      GetAssignments().then((a) => setAssignments(a ?? {})).catch(() => {});
+    }
+  }
+
+  // createAndApplyTag adds a new tag to the library and applies it to the asset.
+  async function createAndApplyTag(assetId: number, def: TagDef) {
+    const nextDefs = [...tagDefs, def];
+    setTagDefs(nextDefs);
+    try {
+      await SaveTagDefinitions(nextDefs);
+    } catch {
+      /* keep optimistic local copy */
+    }
+    await toggleTag(assetId, def.name);
+  }
 
   useEffect(() => {
     EventsOn("scan:progress", (p: { done: number; total: number }) => setProgress(p));
@@ -298,14 +388,19 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
     }
     if (typeFilter !== "All") out = out.filter((r) => r.assetTypeName === typeFilter);
     const dir = sortDir === "asc" ? 1 : -1;
+    // Tags live in the assignments map (not on the row), so sort that column by
+    // the asset's joined tag names rather than via the row-only sortValue().
+    const valueOf = (r: webapp.ScanRow): number | string =>
+      sortField === "tags" ? tagsForAsset(r.assetId).join(", ").toLowerCase() : sortValue(r, sortField);
     return [...out].sort((a, b) => {
-      const av = sortValue(a, sortField);
-      const bv = sortValue(b, sortField);
+      const av = valueOf(a);
+      const bv = valueOf(b);
       if (av < bv) return -1 * dir;
       if (av > bv) return 1 * dir;
       return 0;
     });
-  }, [report, query, typeFilter, sortField, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report, query, typeFilter, sortField, sortDir, assignments]);
 
   async function selectRow(assetId: number) {
     setSelectedId(assetId);
@@ -444,10 +539,16 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
                   <tr
                     key={`${r.assetId}-${i}`}
                     onClick={() => selectRow(r.assetId)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setSelectedId(r.assetId);
+                      setCtxMenu({ assetId: r.assetId, x: e.clientX, y: e.clientY });
+                    }}
                     className={
                       "row-clickable" +
                       (r.state === "Failed" ? " row-failed" : "") +
                       (r.isLarge ? " row-large" : "") +
+                      (tagsForAsset(r.assetId).length > 0 ? " row-tagged" : "") +
                       (r.assetId === selectedId ? " row-selected" : "")
                     }
                   >
@@ -463,6 +564,21 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
                     <td className="num">{r.meshTriangles ? r.meshTriangles.toLocaleString() : "—"}</td>
                     <td className="path" title={r.instancePath}>
                       {r.instancePath || "—"}
+                    </td>
+                    <td className="tags-cell">
+                      {tagsForAsset(r.assetId).length === 0 ? (
+                        <span className="tags-cell-empty">—</span>
+                      ) : (
+                        tagsForAsset(r.assetId).map((name) => {
+                          const def = tagDefs.find((d) => d.name === name);
+                          return (
+                            <span key={name} className="tag-chip-mini" title={name}>
+                              <span className="tag-dot" style={{ background: def?.color || "#888" }} />
+                              {name}
+                            </span>
+                          );
+                        })
+                      )}
                     </td>
                     <td className={r.state === "Failed" ? "state-failed" : ""} title={r.warningCause}>
                       {r.state || r.source}
@@ -489,6 +605,43 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
                   </button>
                 </div>
               </div>
+
+              <div className="detail-tags">
+                {tagsForAsset(selectedId).map((name) => {
+                  const def = tagDefs.find((d) => d.name === name);
+                  return (
+                    <span
+                      key={name}
+                      className="tag-chip"
+                      style={{ borderColor: def?.color || "#888" }}
+                      title="Click to remove"
+                      onClick={() => toggleTag(selectedId, name)}
+                    >
+                      <span className="tag-dot" style={{ background: def?.color || "#888" }} />
+                      {name}
+                      <span className="tag-chip-x">✕</span>
+                    </span>
+                  );
+                })}
+                <button
+                  className="tag-add-btn"
+                  title="Tag or add a note to this instance"
+                  onClick={(e) =>
+                    setCtxMenu({ assetId: selectedId, x: e.clientX, y: e.clientY })
+                  }
+                >
+                  + Tag
+                </button>
+              </div>
+
+              {noteForAsset(selectedId) && (
+                <div
+                  className="detail-note"
+                  title="Right-click the row or use + Tag to edit this note"
+                >
+                  {noteForAsset(selectedId)}
+                </div>
+              )}
 
               {detailLoading && <div className="hint">Loading preview…</div>}
               {detailError && <div className="status-line error">{detailError}</div>}
@@ -533,6 +686,20 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
           )}
           </div>
         </>
+      )}
+
+      {ctxMenu && (
+        <TagPicker
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          defs={tagDefs}
+          applied={tagsForAsset(ctxMenu.assetId)}
+          note={noteForAsset(ctxMenu.assetId)}
+          onToggle={(tag) => toggleTag(ctxMenu.assetId, tag)}
+          onCreateAndApply={(def) => createAndApplyTag(ctxMenu.assetId, def)}
+          onSaveNote={(note) => saveNote(ctxMenu.assetId, note)}
+          onClose={() => setCtxMenu(null)}
+        />
       )}
     </div>
   );

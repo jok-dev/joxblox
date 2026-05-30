@@ -71,6 +71,7 @@ var AssetTypeInfoByID = map[int]AssetTypeInfo{
 	58:             {Name: "EyeAccessory", Emoji: "👓", DownloadExtension: "rbxl"},
 	61:             {Name: "EmoteAnimation", Emoji: "🗣️", DownloadExtension: "rbxl"},
 	62:             {Name: "Video", Emoji: "🎥", SkipRustExtraction: true, DownloadExtension: "mp4"},
+	63:             {Name: "TexturePack", Emoji: "🎨", SkipRustExtraction: true, DownloadExtension: "png"}, // undocumented in Roblox's enum (official gap); delivered as image content
 	64:             {Name: "TShirtAccessory", Emoji: "👚", DownloadExtension: "rbxl"},
 	65:             {Name: "ShirtAccessory", Emoji: "🥼", DownloadExtension: "rbxl"},
 	66:             {Name: "PantsAccessory", Emoji: "🩲", DownloadExtension: "rbxl"},
