@@ -321,6 +321,33 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; 
 /* ---- Scan view ---- */
 .scan-view { display: flex; flex-direction: column; gap: 12px; height: 100%; }
 
+/* Bottom-bar notification shown after an asset download completes/fails. */
+.download-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: 80%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--success);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  z-index: 50;
+}
+.download-toast.error { border-left-color: var(--error); }
+.download-toast-text {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .file-row { display: flex; align-items: center; gap: 8px; }
 .file-row .file-path {
   flex: 1; color: var(--text-dim);

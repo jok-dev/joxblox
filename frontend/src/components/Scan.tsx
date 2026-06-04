@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { webapp } from "../../wailsjs/go/models";
 import { GetCachedScan, ScanFile } from "../../wailsjs/go/webapp/ScanService";
-import { FetchAsset } from "../../wailsjs/go/webapp/AssetService";
+import { DownloadAsset, FetchAsset } from "../../wailsjs/go/webapp/AssetService";
 import {
   GetAssignments,
   GetNotes,
@@ -211,6 +211,10 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
   const [detail, setDetail] = useState<webapp.AssetDetails | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  // downloading guards the per-asset Download button; toast is the bottom-bar
+  // notification shown after a download finishes (or fails).
+  const [downloading, setDownloading] = useState(false);
+  const [toast, setToast] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
 
   // Tagging: the global tag library + the global asset-id→tags assignments,
   // both persisted by TagService so they survive tab switches and re-scans.
@@ -407,6 +411,23 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
     }
   }
 
+  // downloadAsset saves the selected asset's original bytes to a user-chosen
+  // location via the native save dialog, then surfaces where it landed in the
+  // bottom-bar toast. An empty path means the user cancelled the dialog.
+  async function downloadAsset(assetId: number) {
+    if (downloading) return;
+    setDownloading(true);
+    setToast(null);
+    try {
+      const savedPath = await DownloadAsset(String(assetId));
+      if (savedPath) setToast({ text: `Saved to ${savedPath}`, kind: "ok" });
+    } catch (e: any) {
+      setToast({ text: `Download failed: ${String(e)}`, kind: "error" });
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   function toggleSort(field: SortField) {
     if (field === sortField) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -575,6 +596,13 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
                 <span>Asset {selectedId}</span>
                 <div className="detail-header-actions">
                   <button
+                    title="Download this asset to a file (images save as PNG)"
+                    disabled={downloading}
+                    onClick={() => downloadAsset(selectedId)}
+                  >
+                    {downloading ? "Downloading…" : "Download ⤓"}
+                  </button>
+                  <button
                     title="Open this asset in the Single Asset tab"
                     onClick={() => onOpenInSingleAsset(selectedId)}
                   >
@@ -680,6 +708,17 @@ export default function Scan({ filePath, pathFilter, onPickFile, onOpenInSingleA
           onSaveNote={(note) => saveNote(ctxMenu.assetId, note)}
           onClose={() => setCtxMenu(null)}
         />
+      )}
+
+      {toast && (
+        <div className={`download-toast ${toast.kind}`} role="status">
+          <span className="download-toast-text" title={toast.text}>
+            {toast.text}
+          </span>
+          <button className="icon" title="Dismiss" onClick={() => setToast(null)}>
+            ✕
+          </button>
+        </div>
       )}
     </div>
   );

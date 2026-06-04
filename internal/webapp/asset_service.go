@@ -1,10 +1,14 @@
 package webapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"image"
+	"image/png"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"joxblox/internal/app/loader"
@@ -104,6 +108,102 @@ func (s *AssetService) FetchAsset(input string) (AssetDetails, error) {
 		EconomyJSON:        data.EconomyRawJSON,
 		RustyAssetToolJSON: data.RustyAssetToolRawJSON,
 	}, nil
+}
+
+// DownloadAsset re-loads the asset for the given ID / rbxassetid / rbxthumb
+// input and saves its original bytes to a location chosen via the native save
+// dialog. It returns the absolute path the file was written to, or "" (without
+// error) when the user cancels. The download bytes are the same original asset
+// payload the loader pipeline already resolves for previews.
+func (s *AssetService) DownloadAsset(input string) (string, error) {
+	request, err := loader.ParseSingleAssetLoadRequest(input)
+	if err != nil {
+		return "", err
+	}
+
+	if request.RequiresAuth() {
+		if authErr := roblox.ValidateCurrentAuthCookie(); authErr != nil {
+			return "", fmt.Errorf("%s", roblox.SanitizeAuthErrorMessage(authErr))
+		}
+	}
+
+	previewResult, loadErr := loader.LoadSingleAssetPreview(request)
+	if loadErr != nil {
+		return "", loadErr
+	}
+
+	// Image-content assets (Image, TexturePack) are saved as a re-encoded PNG so
+	// the download is always a usable image regardless of the original delivery
+	// format. Every other asset type keeps its original bytes.
+	if isImageContentAsset(previewResult.AssetTypeID) {
+		return s.downloadImageAsPNG(request.TargetID, previewResult)
+	}
+
+	if len(previewResult.DownloadBytes) == 0 {
+		return "", fmt.Errorf("No downloadable asset content is available for this asset.")
+	}
+
+	defaultName := strings.TrimSpace(previewResult.DownloadFileName)
+	if defaultName == "" {
+		defaultName = fmt.Sprintf("asset_%d", request.TargetID)
+	}
+	filterPattern := "*"
+	if ext := filepath.Ext(defaultName); ext != "" {
+		filterPattern = "*" + ext
+	}
+
+	return saveBytesViaDialogPath(s.ctx, "Download asset", defaultName, "Asset file", filterPattern, previewResult.DownloadBytes)
+}
+
+// isImageContentAsset reports whether an asset type is delivered as raw image
+// content (Image, TexturePack) — the types we re-encode to PNG on download.
+// Both are exactly the types whose download extension is "png".
+func isImageContentAsset(assetTypeID int) bool {
+	info, ok := roblox.AssetTypeInfoByID[assetTypeID]
+	return ok && info.DownloadExtension == "png"
+}
+
+// downloadImageAsPNG decodes an image asset (preferring the original download
+// payload, falling back to the already-decoded preview bytes) and saves it as a
+// PNG via the native save dialog. Returns the saved path, or "" when cancelled.
+func (s *AssetService) downloadImageAsPNG(assetID int64, result *loader.AssetPreviewResult) (string, error) {
+	decoded, decodeErr := decodeImage(result.DownloadBytes)
+	if decodeErr != nil {
+		// Original bytes weren't a decodable image (e.g. a compressed texture
+		// format) — fall back to the displayable preview bytes.
+		decoded, decodeErr = decodeImage(result.Image.ImageBytes())
+		if decodeErr != nil {
+			return "", fmt.Errorf("No decodable image content is available for this asset.")
+		}
+	}
+
+	var buffer bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.BestCompression}
+	if encodeErr := encoder.Encode(&buffer, decoded); encodeErr != nil {
+		return "", encodeErr
+	}
+
+	return saveBytesViaDialogPath(s.ctx, "Download image as PNG", imagePNGFileName(assetID, result.DownloadFileName), "PNG image", "*.png", buffer.Bytes())
+}
+
+// decodeImage decodes encoded image bytes, returning an error for empty or
+// undecodable input.
+func decodeImage(imageBytes []byte) (image.Image, error) {
+	if len(imageBytes) == 0 {
+		return nil, fmt.Errorf("no image bytes")
+	}
+	decoded, _, err := image.Decode(bytes.NewReader(imageBytes))
+	return decoded, err
+}
+
+// imagePNGFileName builds a ".png" default filename from the loader's suggested
+// download name (swapping its extension), or "asset_<id>.png" when absent.
+func imagePNGFileName(assetID int64, downloadFileName string) string {
+	base := strings.TrimSpace(downloadFileName)
+	if base == "" {
+		return fmt.Sprintf("asset_%d.png", assetID)
+	}
+	return strings.TrimSuffix(base, filepath.Ext(base)) + ".png"
 }
 
 // buildPreviewDataURL encodes the preview image bytes as a base64 data URL.
