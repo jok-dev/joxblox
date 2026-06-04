@@ -44,7 +44,7 @@ type ScanLoadOptions struct {
 
 func NewScanTab(
 	window fyne.Window,
-) (fyne.CanvasObject, ScanTabFileActionsProvider, []ScanTabFileActionsProvider, func(string), func(string, ScanLoadOptions)) {
+) (fyne.CanvasObject, ScanTabFileActionsProvider, []ScanTabFileActionsProvider, func(string), func(string, ScanLoadOptions), func(string)) {
 	folderSingleScan, folderSingleActions := newAssetScanTab(window, assetScanTabOptions{
 		NoSourceSelectedText:     "No folder selected.",
 		SelectButtonText:         "Select Folder",
@@ -261,7 +261,22 @@ func NewScanTab(
 		}
 	}
 
+	// setPlaceFile prefills the single-RBXL scan source (e.g. from the shared
+	// place-file bar) and switches to that variant without running a scan.
+	setPlaceFile := func(path string) {
+		trimmedPath := strings.TrimSpace(path)
+		if trimmedPath == "" {
+			return
+		}
+		sourceSwitch.SetSelected(scanSourceRBXL)
+		modeSwitch.SetSelected(scanModeSingle)
+		updateVisibleContent()
+		if rbxlSingleActions != nil && rbxlSingleActions.SetSourcePath != nil {
+			rbxlSingleActions.SetSourcePath(trimmedPath)
+		}
+	}
+
 	return content, func() *ScanTabFileActions {
 		return currentActions
-	}, providers, selectContext, loadRBXLFile
+	}, providers, selectContext, loadRBXLFile, setPlaceFile
 }

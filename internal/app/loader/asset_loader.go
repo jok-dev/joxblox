@@ -25,8 +25,6 @@ import (
 	"joxblox/internal/renderdoc"
 	"joxblox/internal/roblox"
 	"joxblox/internal/roblox/ktx2"
-
-	"fyne.io/fyne/v2"
 )
 
 const (
@@ -80,7 +78,12 @@ type thumbnailsData struct {
 }
 
 type ImageInfo struct {
-	Resource                 *fyne.StaticResource
+	// PreviewBytes is the raw encoded preview image (PNG/JPEG/…) for this asset
+	// and PreviewName a suggested filename/label for it. They replace the old
+	// *fyne.StaticResource so the loader stays Fyne-free; the Fyne UI rebuilds a
+	// resource from these via fyne.NewStaticResource when it needs to render.
+	PreviewBytes             []byte
+	PreviewName              string
 	Width                    int
 	Height                   int
 	Duration                 time.Duration
@@ -101,6 +104,15 @@ type ImageInfo struct {
 	// non-zero fraction (< 5% of total pixels) marks a "wasteful" BC3 — the
 	// artist could likely drop the alpha channel and save 2x the GPU memory.
 	NonOpaqueAlphaPixels int64
+}
+
+// ImageBytes returns the raw encoded preview bytes (PNG/JPEG/…) for this asset,
+// or nil when no preview image is present.
+func (info *ImageInfo) ImageBytes() []byte {
+	if info == nil {
+		return nil
+	}
+	return info.PreviewBytes
 }
 
 type ChildAssetInfo struct {
@@ -1076,7 +1088,8 @@ func fetchImageInfoWithCacheKeyAndTrace(imageURL string, cacheKey string, assetI
 		analysis = imageAnalysis{}
 	}
 	return &ImageInfo{
-		Resource:                 fyne.NewStaticResource(resourceName, imageBytes),
+		PreviewBytes:             imageBytes,
+		PreviewName:              resourceName,
 		Width:                    imageConfig.Width,
 		Height:                   imageConfig.Height,
 		BytesSize:                len(imageBytes),
@@ -1121,7 +1134,6 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 	}
 	fileName := buildAssetDownloadFileName(assetID, assetTypeID, contentType, "", false)
 	info := &ImageInfo{
-		Resource:                 nil,
 		Width:                    0,
 		Height:                   0,
 		BytesSize:                len(fileBytes),
@@ -1168,7 +1180,8 @@ func fetchAssetFileInfoWithCacheKeyAndTrace(fileURL string, cacheKey string, ass
 
 	resourceName := fmt.Sprintf("asset_%d.%s", assetID, imageFormat)
 	fileName = buildAssetDownloadFileName(assetID, assetTypeID, contentType, imageFormat, true)
-	info.Resource = fyne.NewStaticResource(resourceName, fileBytes)
+	info.PreviewBytes = fileBytes
+	info.PreviewName = resourceName
 	info.Width = imageConfig.Width
 	info.Height = imageConfig.Height
 	info.Format = strings.ToUpper(imageFormat)
@@ -1234,7 +1247,6 @@ func fetchImageAssetFileInfoUsingKTX2(assetID int64, includeHash bool, fileURL s
 	formatLabel := fmt.Sprintf("KTX2/%s", container.Header.VkFormatName())
 	fileName := fmt.Sprintf("asset_%d.ktx2", assetID)
 	info := &ImageInfo{
-		Resource:        nil,
 		Width:           int(container.Header.PixelWidth),
 		Height:          int(container.Header.PixelHeight),
 		BytesSize:       len(rawBytes),
@@ -1248,7 +1260,8 @@ func fetchImageAssetFileInfoUsingKTX2(assetID int64, includeHash bool, fileURL s
 		info.NonOpaqueAlphaPixels = countNonOpaqueAlphaPixels(rgba)
 		previewPNG, encodeErr := encodeFullResolutionPNG(rgba)
 		if encodeErr == nil {
-			info.Resource = fyne.NewStaticResource(fmt.Sprintf("asset_%d.png", assetID), previewPNG)
+			info.PreviewBytes = previewPNG
+			info.PreviewName = fmt.Sprintf("asset_%d.png", assetID)
 			info.RecompressedPNGByteSize = len(previewPNG)
 		}
 	} else {
@@ -1258,7 +1271,8 @@ func fetchImageAssetFileInfoUsingKTX2(assetID int64, includeHash bool, fileURL s
 		legacyBytes, _, legacyErr := downloadRobloxContentBytesWithCacheKeyAndTrace(fileURL, cacheKey, requestTimeout, trace)
 		if legacyErr == nil && len(legacyBytes) > 0 {
 			if _, legacyFormat, configErr := image.DecodeConfig(bytes.NewReader(legacyBytes)); configErr == nil {
-				info.Resource = fyne.NewStaticResource(fmt.Sprintf("asset_%d.%s", assetID, legacyFormat), legacyBytes)
+				info.PreviewBytes = legacyBytes
+				info.PreviewName = fmt.Sprintf("asset_%d.%s", assetID, legacyFormat)
 			}
 			if analysis, analysisErr := analyzeImage(legacyBytes); analysisErr == nil {
 				info.RecompressedPNGByteSize = analysis.RecompressedPNGBytes

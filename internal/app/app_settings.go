@@ -147,7 +147,7 @@ func calculateDirectorySize(folderPath string) (int64, error) {
 	return totalBytes, nil
 }
 
-func showSettingsDialog(window fyne.Window) {
+func showSettingsDialog(window fyne.Window, authSection fyne.CanvasObject) {
 	currentSettings := loadAssetDownloadCacheSettings()
 	currentLookSensitivity := loadMeshPreviewMouseLookSensitivity()
 
@@ -267,6 +267,9 @@ func showSettingsDialog(window fyne.Window) {
 	)
 
 	formContent := container.NewVBox(
+		widget.NewLabel("Authentication (.ROBLOSECURITY)"),
+		authSection,
+		widget.NewSeparator(),
 		widget.NewLabel("Roblox Studio Path"),
 		studioPathRow,
 		widget.NewSeparator(),

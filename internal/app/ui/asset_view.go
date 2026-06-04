@@ -481,10 +481,7 @@ func (view *AssetView) SetData(data loader.AssetViewData) {
 	}
 	view.configureAudioPlayback(statsInfo, assetTypeID)
 
-	var previewResource fyne.Resource
-	if previewImageInfo != nil && previewImageInfo.Resource != nil {
-		previewResource = previewImageInfo.Resource
-	}
+	previewResource := imageInfoResource(previewImageInfo)
 	view.currentMeshPreviewData = MeshPreviewData{}
 	view.MeshPreview.Clear()
 	view.MeshPreviewWithToolbar.Hide()

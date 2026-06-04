@@ -11,15 +11,13 @@ import (
 	"joxblox/internal/debug"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	nativeDialog "github.com/sqweek/dialog"
 )
 
 func BindMainFileMenu(
 	window fyne.Window,
-	tabs *container.AppTabs,
-	scanTab *container.TabItem,
+	selectScanTab func(),
 	scanFileActions scan.ScanTabFileActionsProvider,
 	allScanFileActions []scan.ScanTabFileActionsProvider,
 	selectScanContext func(string),
@@ -37,7 +35,7 @@ func BindMainFileMenu(
 			fyne.NewMenuItem("Load Results (.json)", func() {
 				loadAllScanResultsFromPickerAsync(window, allScanFileActions, func(selectedContext string, loaded bool) {
 					if loaded {
-						switchToContextTab(tabs, scanTab, selectScanContext, selectedContext)
+						switchToContextTab(selectScanTab, selectScanContext, selectedContext)
 						rebuildMainMenu()
 					}
 				})
@@ -55,8 +53,7 @@ func BindMainFileMenu(
 		)
 		fileMenu.Items = append(fileMenu.Items, buildRecentFilesMenuItem(
 			window,
-			tabs,
-			scanTab,
+			selectScanTab,
 			selectScanContext,
 			allScanFileActions,
 		))
@@ -70,21 +67,12 @@ func BindMainFileMenu(
 		window.SetMainMenu(fyne.NewMainMenu(fileMenu, helpMenu))
 	}
 
-	tabs.OnSelected = func(selectedTab *container.TabItem) {
-		if selectedTab == nil {
-			rebuildMainMenu()
-			return
-		}
-		rebuildMainMenu()
-	}
-
 	rebuildMainMenu()
 }
 
 func buildRecentFilesMenuItem(
 	window fyne.Window,
-	tabs *container.AppTabs,
-	scanTab *container.TabItem,
+	selectScanTab func(),
 	selectScanContext func(string),
 	providers []scan.ScanTabFileActionsProvider,
 ) *fyne.MenuItem {
@@ -96,7 +84,7 @@ func buildRecentFilesMenuItem(
 		recentFilesMenu.Items = append(recentFilesMenu.Items, fyne.NewMenuItem(pathCopy, func() {
 			LoadAllScanResultsFromPathAsync(window, providers, pathCopy, func(selectedContext string, loaded bool) {
 				if loaded {
-					switchToContextTab(tabs, scanTab, selectScanContext, selectedContext)
+					switchToContextTab(selectScanTab, selectScanContext, selectedContext)
 				}
 			})
 		}))
@@ -375,15 +363,14 @@ func collectRecentFiles(providers []scan.ScanTabFileActionsProvider) []string {
 }
 
 func switchToContextTab(
-	tabs *container.AppTabs,
-	scanTab *container.TabItem,
+	selectScanTab func(),
 	selectScanContext func(string),
 	contextKey string,
 ) {
 	switch strings.TrimSpace(contextKey) {
 	case scan.ScanContextFolder, scan.ScanContextFolderDiff, scan.ScanContextRBXLSingle, scan.ScanContextRBXLDiff:
-		if scanTab != nil {
-			tabs.Select(scanTab)
+		if selectScanTab != nil {
+			selectScanTab()
 		}
 		if selectScanContext != nil {
 			selectScanContext(contextKey)

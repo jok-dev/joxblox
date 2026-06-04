@@ -44,3 +44,12 @@ joxblox-private-tests/
 *.rbxm
 *.obj
 .claude/settings.local.json
+
+joxblox
+
+# Wails / web frontend
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/gitkeep
+build/bin/
+internal/webapp/release-assets/*.bin

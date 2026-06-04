@@ -3,6 +3,7 @@ package scan
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -91,6 +92,63 @@ func BuildTagPDFReport(results []loader.ScanResult, store *ScanTagStore, options
 	return buf.Bytes(), nil
 }
 
+// BuildTagPDFReportOrdered renders the same card-grid document as
+// BuildTagPDFReport but driven by an explicit, caller-supplied tag order and
+// asset-id grouping instead of the fixed ScanTag enum. This is what the web
+// Tag Report uses so user-created custom tags render in the order the user
+// arranged them in Tag Management. There is no Duplicated-group special
+// casing here — every tag is a flat card grid.
+//
+//   - idsByTag maps a tag name to the asset ids carrying it.
+//   - order lists the tag names in render order; tags missing from idsByTag (or
+//     with zero ids) are skipped.
+//   - taggedCount is the number of distinct tagged assets (header subtitle).
+func BuildTagPDFReportOrdered(
+	results []loader.ScanResult,
+	idsByTag map[string][]int64,
+	order []string,
+	taggedCount int,
+	options TagPDFReportOptions,
+) ([]byte, error) {
+	resultsByID := buildPDFResultsByID(results)
+
+	pdf := gofpdf.New("P", "mm", "A4", "")
+	pdf.SetMargins(pdfPageMarginMM, pdfPageMarginMM, pdfPageMarginMM)
+	pdf.SetAutoPageBreak(true, pdfPageMarginMM)
+	pdf.AddPage()
+
+	writePDFHeader(pdf, options, taggedCount)
+
+	// Overview first: one line per tagged asset present in the file (path +
+	// tags), then the per-tag card grids below give each its full breakdown.
+	writePDFTagSummaryList(pdf, resultsByID, idsByTag, order)
+
+	totalRendered := 0
+	for _, tag := range order {
+		assetIDs := idsByTag[tag]
+		if len(assetIDs) == 0 {
+			continue
+		}
+		writePDFTagHeading(pdf, tag, len(assetIDs))
+		totalRendered += writePDFCardGrid(pdf, assetIDs, resultsByID, options.EmbedImages)
+		pdf.Ln(pdfTagSectionGapMM)
+	}
+
+	if totalRendered == 0 {
+		pdf.SetFont("Helvetica", "I", pdfBodyFontSize)
+		pdf.MultiCell(0, 6, "No tagged assets yet. Right-click a row in the Asset Breakdown tab and pick a tag.", "", "C", false)
+	}
+
+	if pdf.Err() {
+		return nil, pdf.Error()
+	}
+	var buf bytes.Buffer
+	if err := pdf.Output(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func buildPDFResultsByID(results []loader.ScanResult) map[int64]loader.ScanResult {
 	out := map[int64]loader.ScanResult{}
 	for _, result := range results {
@@ -121,6 +179,70 @@ func writePDFHeader(pdf *gofpdf.Fpdf, options TagPDFReportOptions, taggedCount i
 	metaLine += fmt.Sprintf("  ·  %d tagged assets", taggedCount)
 	pdf.MultiCell(0, 5, metaLine, "", "L", false)
 	pdf.Ln(2)
+}
+
+// writePDFTagSummaryList draws a compact "tagged assets" overview before the
+// per-tag card grids — one line per tagged asset that resolved in this file,
+// showing its instance path and the tags applied to it (in the caller's render
+// order). Assets not present in the file are omitted here; the grids below note
+// nothing for them anyway.
+func writePDFTagSummaryList(
+	pdf *gofpdf.Fpdf,
+	resultsByID map[int64]loader.ScanResult,
+	idsByTag map[string][]int64,
+	order []string,
+) {
+	// Invert tag→ids into id→tags, keeping tags in the caller's render order.
+	tagsByID := map[int64][]string{}
+	for _, tag := range order {
+		for _, id := range idsByTag[tag] {
+			tagsByID[id] = append(tagsByID[id], tag)
+		}
+	}
+
+	ids := make([]int64, 0, len(tagsByID))
+	for id := range tagsByID {
+		if _, ok := resultsByID[id]; ok {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		pi := strings.ToLower(strings.TrimSpace(resultsByID[ids[i]].InstancePath))
+		pj := strings.ToLower(strings.TrimSpace(resultsByID[ids[j]].InstancePath))
+		if pi != pj {
+			return pi < pj
+		}
+		return ids[i] < ids[j]
+	})
+
+	pdf.SetFont("Helvetica", "B", pdfTagFontSize)
+	pdf.MultiCell(0, 6, fmt.Sprintf("Tagged assets summary  (%d)", len(ids)), "B", "L", false)
+	pdf.Ln(1)
+
+	pageWidth, _ := pdf.GetPageSize()
+	leftMargin, _, rightMargin, _ := pdf.GetMargins()
+	usableWidth := pageWidth - leftMargin - rightMargin
+	pathWidth := usableWidth * 0.6
+	tagsWidth := usableWidth - pathWidth
+
+	for _, id := range ids {
+		row := resultsByID[id]
+		label := strings.TrimSpace(row.InstancePath)
+		if label == "" {
+			label = "ID " + strconv.FormatInt(id, 10)
+		}
+		tagsText := strings.Join(tagsByID[id], ", ")
+
+		pdf.SetX(leftMargin)
+		pdf.SetFont("Helvetica", "", pdfBodyFontSize)
+		pdf.CellFormat(pathWidth, 4.5, truncateForPDFCell(pdf, label, pathWidth), "", 0, "L", false, 0, "")
+		pdf.SetFont("Helvetica", "I", pdfMetaFontSize)
+		pdf.CellFormat(tagsWidth, 4.5, truncateForPDFCell(pdf, tagsText, tagsWidth), "", 1, "L", false, 0, "")
+	}
+	pdf.Ln(pdfTagSectionGapMM)
 }
 
 func writePDFTagHeading(pdf *gofpdf.Fpdf, tagName string, count int) {
@@ -279,17 +401,17 @@ func writePDFCard(pdf *gofpdf.Fpdf, row loader.ScanResult, x, y float64, embedIm
 // supports PNG / JPEG / GIF; everything else falls through to the
 // placeholder).
 func drawPDFThumbnail(pdf *gofpdf.Fpdf, row loader.ScanResult, x, y, width, height float64) bool {
-	if row.Resource == nil || len(row.Resource.StaticContent) == 0 {
+	if len(row.PreviewBytes) == 0 {
 		return false
 	}
-	imageType := pdfImageTypeFor(row.ContentType, row.Resource.StaticContent)
+	imageType := pdfImageTypeFor(row.ContentType, row.PreviewBytes)
 	if imageType == "" {
 		return false
 	}
 	imageName := fmt.Sprintf("asset-%d", row.AssetID)
 	if pdf.GetImageInfo(imageName) == nil {
 		options := gofpdf.ImageOptions{ImageType: imageType, ReadDpi: false}
-		pdf.RegisterImageOptionsReader(imageName, options, bytes.NewReader(row.Resource.StaticContent))
+		pdf.RegisterImageOptionsReader(imageName, options, bytes.NewReader(row.PreviewBytes))
 		if pdf.Err() {
 			// Drop the error on the floor — drawing the placeholder
 			// is preferable to abandoning the whole report. Clear so

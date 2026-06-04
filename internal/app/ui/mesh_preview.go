@@ -45,7 +45,7 @@ const (
 
 const (
 	PreviewWidth  = 440
-	PreviewHeight = 300
+	PreviewHeight = 240
 )
 
 var GetPrimaryWindow func() fyne.Window

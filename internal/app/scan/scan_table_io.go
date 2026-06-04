@@ -12,8 +12,6 @@ import (
 
 	"joxblox/internal/app/loader"
 	"joxblox/internal/format"
-
-	"fyne.io/fyne/v2"
 )
 
 const (
@@ -330,12 +328,9 @@ func reportScanJSONProgress(report scanJSONProgressReporter, progress float64) {
 func mapScanResultToExportRow(row loader.ScanResult) scanTableExportRow {
 	imageResourceName := ""
 	imageBytesBase64 := ""
-	if row.Resource != nil {
-		imageBytes := row.Resource.Content()
-		if len(imageBytes) > 0 {
-			imageResourceName = strings.TrimSpace(row.Resource.Name())
-			imageBytesBase64 = base64.StdEncoding.EncodeToString(imageBytes)
-		}
+	if len(row.PreviewBytes) > 0 {
+		imageResourceName = strings.TrimSpace(row.PreviewName)
+		imageBytesBase64 = base64.StdEncoding.EncodeToString(row.PreviewBytes)
 	}
 	return scanTableExportRow{
 		AssetID:              row.AssetID,
@@ -381,7 +376,8 @@ func mapScanResultToExportRow(row loader.ScanResult) scanTableExportRow {
 }
 
 func mapExportRowToScanResult(row scanTableExportRow) (loader.ScanResult, error) {
-	importedResource := (*fyne.StaticResource)(nil)
+	var importedPreviewBytes []byte
+	importedPreviewName := ""
 	if strings.TrimSpace(row.ImageBytesBase64) != "" {
 		imageBytes, decodeErr := base64.StdEncoding.DecodeString(row.ImageBytesBase64)
 		if decodeErr != nil {
@@ -391,7 +387,8 @@ func mapExportRowToScanResult(row scanTableExportRow) (loader.ScanResult, error)
 		if resourceName == "" {
 			resourceName = fmt.Sprintf("asset_%d_imported", row.AssetID)
 		}
-		importedResource = fyne.NewStaticResource(resourceName, imageBytes)
+		importedPreviewBytes = imageBytes
+		importedPreviewName = resourceName
 	}
 	return loader.ScanResult{
 		AssetID:              row.AssetID,
@@ -431,6 +428,7 @@ func mapExportRowToScanResult(row scanTableExportRow) (loader.ScanResult, error)
 		LargeTextureScore:    row.LargeTextureScore,
 		HasAlphaChannel:      row.HasAlphaChannel,
 		NonOpaqueAlphaPixels: row.NonOpaqueAlphaPixels,
-		Resource:             importedResource,
+		PreviewBytes:         importedPreviewBytes,
+		PreviewName:          importedPreviewName,
 	}, nil
 }
