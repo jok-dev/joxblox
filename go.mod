@@ -7,6 +7,7 @@ require (
 	github.com/dweymouth/fyne-tooltip v0.4.0
 	github.com/faiface/beep v1.1.0
 	github.com/fsnotify/fsnotify v1.7.0
+	github.com/jung-kurt/gofpdf v1.16.2
 	github.com/klauspost/compress v1.18.5
 	github.com/sqweek/dialog v0.0.0-20260123140253-64c163d53aac
 	github.com/zalando/go-keyring v0.2.7
@@ -37,7 +38,6 @@ require (
 	github.com/jfreymuth/oggvorbis v1.0.1 // indirect
 	github.com/jfreymuth/vorbis v1.0.0 // indirect
 	github.com/jsummers/gobmp v0.0.0-20230614200233-a9de23ed2e25 // indirect
-	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.5.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -49,8 +49,8 @@ require (
 	github.com/yuin/goldmark v1.7.8 // indirect
 	golang.org/x/exp v0.0.0-20190306152737-a1d7652674e8 // indirect
 	golang.org/x/mobile v0.0.0-20231127183840-76ac6878050a // indirect
-	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
