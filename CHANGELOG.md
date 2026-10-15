@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Loading `.rbxm` / `.rbxl` files saved by Roblox Studio after 2026-06-30 no longer fails with a `Tags` / `SharedString` type mismatch error. Studio now stores `Tags` in the SharedString table; the extractor moves to `rbx_binary` 3.0.1, which reads that format
+
 ## v1.6.0 - 2026-05-12
 
 ### Added
