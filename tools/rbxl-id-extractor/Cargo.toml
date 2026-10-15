@@ -6,8 +6,8 @@ edition = "2021"
 [dependencies]
 draco_decoder = "0.0.26"
 flate2 = "1.1.9"
-rbx_binary = "2"
-rbx_dom_weak = "4.1.0"
+rbx_binary = "3"
+rbx_dom_weak = "4.2.0"
 rbx_types = "3"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
